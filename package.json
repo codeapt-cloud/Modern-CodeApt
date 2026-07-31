@@ -1,0 +1,40 @@
+{
+  "name": "codeapt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CodeApt — coding-aptitude & campus-placement training platform (MERN monorepo)",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n api,worker,web -c blue,magenta,green \"pnpm --filter @codeapt/api dev\" \"pnpm --filter @codeapt/worker dev\" \"pnpm --filter @codeapt/web dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css,html}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css,html}\"",
+    "clean": "pnpm -r exec rimraf dist node_modules/.cache"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.19.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "18.3.31",
+      "@types/react-dom": "18.3.7"
+    }
+  }
+}

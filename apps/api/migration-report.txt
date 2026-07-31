@@ -1,0 +1,81 @@
+CodeApt Neon → Mongo migration — DRY-RUN validation report
+(reads Postgres read-only; writes a scratch Mongo DB only)
+
+== Row counts (source vs inserted — must match) ==
+  [OK ] program              source=5  inserted=5
+  [OK ] user                 source=1949  inserted=1949
+  [OK ] subject              source=9  inserted=9
+  [OK ] module               source=45  inserted=45
+  [OK ] essaytopic           source=4  inserted=4
+  [OK ] topic                source=314  inserted=314
+  [OK ] profile              source=1949  inserted=1949
+  [OK ] question             source=3  inserted=3
+  [OK ] choice               source=12  inserted=12
+  [OK ] coupon               source=2  inserted=2
+  [OK ] enrollment           source=1916  inserted=1916
+  [OK ] order                source=157  inserted=157
+  [OK ] quizsubmission       source=2  inserted=2
+  [OK ] topicprogress        source=2625  inserted=2625
+  [OK ] job                  source=3  inserted=3
+  [OK ] jobapplication       source=5  inserted=5
+  [OK ] exam                 source=79  inserted=79
+  [OK ] section              source=115  inserted=115
+  [OK ] examquestion         source=1307  inserted=1307
+  [OK ] examtestcase         source=70  inserted=70
+  [OK ] publiclink           source=17  inserted=17
+  [OK ] counter              source=153971  inserted=153971
+  [OK ] resetlog             source=3  inserted=3
+  [OK ] studentattempt       source=16123  inserted=16123
+  [OK ] dailyquestion        source=206  inserted=206
+  [OK ] dailytestcase        source=65  inserted=65
+  [OK ] dailysubmission      source=1871  inserted=1871
+  [OK ] userstreak           source=616  inserted=616
+  [OK ] essayattempt         source=5  inserted=5
+  [OK ] essayanalytics       source=0  inserted=0
+  [OK ] essaydraft           source=0  inserted=0
+  [OK ] essayscore           source=0  inserted=0
+  [OK ] essayattemptanalytics source=0  inserted=0
+  [OK ] essayfeedback        source=0  inserted=0
+  → all tables balanced.
+
+== Relationship spot-checks (child FK → parent resolves) ==
+  [OK ] modules: subject → subjects (5 sampled)
+  [OK ] topics: module → modules (5 sampled)
+  [OK ] orders: user → users (5 sampled)
+  [OK ] examquestions: exam → exams (5 sampled)
+
+== Critical link health (Mongo non-null vs SOURCE non-null — no links lost) ==
+  [OK ] examquestions.exam: mongo=1296 ≥ source=1296 (questions with a section resolve an exam (derived via section))
+  [OK ] examquestions.section: mongo=1296 ≥ source=1296 (source-null (sectionless) questions are allowed; none lost)
+  [OK ] examsections.exam: mongo=115 ≥ source=115 (every section keeps its exam)
+
+== Unresolved FKs (non-null source FK with no migrated parent) ==
+  none — every non-null FK resolved.
+
+== Money spot-checks (source → integer paise) ==
+  subject.price: 999 → 99900 paise
+  subject.price: 999 → 99900 paise
+  subject.price: 999 → 99900 paise
+  subject.price: 999 → 99900 paise
+  subject.price: 999 → 99900 paise
+  order.amount: 999.00 → 99900 paise
+  order.amount: 999.00 → 99900 paise
+  order.amount: 999.00 → 99900 paise
+  order.amount: 999.00 → 99900 paise
+  order.amount: 999.00 → 99900 paise
+
+== Flagged enum values (no target mapping) ==
+  none — every enum value mapped.
+
+== Admin users (role=admin — eyeball this list) ==
+  vsrgunturi <vsrgunturi@gmail.com>
+  jangalapallihemanth@gmail.com <>
+  hemanthj <>
+
+== Preserved (unmapped) source columns → stashed under `_migrated` ==
+  user: first_name, last_name
+  topic: subject_id
+  exam: max_attempts
+  counter: last_reset_at, reset_events, total_attempts_reset
+  resetlog: new_attempt_count
+  studentattempt: graded_at, grading_error, grading_status

@@ -1,0 +1,143 @@
+/**
+ * Design tokens — the single source of truth for the CodeApt visual language.
+ *
+ * Colour tokens are stored as RGB CHANNEL TRIPLETS ("r g b"), not hex, so
+ * Tailwind can inject opacity via `rgb(var(--token) / <alpha-value>)` and
+ * utilities like `bg-primary/15` or `bg-surface-raised/80` work correctly.
+ * For direct (non-Tailwind) CSS/SVG use, wrap a token as `rgb(var(--token))`.
+ *
+ * `:root` holds the LIGHT theme; `.dark` overrides for the DARK theme (the
+ * aesthetic default). Scale/geometry/motion tokens are theme-independent.
+ *
+ * Brand "CodeApt Cyan" primary scale is anchored at #00C8E8 (primary-500) and
+ * is identical in both themes.
+ */
+
+:root {
+  /* ---- Brand primary scale (anchor 500 = #00C8E8) ---- */
+  --color-primary-50: 236 253 255;
+  --color-primary-100: 207 248 255;
+  --color-primary-200: 165 240 255;
+  --color-primary-300: 103 229 251;
+  --color-primary-400: 34 211 240;
+  --color-primary-500: 0 200 232;
+  --color-primary-600: 0 160 189;
+  --color-primary-700: 6 126 150;
+  --color-primary-800: 14 101 122;
+  --color-primary-900: 19 83 104;
+  --color-primary-950: 7 53 71;
+
+  /* ---- Neutral scale (theme-independent) ---- */
+  --color-neutral-50: 247 248 249;
+  --color-neutral-100: 236 238 241;
+  --color-neutral-200: 217 221 226;
+  --color-neutral-300: 183 190 199;
+  --color-neutral-400: 139 149 161;
+  --color-neutral-500: 100 110 123;
+  --color-neutral-600: 76 85 95;
+  --color-neutral-700: 58 66 75;
+  --color-neutral-800: 38 43 49;
+  --color-neutral-900: 22 25 29;
+  --color-neutral-950: 11 12 14;
+
+  /* ---- Semantic accents ---- */
+  --color-success: 22 163 74;
+  --color-success-fg: 21 128 61;
+  --color-success-subtle: 220 252 231;
+  --color-warning: 217 119 6;
+  --color-warning-fg: 180 83 9;
+  --color-warning-subtle: 254 243 199;
+  --color-error: 220 38 38;
+  --color-error-fg: 185 28 28;
+  --color-error-subtle: 254 226 226;
+  --color-info: 37 99 235;
+  --color-info-fg: 29 78 216;
+  --color-info-subtle: 219 234 254;
+
+  /* ---- LIGHT theme surfaces / text / borders ---- */
+  --surface-sunken: 238 240 242;
+  --surface-base: 248 248 248;
+  --surface-raised: 255 255 255;
+  --surface-overlay: 255 255 255;
+
+  --text-primary: 10 10 10;
+  --text-secondary: 63 68 75;
+  --text-muted: 107 113 120;
+  --text-inverse: 255 255 255;
+
+  --border-subtle: 228 230 233;
+  --border-strong: 205 209 214;
+
+  --ring: var(--color-primary-500);
+  --ring-offset: rgb(var(--surface-base));
+
+  /* Focus glow (luminous cyan). */
+  --glow-primary: 0 0 0 3px rgb(var(--color-primary-500) / 0.35);
+
+  /* Elevation — soft, not heavy. */
+  --shadow-xs: 0 1px 2px rgb(10 10 10 / 0.06);
+  --shadow-sm: 0 1px 3px rgb(10 10 10 / 0.08), 0 1px 2px rgb(10 10 10 / 0.04);
+  --shadow-md: 0 4px 12px rgb(10 10 10 / 0.1);
+  --shadow-lg: 0 12px 32px rgb(10 10 10 / 0.14);
+  --shadow-glow: 0 0 24px rgb(var(--color-primary-500) / 0.3);
+
+  /* Glass overlay. */
+  --glass-bg: rgb(var(--surface-raised) / 0.72);
+  --glass-border: rgb(var(--border-subtle));
+
+  /* ---- Typography ---- */
+  --font-sans:
+    "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* ---- Motion ---- */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.3, 0, 0, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
+
+.dark {
+  /* ---- DARK theme surfaces / text / borders ---- */
+  --surface-sunken: 7 8 9;
+  --surface-base: 11 12 14;
+  --surface-raised: 20 22 25;
+  --surface-overlay: 27 30 35;
+
+  --text-primary: 244 245 246;
+  --text-secondary: 180 186 194;
+  --text-muted: 124 131 141;
+  --text-inverse: 10 10 10;
+
+  --border-subtle: 35 38 43;
+  --border-strong: 51 56 66;
+
+  --ring: var(--color-primary-400);
+  --ring-offset: rgb(var(--surface-base));
+
+  --glow-primary: 0 0 0 3px rgb(var(--color-primary-400) / 0.45);
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.5), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.55);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.6);
+  --shadow-glow: 0 0 28px rgb(var(--color-primary-500) / 0.4);
+
+  --glass-bg: rgb(var(--surface-raised) / 0.6);
+  --glass-border: rgb(255 255 255 / 0.08);
+
+  /* Semantic accents shift lighter/darker for dark surfaces. */
+  --color-success-fg: 74 222 128;
+  --color-success-subtle: 20 50 31;
+  --color-warning-fg: 251 191 36;
+  --color-warning-subtle: 58 42 16;
+  --color-error-fg: 248 113 113;
+  --color-error-subtle: 58 26 26;
+  --color-info-fg: 96 165 250;
+  --color-info-subtle: 22 35 63;
+}

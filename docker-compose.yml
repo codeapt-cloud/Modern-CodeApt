@@ -1,0 +1,97 @@
+# Local infrastructure for CodeApt.
+#
+#   docker compose up -d          → starts MongoDB + Redis (for `pnpm dev`)
+#   docker compose --profile full up --build
+#                                 → also builds & runs api, worker, web
+#
+# The app services live behind the `full` profile so the common workflow
+# (containerized data stores + local `pnpm dev`) stays the default.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: codeapt-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: codeapt-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: codeapt-api
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      MONGODB_URI: mongodb://mongo:27017/codeapt
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:5173
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret-change-me-32chars}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-only-refresh-secret-change-me-32char}
+    ports:
+      - "4000:4000"
+
+  worker:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: codeapt-worker
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongo:27017/codeapt
+      REDIS_URL: redis://redis:6379
+      WORKER_CONCURRENCY: "5"
+      # Public Piston by default; point at a self-hosted instance to avoid rate limits.
+      PISTON_URL: ${PISTON_URL:-https://emkc.org/api/v2/piston}
+      PISTON_TIMEOUT_MS: "15000"
+
+  web:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: codeapt-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  mongo-data:
+  redis-data:

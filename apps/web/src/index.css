@@ -1,0 +1,201 @@
+/* Self-hosted variable fonts (no external CDN — CSP-friendly). */
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* Design tokens (CSS variables, themed). Must precede Tailwind layers. */
+@import "./styles/tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: rgb(var(--border-subtle));
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    font-feature-settings: "cv11", "ss01";
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+    min-height: 100vh;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Luminous cyan focus ring for keyboard users, across the app. */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--glow-primary);
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: rgb(var(--color-primary-500) / 0.3);
+    color: rgb(var(--text-primary));
+  }
+
+  /* Themed scrollbars. */
+  * {
+    scrollbar-color: rgb(var(--border-strong)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--border-strong));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--text-muted));
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  /* Glassy elevated surface used by overlays/cards. */
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+  }
+
+  /* Subtle cyan radial glow backdrop for hero/auth areas. */
+  .bg-grid-glow {
+    background-image:
+      radial-gradient(
+        60rem 60rem at 80% -10%,
+        rgb(var(--color-primary-500) / 0.12),
+        transparent 60%
+      ),
+      radial-gradient(
+        40rem 40rem at 0% 100%,
+        rgb(var(--color-primary-500) / 0.08),
+        transparent 55%
+      );
+  }
+
+  /* ---- Aurora hero (college dashboard) ------------------------------------
+     Large blurred colour blobs drifting on slow independent loops, a faint
+     grid, and a shimmer sweep. All CSS-driven, so the global reduced-motion
+     media query below neutralises the movement to a still, attractive gradient
+     automatically. Colours come from the primary/info tokens. */
+  .aurora-blob {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(64px);
+    will-change: transform;
+  }
+  .aurora-1 {
+    animation: aurora-drift-1 22s ease-in-out infinite;
+  }
+  .aurora-2 {
+    animation: aurora-drift-2 26s ease-in-out infinite;
+  }
+  .aurora-3 {
+    animation: aurora-drift-3 30s ease-in-out infinite;
+  }
+  /* Faint grid overlay for texture. */
+  .hero-grid {
+    background-image:
+      linear-gradient(rgb(var(--color-primary-500) / 0.06) 1px, transparent 1px),
+      linear-gradient(
+        90deg,
+        rgb(var(--color-primary-500) / 0.06) 1px,
+        transparent 1px
+      );
+    background-size: 28px 28px;
+    mask-image: radial-gradient(70% 70% at 30% 20%, black, transparent 75%);
+    -webkit-mask-image: radial-gradient(
+      70% 70% at 30% 20%,
+      black,
+      transparent 75%
+    );
+  }
+  /* Diagonal shimmer sweep (hero band + buttons). */
+  .animate-shimmer {
+    background: linear-gradient(
+      110deg,
+      transparent 30%,
+      rgb(255 255 255 / 0.22) 50%,
+      transparent 70%
+    );
+    background-size: 220% 100%;
+    animation: shimmer-sweep 6s ease-in-out infinite;
+  }
+  /* Gentle attention pulse for roadmap ("Coming soon") badges. */
+  .animate-soft-pulse {
+    animation: soft-pulse 2.6s ease-in-out infinite;
+  }
+}
+
+@keyframes aurora-drift-1 {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(30px, 20px, 0) scale(1.12);
+  }
+}
+@keyframes aurora-drift-2 {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  50% {
+    transform: translate3d(-36px, -18px, 0) scale(0.92);
+  }
+}
+@keyframes aurora-drift-3 {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(0.95);
+  }
+  50% {
+    transform: translate3d(24px, -26px, 0) scale(1.1);
+  }
+}
+@keyframes shimmer-sweep {
+  0% {
+    background-position: 180% 0;
+  }
+  60%,
+  100% {
+    background-position: -80% 0;
+  }
+}
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(0.97);
+  }
+}
+
+/* Honour reduced-motion globally as a safety net (framer-motion also respects
+   it per-component via useReducedMotion). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

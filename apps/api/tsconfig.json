@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["node"],
+    // App bundles via tsup; no .d.ts emit, so skip declaration-nameability
+    // checks (avoids TS2742 on Express handler types).
+    "declaration": false
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@codeapt/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CodeApt BullMQ worker service (code execution + grading)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@codeapt/shared": "workspace:*",
+    "an-array-of-english-words": "^2.0.0",
+    "bullmq": "^5.34.0",
+    "dotenv": "^16.4.7",
+    "ioredis": "^5.4.2",
+    "mongoose": "^8.9.5",
+    "pino": "^9.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "pino-pretty": "^13.0.0",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
