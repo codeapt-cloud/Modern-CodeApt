@@ -24,6 +24,7 @@ import {
   BookOpen,
   Briefcase,
   CalendarCheck,
+  Code2,
   Building2,
   ClipboardCheck,
   FolderTree,
@@ -84,6 +85,7 @@ const ICON: Record<CollegeNavIcon, LucideIcon> = {
   jobs: Briefcase,
   analytics: BarChart3,
   attendance: CalendarCheck,
+  coding: Code2,
   results: BarChart3,
 };
 

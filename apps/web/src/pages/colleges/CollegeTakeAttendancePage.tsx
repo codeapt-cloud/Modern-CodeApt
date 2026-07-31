@@ -14,16 +14,19 @@ import { ArrowLeft, Check, Save, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import { ImageUpload } from "../../components/media/ImageUpload.js";
 import { PageHeader } from "../../components/layout/PageHeader.js";
 import { Alert } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Card } from "../../components/ui/card.js";
+import { IconButton } from "../../components/ui/icon-button.js";
 import { Input } from "../../components/ui/input.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
 import { Switch } from "../../components/ui/switch.js";
 import { useToast } from "../../components/ui/toast.js";
 import { api, parseApiError } from "../../lib/api-client.js";
+import { imageUrl } from "../../lib/cloudinary.js";
 import { useQuery } from "../../lib/use-query.js";
 import { useCollege } from "./college-context.js";
 
@@ -106,6 +109,26 @@ export function CollegeTakeAttendancePage() {
       toast({ variant: "error", title: parseApiError(err).message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Optional session photos (filing/audit). Uploading via ImageUpload yields a
+  // Cloudinary URL → we attach it; a session with none is unaffected.
+  const addPhoto = async (url: string): Promise<void> => {
+    if (!url.trim()) return;
+    try {
+      await api.attendance.addSessionPhotos(slug, sessionId, [{ url }]);
+      rosterQuery.refetch();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    }
+  };
+  const removePhoto = async (photoId: string): Promise<void> => {
+    try {
+      await api.attendance.removeSessionPhoto(slug, sessionId, photoId);
+      rosterQuery.refetch();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
     }
   };
 
@@ -207,6 +230,44 @@ export function CollegeTakeAttendancePage() {
           })}
         </div>
       )}
+
+      {/* OPTIONAL session photos — attach for your records; nothing requires one. */}
+      <Card className="space-y-3 p-5">
+        <div>
+          <h3 className="text-sm font-semibold text-ink">Session photos</h3>
+          <p className="text-xs text-ink-muted">
+            Optional — attach photos for your records (filing / audit).
+          </p>
+        </div>
+        {session && session.photos.length > 0 ? (
+          <div className="flex flex-wrap gap-3">
+            {session.photos.map((p) => (
+              <div key={p.id} className="relative">
+                <a href={p.url} target="_blank" rel="noreferrer">
+                  <img
+                    src={imageUrl(p.url)}
+                    alt={p.caption || "Session photo"}
+                    className="h-24 w-24 rounded-lg border border-subtle object-cover"
+                  />
+                </a>
+                <IconButton
+                  aria-label="Remove photo"
+                  size="sm"
+                  variant="outline"
+                  className="absolute -right-2 -top-2 bg-surface"
+                  icon={<X className="h-3.5 w-3.5" />}
+                  onClick={() => void removePhoto(p.id)}
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <ImageUpload
+          value=""
+          onChange={(url) => void addPhoto(url)}
+          signatureFetcher={() => api.attendance.uploadSignature(slug)}
+        />
+      </Card>
     </div>
   );
 }

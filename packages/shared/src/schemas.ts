@@ -34,6 +34,12 @@ import {
   type AttendanceSessionStatus,
   ATTENDANCE_RECORD_STATUS_VALUES,
   type AttendanceRecordStatus,
+  CODING_PLATFORM_VALUES,
+  type CodingPlatform,
+  CODING_FETCH_STATUS_VALUES,
+  type CodingFetchStatus,
+  CODING_METRIC_VALUES,
+  type CodingMetric,
   DAILY_CHALLENGE_SOURCE_VALUES,
   DailyChallengeSource,
   DAILY_QUESTION_TYPE_VALUES,
@@ -385,6 +391,13 @@ export const essayGradingJobSchema = z.object({
    * (`college == null`) → grading is not metered against any college.
    */
   collegeId: z.string().optional(),
+  /**
+   * The STUDENT (essay author) to charge AI grading to, set ONLY when the college
+   * has per-student credit distribution enabled (resolved at enqueue). Present →
+   * the worker seam meters this grading against the student's ledger instead of
+   * the college pool; absent → Stage-1 per-college metering (unchanged).
+   */
+  userId: z.string().optional(),
 });
 export type EssayGradingJob = z.infer<typeof essayGradingJobSchema>;
 
@@ -3372,6 +3385,13 @@ export const collegeCreditsSchema = z.object({
   tier: aiCreditTierSchema,
   /** Explicit monthly credits that override the tier formula; null = use tier. */
   monthlyOverride: z.number().int().nonnegative().nullable(),
+  /**
+   * OPT-IN per-student credit distribution. Default false → student AI draws the
+   * college pool as before (unchanged). When true, the college_admin allocates
+   * the pool to specific students and student-initiated AI is metered against
+   * each student's own allocation (no allocation → no AI).
+   */
+  perStudentDistribution: z.boolean().default(false),
 });
 export type CollegeCredits = z.infer<typeof collegeCreditsSchema>;
 
@@ -3421,6 +3441,87 @@ export const aiCreditBalanceSchema = z.object({
   byFeature: z.record(z.string(), z.number()),
 });
 export type AiCreditBalance = z.infer<typeof aiCreditBalanceSchema>;
+
+// ---------------------------------------------------------------------------
+// PER-STUDENT AI CREDIT DISTRIBUTION — the college_admin carves the pool into
+// per-student allocations; students spend only their own. Layers UNDER Stage-1
+// (pool source) + Stage-2 (governor). Read-only over stored ledgers.
+// ---------------------------------------------------------------------------
+
+/** One student's own AI-credit allocation this period (student + admin views). */
+export const studentAiCreditRowSchema = z.object({
+  studentId: z.string(),
+  fullName: z.string(),
+  rollNumber: z.string(),
+  orgUnitId: z.string().nullable(),
+  allocated: z.number().int().nonnegative(),
+  consumed: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+});
+export type StudentAiCreditRow = z.infer<typeof studentAiCreditRowSchema>;
+
+/** Admin distribution view: pool math + per-student allocations this period. */
+export const aiCreditDistributionResponseSchema = z.object({
+  /** Whether per-student distribution is enabled for this college. */
+  enabled: z.boolean(),
+  periodKey: z.string(),
+  /** The college pool cap this period (Stage-1 `allocated`). */
+  poolAllocated: z.number().int().nonnegative(),
+  /** Σ of all students' allocations this period. */
+  allocatedToStudents: z.number().int().nonnegative(),
+  /** poolAllocated − allocatedToStudents (never negative). */
+  distributable: z.number().int().nonnegative(),
+  /** Σ of all students' consumption this period. */
+  consumedByStudents: z.number().int().nonnegative(),
+  /** Students who currently hold an allocation (allocated > 0). */
+  students: z.array(studentAiCreditRowSchema),
+});
+export type AiCreditDistributionResponse = z.infer<
+  typeof aiCreditDistributionResponseSchema
+>;
+
+/**
+ * Allocate (SET) an amount to a set of students, chosen by org-unit subtree /
+ * individual ids / Excel-matched roll numbers (reusing the attendance selection).
+ * SET-semantics: each selected student's allocation becomes `amount` (not added);
+ * amount 0 clears it. Rejected if Σ would exceed the pool.
+ */
+export const allocateStudentCreditsSchema = z
+  .object({
+    orgUnitIds: z.array(z.string().min(1)).max(500).optional(),
+    studentIds: z.array(z.string().min(1)).max(5000).optional(),
+    excelRollNumbers: z.array(z.string().min(1)).max(5000).optional(),
+    amount: z.number().int().min(0).max(1_000_000),
+  })
+  .refine(
+    (v) =>
+      (v.orgUnitIds?.length ?? 0) +
+        (v.studentIds?.length ?? 0) +
+        (v.excelRollNumbers?.length ?? 0) >
+      0,
+    { message: "Select at least one student (org-unit, individual, or roll number)" },
+  );
+export type AllocateStudentCreditsInput = z.infer<
+  typeof allocateStudentCreditsSchema
+>;
+
+/** Toggle per-student distribution mode for a college (college_admin). */
+export const setStudentDistributionSchema = z.object({ enabled: z.boolean() });
+export type SetStudentDistributionInput = z.infer<
+  typeof setStudentDistributionSchema
+>;
+
+/** A student's OWN AI-credit balance (own-data-only student view). */
+export const studentOwnAiCreditSchema = z.object({
+  /** Whether the college runs per-student distribution (else pool-managed). */
+  enabled: z.boolean(),
+  periodKey: z.string(),
+  /** Null when the college has never allocated to this student this period. */
+  allocated: z.number().int().nonnegative().nullable(),
+  consumed: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+});
+export type StudentOwnAiCredit = z.infer<typeof studentOwnAiCreditSchema>;
 
 // ---------------------------------------------------------------------------
 // AI GOVERNOR (Stage-2) — the global free-tier pool governor config + status.
@@ -3492,6 +3593,145 @@ export const pacedAiJobSchema = z.object({
   policy: z.record(z.string(), z.unknown()).optional(),
 });
 export type PacedAiJob = z.infer<typeof pacedAiJobSchema>;
+
+// ---------------------------------------------------------------------------
+// Coding profiles (Prompt 1) — student handles + stored per-platform stats.
+// ---------------------------------------------------------------------------
+
+/**
+ * BullMQ payload for a per-STUDENT coding-profile refresh (rate-limited
+ * `coding-refresh` queue). Carries only the identity — the worker loads the
+ * current handles from the stored profile so a handle edit mid-flight is always
+ * respected. Enqueued by the daily sweep (fan-out) + the manual "refresh now".
+ */
+export const codingRefreshStudentJobSchema = z.object({
+  collegeId: z.string(),
+  userId: z.string(),
+});
+export type CodingRefreshStudentJob = z.infer<typeof codingRefreshStudentJobSchema>;
+
+/** A handle is a short opaque platform username; blank string = "not linked". */
+const codingHandleSchema = z.string().trim().max(100);
+
+/**
+ * Set/update the calling student's handles. Any field OMITTED is left unchanged;
+ * an empty string CLEARS that platform's handle (and its stored stats). Trusting
+ * the entered handle — no ownership verification in v1 (a wrong handle simply
+ * fetches to `not_found`, flagged, never crashes).
+ */
+export const setCodingHandlesSchema = z
+  .object({
+    codeforces: codingHandleSchema.optional(),
+    leetcode: codingHandleSchema.optional(),
+    codechef: codingHandleSchema.optional(),
+  })
+  .strict();
+export type SetCodingHandlesInput = z.infer<typeof setCodingHandlesSchema>;
+
+export const codingPlatformSchema = z.enum(
+  CODING_PLATFORM_VALUES as [CodingPlatform, ...CodingPlatform[]],
+);
+export const codingFetchStatusSchema = z.enum(
+  CODING_FETCH_STATUS_VALUES as [CodingFetchStatus, ...CodingFetchStatus[]],
+);
+
+/** One platform's stored, normalized stats (client-facing; `raw` is NOT sent). */
+export const codingPlatformStatSchema = z.object({
+  platform: codingPlatformSchema,
+  handle: z.string(),
+  rating: z.number().nullable(),
+  maxRating: z.number().nullable(),
+  problemsSolved: z.number().nullable(),
+  rank: z.string().nullable(),
+  status: codingFetchStatusSchema,
+  lastFetchedAt: z.string().datetime().nullable(),
+});
+export type CodingPlatformStat = z.infer<typeof codingPlatformStatSchema>;
+
+export const codingHandlesSchema = z.object({
+  codeforces: z.string().nullable(),
+  leetcode: z.string().nullable(),
+  codechef: z.string().nullable(),
+});
+export type CodingHandles = z.infer<typeof codingHandlesSchema>;
+
+/** The calling student's own coding profile (handles + per-platform stats). */
+export const codingProfileResponseSchema = z.object({
+  handles: codingHandlesSchema,
+  stats: z.array(codingPlatformStatSchema),
+  /** True once a refresh has been requested/queued and is not yet reflected. */
+  refreshQueued: z.boolean(),
+  updatedAt: z.string().datetime().nullable(),
+});
+export type CodingProfileResponse = z.infer<typeof codingProfileResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Coding leaderboard (Prompt 2) — admin ranking over the stored stats above.
+// Read-only; no live fetching. Ranked strictly over real `ok` stats; na/stale
+// students are surfaced honestly (unranked, never a fabricated rank).
+// ---------------------------------------------------------------------------
+
+export const codingMetricSchema = z.enum(
+  CODING_METRIC_VALUES as [CodingMetric, ...CodingMetric[]],
+);
+
+/** Filters/params for the leaderboard read (coerced from the query string). */
+export const codingLeaderboardQuerySchema = z.object({
+  platform: codingPlatformSchema.default("codeforces"),
+  metric: codingMetricSchema.default("rating"),
+  /** Restrict to an org-unit subtree (branch/section/year); scope-checked. */
+  unitId: z.string().min(1).optional(),
+  /** Restrict to an attendance group's members. */
+  groupId: z.string().min(1).optional(),
+});
+export type CodingLeaderboardQuery = z.infer<typeof codingLeaderboardQuerySchema>;
+
+/** One leaderboard row — a linked student with per-platform stats + rank. */
+export const codingLeaderboardRowSchema = z.object({
+  /** 1-based rank on the chosen platform+metric; null = not ranked (na/stale). */
+  rank: z.number().int().positive().nullable(),
+  studentId: z.string(),
+  fullName: z.string(),
+  rollNumber: z.string(),
+  orgUnitId: z.string().nullable(),
+  orgUnitName: z.string().nullable(),
+  /** The ranked metric's value on the chosen platform (null when unranked). */
+  metricValue: z.number().nullable(),
+  /** Status + freshness of the CHOSEN platform's stat (honest na/stale signal). */
+  rankedStatus: codingFetchStatusSchema,
+  rankedLastFetchedAt: z.string().datetime().nullable(),
+  /** Per-platform quick stats (reuses the Prompt-1 stat shape). */
+  stats: z.array(codingPlatformStatSchema),
+});
+export type CodingLeaderboardRow = z.infer<typeof codingLeaderboardRowSchema>;
+
+export const codingLeaderboardOverviewSchema = z.object({
+  platform: codingPlatformSchema,
+  metric: codingMetricSchema,
+  /** Students in the filtered population (scope + org-unit/group filters). */
+  totalStudents: z.number().int().nonnegative(),
+  /** Of those, how many have at least one linked handle (are shown as rows). */
+  linked: z.number().int().nonnegative(),
+  /** Of the linked, how many are ranked for the chosen platform+metric. */
+  ranked: z.number().int().nonnegative(),
+  /** Linked but not ranked for this platform (na/stale) — shown, not faked. */
+  unranked: z.number().int().nonnegative(),
+  /** Freshness range of the ranked stats (earliest/latest lastFetchedAt). */
+  lastRefreshedFrom: z.string().datetime().nullable(),
+  lastRefreshedTo: z.string().datetime().nullable(),
+});
+export type CodingLeaderboardOverview = z.infer<
+  typeof codingLeaderboardOverviewSchema
+>;
+
+export const codingLeaderboardResponseSchema = z.object({
+  overview: codingLeaderboardOverviewSchema,
+  /** Ranked rows first (rank 1..n), then unranked (rank null), name-sorted. */
+  rows: z.array(codingLeaderboardRowSchema),
+});
+export type CodingLeaderboardResponse = z.infer<
+  typeof codingLeaderboardResponseSchema
+>;
 
 export const collegeListResponseSchema = z.object({
   items: z.array(collegeSchema),
@@ -4103,6 +4343,19 @@ export const attendanceRecordStatusSchema = z.enum(
 );
 
 /** A session (a dated/timed occurrence of a group) + its live mark tally. */
+/**
+ * An OPTIONAL photo attached to a session (for filing/audit). Uploaded via the
+ * shared Cloudinary flow → we keep the returned URL. A session normally has none.
+ */
+export const attendancePhotoSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  caption: z.string(),
+  uploadedBy: z.string().nullable(),
+  uploadedAt: z.string().datetime(),
+});
+export type AttendancePhoto = z.infer<typeof attendancePhotoSchema>;
+
 export const attendanceSessionSchema = z.object({
   id: z.string(),
   groupId: z.string(),
@@ -4119,8 +4372,26 @@ export const attendanceSessionSchema = z.object({
   absentCount: z.number().int().nonnegative(),
   /** True once attendance has been recorded (status completed / has records). */
   recorded: z.boolean(),
+  /** Optional filing/audit photos (usually empty). */
+  photos: z.array(attendancePhotoSchema),
 });
 export type AttendanceSession = z.infer<typeof attendanceSessionSchema>;
+
+/** Attach one or more optional photos (already-uploaded Cloudinary URLs). */
+export const addAttendancePhotosSchema = z.object({
+  photos: z
+    .array(
+      z.object({
+        url: z.string().url().max(2000),
+        caption: z.string().trim().max(300).optional(),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type AddAttendancePhotosInput = z.infer<
+  typeof addAttendancePhotosSchema
+>;
 
 export const attendanceSessionListResponseSchema = z.object({
   items: z.array(attendanceSessionSchema),

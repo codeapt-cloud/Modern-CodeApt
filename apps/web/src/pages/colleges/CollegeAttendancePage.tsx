@@ -2,11 +2,11 @@
  * College Attendance (route: /c/:slug/attendance) — Prompt 1: form attendance
  * GROUPS (classes / events) whose membership is the de-duplicated UNION of any
  * mix of org-units, individual students, and an Excel roll-number upload (with a
- * matched/unmatched PREVIEW before confirming). All calls are tenant-scoped +
- * faculty-scoped by the backend; gated by the `attendance` feature. A college
- * admin can toggle whether faculty may form CROSS-CUTTING / Excel groups.
- *
- * Sessions + taking attendance arrive in Prompt 2; this page only forms groups.
+ * matched/unmatched PREVIEW before confirming). Groups are also EDITABLE — rename
+ * / re-describe / change kind, add more members (same selection), and remove
+ * individual members. All calls are tenant-scoped + faculty-scoped by the
+ * backend; gated by the `attendance` feature. A college admin can toggle whether
+ * faculty may form CROSS-CUTTING / Excel groups.
  */
 import {
   AttendanceGroupKind,
@@ -14,26 +14,29 @@ import {
   CollegeFeature,
   checkEntitlement,
   type AttendanceGroupSummary,
-  type CollegeStudent,
 } from "@codeapt/shared";
 import {
   CalendarCheck,
   ClipboardList,
+  Pencil,
   Plus,
   Trash2,
-  Upload,
+  UserMinus,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ConfirmDeleteDialog } from "../../components/curriculum/admin/ConfirmDeleteDialog.js";
+import {
+  GroupMemberSelector,
+  type ExcelPreview,
+} from "../../components/colleges/GroupMemberSelector.js";
 import { PageHeader } from "../../components/layout/PageHeader.js";
 import { Alert } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Card } from "../../components/ui/card.js";
-import { Checkbox } from "../../components/ui/checkbox.js";
 import {
   Dialog,
   DialogContent,
@@ -49,28 +52,27 @@ import { Switch } from "../../components/ui/switch.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { useToast } from "../../components/ui/toast.js";
 import { api, parseApiError } from "../../lib/api-client.js";
-import { flattenTree, orgUnitTypeLabel } from "../../lib/org-structure-ui.js";
 import { useQuery } from "../../lib/use-query.js";
 import { useCollege } from "./college-context.js";
 
-/** Read a File into a bare base64 string (strips the data: URL prefix). */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result);
-      const comma = result.indexOf(",");
-      resolve(comma >= 0 ? result.slice(comma + 1) : result);
-    };
-    reader.onerror = () => reject(new Error("Could not read the file"));
-    reader.readAsDataURL(file);
-  });
-}
-
-interface ExcelPreview {
-  matchedRolls: string[];
-  matchedNames: string[];
-  unmatched: string[];
+function KindSelect({
+  kind,
+  onChange,
+}: {
+  kind: AttendanceGroupKind;
+  onChange: (k: AttendanceGroupKind) => void;
+}) {
+  return (
+    <select
+      value={kind}
+      onChange={(e) => onChange(e.target.value as AttendanceGroupKind)}
+      className="h-10 w-full rounded-lg border border-subtle bg-surface px-3 text-sm text-ink"
+      aria-label="Group kind"
+    >
+      <option value={AttendanceGroupKind.CLASS}>Class (recurring)</option>
+      <option value={AttendanceGroupKind.EVENT}>Event (one-off)</option>
+    </select>
+  );
 }
 
 function CreateGroupDialog({
@@ -83,62 +85,13 @@ function CreateGroupDialog({
   onCreated: () => void;
 }) {
   const { toast } = useToast();
-  const treeQuery = useQuery(() => api.collegeOrgUnits.listTree(slug), [slug]);
-  const studentsQuery = useQuery(() => api.collegeStudents.list(slug), [slug]);
-  const flat = useMemo(
-    () => flattenTree(treeQuery.data?.items ?? []),
-    [treeQuery.data],
-  );
-  const students: CollegeStudent[] = studentsQuery.data?.items ?? [];
-
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [kind, setKind] = useState<AttendanceGroupKind>(
-    AttendanceGroupKind.CLASS,
-  );
+  const [kind, setKind] = useState<AttendanceGroupKind>(AttendanceGroupKind.CLASS);
   const [unitIds, setUnitIds] = useState<Set<string>>(new Set());
   const [studentIds, setStudentIds] = useState<Set<string>>(new Set());
-  const [studentFilter, setStudentFilter] = useState("");
   const [excel, setExcel] = useState<ExcelPreview | null>(null);
-  const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  const toggle = (set: Set<string>, id: string): Set<string> => {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    return next;
-  };
-
-  const filteredStudents = students.filter((s) => {
-    const q = studentFilter.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      s.fullName.toLowerCase().includes(q) ||
-      s.rollNumber.toLowerCase().includes(q)
-    );
-  });
-
-  const runPreview = async (file: File): Promise<void> => {
-    setPreviewing(true);
-    try {
-      const fileBase64 = await fileToBase64(file);
-      const res = await api.attendance.importPreview(slug, fileBase64);
-      setExcel({
-        matchedRolls: res.matched.map((m) => m.rollNumber),
-        matchedNames: res.matched.map((m) => m.fullName || m.rollNumber),
-        unmatched: res.unmatched,
-      });
-      toast({
-        variant: "success",
-        title: `Matched ${res.summary.matched} of ${res.summary.total} roll numbers`,
-      });
-    } catch (err) {
-      toast({ variant: "error", title: parseApiError(err).message });
-    } finally {
-      setPreviewing(false);
-    }
-  };
 
   const totalSelected =
     unitIds.size + studentIds.size + (excel?.matchedRolls.length ?? 0);
@@ -180,7 +133,6 @@ function CreateGroupDialog({
         </DialogHeader>
 
         <div className="space-y-5">
-          {/* Basics */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <label className="text-xs font-medium text-ink-muted">Name</label>
@@ -193,15 +145,7 @@ function CreateGroupDialog({
             </div>
             <div className="space-y-1">
               <label className="text-xs font-medium text-ink-muted">Kind</label>
-              <select
-                value={kind}
-                onChange={(e) => setKind(e.target.value as AttendanceGroupKind)}
-                className="h-10 w-full rounded-lg border border-subtle bg-surface px-3 text-sm text-ink"
-                aria-label="Group kind"
-              >
-                <option value={AttendanceGroupKind.CLASS}>Class (recurring)</option>
-                <option value={AttendanceGroupKind.EVENT}>Event (one-off)</option>
-              </select>
+              <KindSelect kind={kind} onChange={setKind} />
             </div>
           </div>
           <div className="space-y-1">
@@ -216,134 +160,15 @@ function CreateGroupDialog({
             />
           </div>
 
-          {/* 1) Org-units / sections */}
-          <div className="space-y-2">
-            <p className="flex items-center gap-2 text-sm font-medium text-ink">
-              <Users className="h-4 w-4 text-primary" /> Org-units & sections
-            </p>
-            {flat.length === 0 ? (
-              <p className="text-xs text-ink-muted">
-                No org-units yet — add them under Academic structure.
-              </p>
-            ) : (
-              <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-subtle p-2">
-                {flat.map((u) => (
-                  <label
-                    key={u.id}
-                    className="flex items-center gap-2 text-sm text-ink"
-                    style={{ paddingLeft: `${u.depth * 14}px` }}
-                  >
-                    <Checkbox
-                      checked={unitIds.has(u.id)}
-                      onCheckedChange={() => setUnitIds((s) => toggle(s, u.id))}
-                    />
-                    <span className="truncate">{u.name}</span>
-                    <Badge variant="neutral">{orgUnitTypeLabel(u.type)}</Badge>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* 2) Individual students */}
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-ink">Individual students</p>
-            <Input
-              value={studentFilter}
-              onChange={(e) => setStudentFilter(e.target.value)}
-              placeholder="Filter by name or roll number…"
-              aria-label="Filter students"
-            />
-            {studentsQuery.loading ? (
-              <Skeleton className="h-24 w-full rounded-lg" />
-            ) : (
-              <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-subtle p-2">
-                {filteredStudents.length === 0 ? (
-                  <p className="p-2 text-xs text-ink-muted">No students match.</p>
-                ) : (
-                  filteredStudents.slice(0, 200).map((s) => (
-                    <label
-                      key={s.id}
-                      className="flex items-center gap-2 text-sm text-ink"
-                    >
-                      <Checkbox
-                        checked={studentIds.has(s.id)}
-                        onCheckedChange={() =>
-                          setStudentIds((set) => toggle(set, s.id))
-                        }
-                      />
-                      <span className="truncate">{s.fullName}</span>
-                      <span className="text-xs text-ink-muted">
-                        {s.rollNumber}
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 3) Excel roll-number upload → preview */}
-          <div className="space-y-2">
-            <p className="flex items-center gap-2 text-sm font-medium text-ink">
-              <Upload className="h-4 w-4 text-primary" /> Excel roll numbers
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  void api.attendance
-                    .template(slug)
-                    .then(({ blob, filename }) => {
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = filename;
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    })
-                    .catch((err: unknown) =>
-                      toast({ variant: "error", title: parseApiError(err).message }),
-                    );
-                }}
-              >
-                Download template
-              </Button>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-subtle px-3 py-1.5 text-sm text-ink hover:bg-surface-sunken">
-                {previewing ? "Reading…" : "Upload .xlsx"}
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void runPreview(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-            </div>
-            {excel ? (
-              <div className="rounded-lg border border-subtle p-2 text-xs">
-                <p className="text-success-fg">
-                  {excel.matchedRolls.length} matched
-                  {excel.matchedNames.length > 0
-                    ? `: ${excel.matchedNames.slice(0, 8).join(", ")}${
-                        excel.matchedNames.length > 8 ? "…" : ""
-                      }`
-                    : ""}
-                </p>
-                {excel.unmatched.length > 0 ? (
-                  <p className="mt-1 text-warning-fg">
-                    {excel.unmatched.length} unmatched:{" "}
-                    {excel.unmatched.slice(0, 8).join(", ")}
-                    {excel.unmatched.length > 8 ? "…" : ""}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          <GroupMemberSelector
+            slug={slug}
+            unitIds={unitIds}
+            onUnitIdsChange={setUnitIds}
+            studentIds={studentIds}
+            onStudentIdsChange={setStudentIds}
+            excel={excel}
+            onExcelChange={setExcel}
+          />
         </div>
 
         <DialogFooter>
@@ -363,14 +188,221 @@ function CreateGroupDialog({
   );
 }
 
+function EditGroupDialog({
+  slug,
+  groupId,
+  onClose,
+  onSaved,
+}: {
+  slug: string;
+  groupId: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const groupQuery = useQuery(() => api.attendance.getGroup(slug, groupId), [
+    slug,
+    groupId,
+  ]);
+  const group = groupQuery.data;
+
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [kind, setKind] = useState<AttendanceGroupKind>(AttendanceGroupKind.CLASS);
+  const [seeded, setSeeded] = useState(false);
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [addingMembers, setAddingMembers] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  const [unitIds, setUnitIds] = useState<Set<string>>(new Set());
+  const [studentIds, setStudentIds] = useState<Set<string>>(new Set());
+  const [excel, setExcel] = useState<ExcelPreview | null>(null);
+
+  // Seed the metadata fields once the group loads.
+  if (group && !seeded) {
+    setName(group.name);
+    setDescription(group.description ?? "");
+    setKind(group.kind as AttendanceGroupKind);
+    setSeeded(true);
+  }
+
+  const saveMeta = async (): Promise<void> => {
+    if (!name.trim()) {
+      toast({ variant: "error", title: "Give the group a name" });
+      return;
+    }
+    setSavingMeta(true);
+    try {
+      // Metadata only (no membership fields) → members are left untouched.
+      await api.attendance.updateGroup(slug, groupId, {
+        name: name.trim(),
+        description: description.trim(),
+        kind,
+      });
+      toast({ variant: "success", title: "Group updated" });
+      onSaved();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
+  const addMembers = async (): Promise<void> => {
+    const total = unitIds.size + studentIds.size + (excel?.matchedRolls.length ?? 0);
+    if (total === 0) {
+      toast({ variant: "error", title: "Select students to add" });
+      return;
+    }
+    setAddingMembers(true);
+    try {
+      await api.attendance.addMembers(slug, groupId, {
+        orgUnitIds: [...unitIds],
+        studentIds: [...studentIds],
+        excelRollNumbers: excel?.matchedRolls ?? [],
+      });
+      toast({ variant: "success", title: "Members added" });
+      setUnitIds(new Set());
+      setStudentIds(new Set());
+      setExcel(null);
+      groupQuery.refetch();
+      onSaved();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setAddingMembers(false);
+    }
+  };
+
+  const removeMember = async (studentId: string): Promise<void> => {
+    setRemovingId(studentId);
+    try {
+      await api.attendance.removeMember(slug, groupId, studentId);
+      groupQuery.refetch();
+      onSaved();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit attendance group</DialogTitle>
+          <DialogDescription>
+            Rename or re-describe the group, add more members, or remove
+            individual members.
+          </DialogDescription>
+        </DialogHeader>
+
+        {groupQuery.loading ? (
+          <Skeleton className="h-48 w-full rounded-xl" />
+        ) : groupQuery.error || !group ? (
+          <Alert variant="error">{groupQuery.error ?? "Group not found"}</Alert>
+        ) : (
+          <div className="space-y-6">
+            {/* Metadata */}
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-ink-muted">Name</label>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-ink-muted">Kind</label>
+                  <KindSelect kind={kind} onChange={setKind} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-ink-muted">
+                  Description (optional)
+                </label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={2}
+                />
+              </div>
+              <Button size="sm" disabled={savingMeta} onClick={() => void saveMeta()}>
+                {savingMeta ? "Saving…" : "Save details"}
+              </Button>
+            </div>
+
+            {/* Current members */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-ink">
+                Current members{" "}
+                <Badge variant="neutral">{group.members.length}</Badge>
+              </p>
+              {group.members.length === 0 ? (
+                <p className="text-xs text-ink-muted">No members yet — add some below.</p>
+              ) : (
+                <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-subtle p-2">
+                  {group.members.map((m) => (
+                    <div
+                      key={m.studentId}
+                      className="flex items-center justify-between gap-2 text-sm text-ink"
+                    >
+                      <span className="min-w-0 truncate">
+                        {m.fullName || m.rollNumber}{" "}
+                        <span className="text-xs text-ink-muted">{m.rollNumber}</span>
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={removingId === m.studentId}
+                        onClick={() => void removeMember(m.studentId)}
+                      >
+                        <UserMinus className="h-4 w-4 text-error-fg" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Add members */}
+            <div className="space-y-3 border-t border-subtle pt-4">
+              <p className="text-sm font-semibold text-ink">Add members</p>
+              <GroupMemberSelector
+                slug={slug}
+                unitIds={unitIds}
+                onUnitIdsChange={setUnitIds}
+                studentIds={studentIds}
+                onStudentIdsChange={setStudentIds}
+                excel={excel}
+                onExcelChange={setExcel}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={addingMembers}
+                onClick={() => void addMembers()}
+              >
+                {addingMembers ? "Adding…" : "Add selected"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function CollegeAttendancePage() {
   const { slug, context } = useCollege();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const entitled = checkEntitlement(
-    context.entitlements,
-    CollegeFeature.ATTENDANCE,
-  );
+  const entitled = checkEntitlement(context.entitlements, CollegeFeature.ATTENDANCE);
   const isAdmin = COLLEGE_ADMIN_ROLES.includes(context.membership.role);
 
   const groupsQuery = useQuery(
@@ -379,13 +411,12 @@ export function CollegeAttendancePage() {
   );
   const settingsQuery = useQuery(
     () =>
-      entitled && isAdmin
-        ? api.attendance.getSettings(slug)
-        : Promise.resolve(null),
+      entitled && isAdmin ? api.attendance.getSettings(slug) : Promise.resolve(null),
     [slug, entitled, isAdmin],
   );
 
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<AttendanceGroupSummary | null>(null);
   const [deleting, setDeleting] = useState<AttendanceGroupSummary | null>(null);
   const [savingSetting, setSavingSetting] = useState(false);
 
@@ -499,14 +530,15 @@ export function CollegeAttendancePage() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    onClick={() =>
-                      navigate(`/c/${slug}/attendance/groups/${g.id}`)
-                    }
+                    onClick={() => navigate(`/c/${slug}/attendance/groups/${g.id}`)}
                   >
                     <ClipboardList className="h-4 w-4" /> Sessions
                   </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(g)}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => setDeleting(g)}>
-                    <Trash2 className="h-4 w-4 text-error-fg" /> Delete
+                    <Trash2 className="h-4 w-4 text-error-fg" />
                   </Button>
                 </div>
               </div>
@@ -520,6 +552,15 @@ export function CollegeAttendancePage() {
           slug={slug}
           onClose={() => setCreating(false)}
           onCreated={() => groupsQuery.refetch()}
+        />
+      ) : null}
+
+      {editing ? (
+        <EditGroupDialog
+          slug={slug}
+          groupId={editing.id}
+          onClose={() => setEditing(null)}
+          onSaved={() => groupsQuery.refetch()}
         />
       ) : null}
 

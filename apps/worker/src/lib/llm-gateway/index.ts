@@ -27,6 +27,10 @@ import {
 import { isEncryptionConfigured } from "../crypto.js";
 import { logger } from "../logger.js";
 import { reserveCredits, refundCredits } from "../ai-credit.js";
+import {
+  reserveStudentCredits,
+  refundStudentCredits,
+} from "../student-ai-credit.js";
 import { getGovernorConfig } from "../ai-governor.js";
 import { cacheGet, cacheKey, cacheSet, isCacheable } from "./cache.js";
 import { recordFailure, recordSuccess } from "./persist.js";
@@ -57,12 +61,27 @@ export async function gatewayCallLlmChatJson(
   const providers = (await loadProviderRuntimes(now)).map((p) => ({ ...p, maxTokens }));
   if (providers.length === 0) return null;
 
-  // AI CREDITS (Stage 1): charge a COLLEGE-initiated call (e.g. essay grading of
-  // a college attempt) to that college — atomic reserve BEFORE calling a provider;
-  // exhausted → null (grading degrades to deterministic). Platform calls (no
-  // collegeId) are not metered. Mirrors the API glue.
+  // AI CREDITS (Stage 1 + per-student): atomic reserve BEFORE calling a provider;
+  // exhausted → null (grading degrades to deterministic). Mirrors the API glue.
+  //   • PER-STUDENT (policy.userId set → distribution on): charge the STUDENT's
+  //     own allocation ONLY — the pool was committed at allocation time, so it is
+  //     NOT debited again (no double-charge). No allocation → graceful gate.
+  //   • Otherwise: charge the COLLEGE pool (Stage-1, unchanged). Platform calls
+  //     (no collegeId) are not metered.
   const collegeId = policy?.collegeId;
-  if (collegeId) {
+  const studentMeter =
+    policy?.userId && collegeId
+      ? { collegeId, studentId: policy.userId }
+      : null;
+  if (studentMeter) {
+    const reserved = await reserveStudentCredits(
+      studentMeter.collegeId,
+      studentMeter.studentId,
+      feature,
+      new Date(now),
+    );
+    if (!reserved) return null;
+  } else if (collegeId) {
     const reserved = await reserveCredits(collegeId, feature, new Date(now));
     if (!reserved) return null;
   }
@@ -81,7 +100,16 @@ export async function gatewayCallLlmChatJson(
       kind,
     });
     if (decision.action === "shed") {
-      if (collegeId) await refundCredits(collegeId, feature, new Date(now));
+      if (studentMeter) {
+        await refundStudentCredits(
+          studentMeter.collegeId,
+          studentMeter.studentId,
+          feature,
+          new Date(now),
+        );
+      } else if (collegeId) {
+        await refundCredits(collegeId, feature, new Date(now));
+      }
       return null;
     }
   }
@@ -109,8 +137,15 @@ export async function gatewayCallLlmChatJson(
     const w: { id: string; usage: AdapterUsage } = winner;
     await recordProviderUsage(w.id, feature, w.usage, cacheable, now);
     if (key) await cacheSet(key, kind, feature, result, w.usage, now);
-  } else if (collegeId) {
+  } else if (studentMeter) {
     // Providers all failed after we reserved → REFUND (debit only on success).
+    await refundStudentCredits(
+      studentMeter.collegeId,
+      studentMeter.studentId,
+      feature,
+      new Date(now),
+    );
+  } else if (collegeId) {
     await refundCredits(collegeId, feature, new Date(now));
   }
   return result;

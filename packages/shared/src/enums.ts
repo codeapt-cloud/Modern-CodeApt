@@ -83,10 +83,55 @@ export const CollegeFeature = {
    * sections, individuals, and Excel roll-number uploads, then take + report
    * attendance (sessions/records arrive in later prompts). */
   ATTENDANCE: "attendance",
+  /** Coding profiles: students add competitive-coding handles (Codeforces /
+   * LeetCode / CodeChef); a scheduled job fetches + stores normalized stats per
+   * platform so the (Prompt-2) leaderboard reads fast, stored data. */
+  CODING_PROFILES: "coding_profiles",
 } as const;
 export type CollegeFeature =
   (typeof CollegeFeature)[keyof typeof CollegeFeature];
 export const COLLEGE_FEATURE_VALUES = Object.values(CollegeFeature);
+
+/**
+ * Competitive-coding platforms a college student can link a handle for. Only
+ * Codeforces has an OFFICIAL public API; LeetCode + CodeChef use best-available
+ * (unofficial) sources, so their adapters are isolated and degrade gracefully.
+ */
+export const CodingPlatform = {
+  CODEFORCES: "codeforces",
+  LEETCODE: "leetcode",
+  CODECHEF: "codechef",
+} as const;
+export type CodingPlatform =
+  (typeof CodingPlatform)[keyof typeof CodingPlatform];
+export const CODING_PLATFORM_VALUES = Object.values(CodingPlatform);
+
+/**
+ * Per-handle fetch status stored alongside the stats. `never` = a handle exists
+ * but has never been fetched yet; `ok` = last fetch succeeded; `not_found` = the
+ * platform said no such handle; `error` = the platform was unreachable / errored
+ * (we KEEP the last-known numbers and just flag this so nothing is nulled out).
+ */
+export const CodingFetchStatus = {
+  NEVER: "never",
+  OK: "ok",
+  NOT_FOUND: "not_found",
+  ERROR: "error",
+} as const;
+export type CodingFetchStatus =
+  (typeof CodingFetchStatus)[keyof typeof CodingFetchStatus];
+export const CODING_FETCH_STATUS_VALUES = Object.values(CodingFetchStatus);
+
+/**
+ * The metric the (Prompt-2) coding leaderboard ranks by. `rating` = the
+ * platform's contest rating; `problemsSolved` = the accepted-problems count.
+ */
+export const CodingMetric = {
+  RATING: "rating",
+  PROBLEMS_SOLVED: "problemsSolved",
+} as const;
+export type CodingMetric = (typeof CodingMetric)[keyof typeof CodingMetric];
+export const CODING_METRIC_VALUES = Object.values(CodingMetric);
 
 /**
  * College org-structure node types (Phase 2). The tree is FLEXIBLE — not every

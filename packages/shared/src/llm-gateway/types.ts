@@ -86,6 +86,17 @@ export interface LlmTaskPolicy {
    */
   collegeId?: string;
   /**
+   * The STUDENT this AI action is charged to (per-student distribution layer).
+   * Set ONLY for a student-initiated action AND only when the college has
+   * per-student distribution ENABLED — the API resolves this at the call/enqueue
+   * site. When present, the gateway seam reserves the action's weight against the
+   * STUDENT's ledger (NOT the college pool again — the pool was already committed
+   * to the student at allocation time) and refunds on failure; exhausted/no
+   * allocation → the graceful "no AI credits" gate. When absent, metering falls
+   * back to the Stage-1 per-college charge (unchanged).
+   */
+  userId?: string;
+  /**
    * Stage-2 governor: set ONLY by the paced-queue worker when it drains a
    * previously-deferred call. It tells the seam to SKIP the global governor
    * check (this IS the paced execution — it must run-or-fail, never re-defer),

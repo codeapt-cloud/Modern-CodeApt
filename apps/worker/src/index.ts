@@ -7,6 +7,7 @@
  */
 import {
   AI_PACED_MAX_PER_MINUTE,
+  CODING_REFRESH_MAX_PER_MINUTE,
   QUEUE_CONFIGS,
   QUEUE_NAME_VALUES,
   QueueName,
@@ -16,6 +17,7 @@ import type { Redis } from "ioredis";
 
 import { env } from "./config/env.js";
 import { connectDb, disconnectDb } from "./lib/db.js";
+import { registerCodingRefreshSchedule } from "./lib/coding-refresh/schedule.js";
 import { registerDailyChallengeSchedule } from "./lib/daily-challenge/schedule.js";
 import type { ScheduleHandle } from "./lib/daily-challenge/schedule.js";
 import { installLlmGateway } from "./lib/llm-gateway/index.js";
@@ -26,23 +28,36 @@ import { processors } from "./processors/index.js";
 import "./models/ai-provider.model.js";
 import "./models/ai-usage.model.js";
 import "./models/ai-governor.model.js";
+// Register the coding-profile model (read by the sweep + student refresh).
+import "./models/coding-profile.model.js";
+// Register the per-student AI credit ledger (metered at the gateway seam).
+import "./models/student-ai-credit.model.js";
+
+/** Per-queue BullMQ rate limiter (paced drains); other queues run unlimited. */
+function limiterFor(queue: QueueName): { max: number; duration: number } | null {
+  if (queue === QueueName.AI_PACED) {
+    return { max: AI_PACED_MAX_PER_MINUTE, duration: 60_000 };
+  }
+  if (queue === QueueName.CODING_REFRESH) {
+    return { max: CODING_REFRESH_MAX_PER_MINUTE, duration: 60_000 };
+  }
+  return null;
+}
 
 function start(connection: Redis): Worker[] {
   const workers = QUEUE_NAME_VALUES.map((queue) => {
     const config = QUEUE_CONFIGS[queue];
-    // The paced-AI queue (Stage-2 governor) is RATE-LIMITED so the deferred
-    // backlog drains within provider minute-limits and never rate-limits
-    // everyone. Other queues run at full concurrency.
-    const isPaced = queue === QueueName.AI_PACED;
+    // The paced-AI + coding-refresh queues are RATE-LIMITED so their backlogs
+    // drain within external minute-limits and never burst. Other queues run at
+    // full concurrency.
+    const limiter = limiterFor(queue);
     const worker = new Worker(queue, processors[queue], {
       connection,
       concurrency: env.WORKER_CONCURRENCY,
       // Lock as long as the queue's timeout: a job that outlives this (a wedged
       // execution) is treated as stalled and reclaimed rather than stuck.
       lockDuration: config.timeoutSeconds * 1000,
-      ...(isPaced
-        ? { limiter: { max: AI_PACED_MAX_PER_MINUTE, duration: 60_000 } }
-        : {}),
+      ...(limiter ? { limiter } : {}),
     });
 
     worker.on("completed", (job) =>
@@ -97,18 +112,32 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  setupGracefulShutdown(workers, connection, schedule);
+  // Daily coding-profile sweep — also AUXILIARY and independently guarded, so a
+  // failure here can't take down grading OR the daily-challenge scheduler.
+  let codingSchedule: ScheduleHandle | null = null;
+  try {
+    codingSchedule = await registerCodingRefreshSchedule();
+  } catch (err) {
+    logger.error(
+      { err },
+      "coding-refresh scheduler failed to register — grading continues without it",
+    );
+  }
+
+  setupGracefulShutdown(workers, connection, [schedule, codingSchedule]);
 }
 
 function setupGracefulShutdown(
   workers: Worker[],
   connection: Redis,
-  schedule: ScheduleHandle | null,
+  schedules: (ScheduleHandle | null)[],
 ): void {
   const shutdown = (signal: string): void => {
     logger.info(`${signal} received — closing workers`);
     Promise.allSettled(workers.map((w) => w.close()))
-      .then(() => schedule?.close())
+      .then(() =>
+        Promise.allSettled(schedules.map((s) => s?.close() ?? Promise.resolve())),
+      )
       .then(() => connection.quit())
       .then(() => disconnectDb())
       .finally(() => {

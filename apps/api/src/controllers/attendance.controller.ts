@@ -12,6 +12,7 @@ import {
   AuthErrorCode,
   TenantErrorCode,
   addAttendanceMembersSchema,
+  addAttendancePhotosSchema,
   attendanceImportPreviewRequestSchema,
   createAttendanceGroupSchema,
   createAttendanceSessionSchema,
@@ -37,6 +38,7 @@ import * as attendance from "../services/attendance.service.js";
 import type { AttendanceActor } from "../services/attendance.service.js";
 import * as sessions from "../services/attendance-session.service.js";
 import * as analytics from "../services/attendance-analytics.service.js";
+import { createUploadSignature } from "../services/upload-admin.service.js";
 
 function tenantId(req: Request): string {
   if (!req.tenant) {
@@ -280,6 +282,48 @@ export const saveAttendanceController = asyncHandler(
           actor(req),
           req.params.sessionId ?? "",
           input,
+        ),
+      );
+  },
+);
+
+// --- Optional session photos (filing/audit) ---------------------------------
+
+/** Feature-scoped Cloudinary upload signature (reuses the shared signer). Lets
+ * a session manager (faculty/admin) upload a photo directly to Cloudinary — the
+ * platform `/admin/uploads/signature` route is platform-admin-only. */
+export const attendanceUploadSignatureController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(createUploadSignature());
+  },
+);
+
+export const addSessionPhotosController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = addAttendancePhotosSchema.parse(req.body);
+    res
+      .status(200)
+      .json(
+        await sessions.addSessionPhotos(
+          tenantId(req),
+          actor(req),
+          req.params.sessionId ?? "",
+          input,
+        ),
+      );
+  },
+);
+
+export const removeSessionPhotoController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await sessions.removeSessionPhoto(
+          tenantId(req),
+          actor(req),
+          req.params.sessionId ?? "",
+          req.params.photoId ?? "",
         ),
       );
   },

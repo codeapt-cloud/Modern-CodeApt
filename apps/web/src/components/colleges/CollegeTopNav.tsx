@@ -20,6 +20,7 @@ import {
   CalendarCheck,
   ChevronDown,
   ClipboardCheck,
+  Code2,
   FolderTree,
   GraduationCap,
   LayoutDashboard,
@@ -73,6 +74,7 @@ const ICON: Record<CollegeNavIcon, LucideIcon> = {
   jobs: Briefcase,
   analytics: BarChart3,
   attendance: CalendarCheck,
+  coding: Code2,
   results: Award,
 };
 

@@ -27,6 +27,10 @@ import {
 
 import { isEncryptionConfigured } from "../crypto.js";
 import { reserveCredits, refundCredits } from "../../services/ai-credit.service.js";
+import {
+  reserveStudentCredits,
+  refundStudentCredits,
+} from "../../services/student-ai-credit.service.js";
 import { getGovernorConfig } from "../../services/ai-governor.service.js";
 import { cacheGet, cacheKey, cacheSet, isCacheable } from "./cache.js";
 import { enqueuePacedAiJob } from "../execution-queue.js";
@@ -60,12 +64,30 @@ export async function gatewayCallLlmChatJson(
   const providers = (await loadProviderRuntimes(now)).map((p) => ({ ...p, maxTokens }));
   if (providers.length === 0) return null;
 
-  // 2a) AI CREDITS (Stage 1): for a COLLEGE-initiated call, atomically reserve the
-  // action's credit weight BEFORE hitting a provider. Exhausted → return null (the
-  // same "AI unavailable" signal features already degrade on) so a capped college
-  // never touches the shared pool. Platform calls (no collegeId) are not metered.
+  // 2a) AI CREDITS (Stage 1 + per-student): atomically reserve the action's credit
+  // weight BEFORE hitting a provider. Exhausted → return null (the same "AI
+  // unavailable" signal features already degrade on). Platform calls (no collegeId)
+  // are not metered.
+  //   • PER-STUDENT (policy.userId set → the college runs distribution): reserve
+  //     the STUDENT's own allocation ONLY. The college pool was already committed
+  //     to the student at allocation time, so it is NOT debited again here (no
+  //     double-charge). No allocation / exhausted → graceful gate.
+  //   • Otherwise (college-initiated, or distribution off): reserve the college
+  //     pool exactly as Stage-1 always did (unchanged).
   const collegeId = policy?.collegeId;
-  if (collegeId) {
+  const studentMeter =
+    policy?.userId && collegeId
+      ? { collegeId, studentId: policy.userId }
+      : null;
+  if (studentMeter) {
+    const reserved = await reserveStudentCredits(
+      studentMeter.collegeId,
+      studentMeter.studentId,
+      feature,
+      new Date(now),
+    );
+    if (!reserved) return null;
+  } else if (collegeId) {
     const reserved = await reserveCredits(collegeId, feature, new Date(now));
     if (!reserved) return null;
   }
@@ -83,8 +105,17 @@ export async function gatewayCallLlmChatJson(
       kind,
     });
     if (decision.action === "shed") {
-      // Release the Stage-1 reserve — no provider call will happen.
-      if (collegeId) await refundCredits(collegeId, feature, new Date(now));
+      // Release whichever ledger we reserved — no provider call will happen.
+      if (studentMeter) {
+        await refundStudentCredits(
+          studentMeter.collegeId,
+          studentMeter.studentId,
+          feature,
+          new Date(now),
+        );
+      } else if (collegeId) {
+        await refundCredits(collegeId, feature, new Date(now));
+      }
       // Deferrable + cacheable → pace it so a retry becomes a cheap cache hit.
       if (decision.tier === "deferrable" && key) {
         try {
@@ -126,8 +157,15 @@ export async function gatewayCallLlmChatJson(
     const w: { id: string; usage: AdapterUsage } = winner;
     await recordProviderUsage(w.id, feature, w.usage, cacheable, now);
     if (key) await cacheSet(key, kind, feature, result, w.usage, now);
-  } else if (collegeId) {
+  } else if (studentMeter) {
     // Providers all failed after we reserved → REFUND (debit only on success).
+    await refundStudentCredits(
+      studentMeter.collegeId,
+      studentMeter.studentId,
+      feature,
+      new Date(now),
+    );
+  } else if (collegeId) {
     await refundCredits(collegeId, feature, new Date(now));
   }
   return result;

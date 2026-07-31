@@ -16,6 +16,11 @@ import type { Job, Processor } from "bullmq";
 import { logger } from "../lib/logger.js";
 import { makeCodeExecutionProcessor } from "./code-execution.processor.js";
 import {
+  CODING_REFRESH_SWEEP_JOB_NAME,
+  codingRefreshStudentProcessor,
+  codingRefreshSweepProcessor,
+} from "./coding-refresh.processor.js";
+import {
   DAILY_CHALLENGE_JOB_NAME,
   dailyChallengeProcessor,
 } from "./daily-challenge.processor.js";
@@ -43,6 +48,9 @@ const defaultProcessor: Processor = async (job: Job) => {
   if (job.name === DAILY_CHALLENGE_JOB_NAME) {
     return dailyChallengeProcessor(job);
   }
+  if (job.name === CODING_REFRESH_SWEEP_JOB_NAME) {
+    return codingRefreshSweepProcessor(job);
+  }
   return noop(job);
 };
 
@@ -53,4 +61,6 @@ export const processors: Record<QueueName, Processor> = {
   [QueueName.PLAYGROUND]: makeCodeExecutionProcessor(QueueName.PLAYGROUND),
   // Rate-limited drain of governor-deferred non-urgent AI (see worker index).
   [QueueName.AI_PACED]: pacedAiProcessor,
+  // Rate-limited per-student coding-profile refresh (see worker index).
+  [QueueName.CODING_REFRESH]: codingRefreshStudentProcessor,
 };

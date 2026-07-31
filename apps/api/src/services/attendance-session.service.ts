@@ -17,6 +17,7 @@ import {
   AttendanceErrorCode,
   AttendanceRecordStatus,
   AttendanceSessionStatus,
+  type AddAttendancePhotosInput,
   type AttendanceRosterEntry,
   type AttendanceRosterResponse,
   type AttendanceSession,
@@ -66,6 +67,13 @@ function sessionDTO(
     presentCount: present,
     absentCount: recorded ? Math.max(0, total - present) : 0,
     recorded,
+    photos: (session.photos ?? []).map((p) => ({
+      id: p._id.toString(),
+      url: p.url,
+      caption: p.caption ?? "",
+      uploadedBy: p.uploadedBy ? p.uploadedBy.toString() : null,
+      uploadedAt: (p.uploadedAt ?? new Date()).toISOString(),
+    })),
   };
 }
 
@@ -296,4 +304,55 @@ export async function saveAttendance(
   await session.save();
 
   return buildRoster(session, group);
+}
+
+// --- Optional session photos (filing/audit) ---------------------------------
+// Same manager authority as everything else (loadManageableSession): the
+// session's creator/owner or a college_admin. Purely additive — a session with
+// no photos is unaffected. Uploads go through the shared Cloudinary flow; only
+// the resulting URL is stored here.
+
+export async function addSessionPhotos(
+  collegeId: string,
+  actor: AttendanceActor,
+  sessionId: string,
+  input: AddAttendancePhotosInput,
+): Promise<AttendanceSession> {
+  const scope = createTenantScope(collegeId);
+  const { session, group } = await loadManageableSession(scope, actor, sessionId);
+  const uploadedBy = new Types.ObjectId(actor.userId);
+  const now = new Date();
+  for (const p of input.photos) {
+    session.photos.push({
+      url: p.url,
+      caption: p.caption ?? "",
+      uploadedBy,
+      uploadedAt: now,
+    } as never);
+  }
+  await session.save();
+  return sessionDTO(session, group, await presentCountFor(session, group));
+}
+
+export async function removeSessionPhoto(
+  collegeId: string,
+  actor: AttendanceActor,
+  sessionId: string,
+  photoId: string,
+): Promise<AttendanceSession> {
+  const scope = createTenantScope(collegeId);
+  const { session, group } = await loadManageableSession(scope, actor, sessionId);
+  const before = session.photos.length;
+  session.photos = session.photos.filter(
+    (p) => p._id.toString() !== photoId,
+  ) as never;
+  if (session.photos.length === before) {
+    throw new AppError(
+      "Photo not found on this session",
+      404,
+      AttendanceErrorCode.PHOTO_NOT_FOUND,
+    );
+  }
+  await session.save();
+  return sessionDTO(session, group, await presentCountFor(session, group));
 }

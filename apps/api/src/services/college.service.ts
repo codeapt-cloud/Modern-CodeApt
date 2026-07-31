@@ -95,6 +95,7 @@ function toDTO(college: CollegeDoc): CollegeDTO {
     credits: {
       tier: (college.credits?.tier ?? DEFAULT_AI_CREDIT_TIER) as AiCreditTier,
       monthlyOverride: college.credits?.monthlyOverride ?? null,
+      perStudentDistribution: college.credits?.perStudentDistribution ?? false,
     },
     createdAt: college.createdAt.toISOString(),
     updatedAt: college.updatedAt.toISOString(),

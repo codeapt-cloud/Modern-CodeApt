@@ -80,6 +80,16 @@ const envSchema = z.object({
   // fallback), mirroring the API's posture.
   ENCRYPTION_KEY: z.string().min(16, "ENCRYPTION_KEY must be >= 16 chars").optional(),
   LLM_GATEWAY_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+
+  // --- Coding-profile refresh (competitive-coding stats) ---
+  // Per-request timeout (ms) for an outbound call to a coding platform
+  // (Codeforces / LeetCode / CodeChef). Each platform call is isolated and
+  // times out independently; a slow platform never blocks the others.
+  // NOTE (egress): the worker must be able to reach codeforces.com,
+  // leetcode.com, and www.codechef.com for this feature to populate stats. If
+  // outbound egress to those hosts is blocked, refreshes degrade to `error`
+  // status (last-known data kept) — nothing crashes, but no fresh numbers.
+  CODING_REFRESH_TIMEOUT_MS: z.coerce.number().int().positive().default(12_000),
 });
 
 export type Env = z.infer<typeof envSchema>;

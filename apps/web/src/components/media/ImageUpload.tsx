@@ -14,6 +14,8 @@
 import { ImageOff, UploadCloud, X } from "lucide-react";
 import { useRef, useState } from "react";
 
+import type { UploadSignatureResponse } from "@codeapt/shared";
+
 import { api, parseApiError } from "../../lib/api-client.js";
 import { imageUrl } from "../../lib/cloudinary.js";
 import { Button } from "../ui/button.js";
@@ -28,6 +30,12 @@ export interface ImageUploadProps {
   disabled?: boolean;
   /** Accepted mime hint for the file picker. */
   accept?: string;
+  /**
+   * How to obtain the Cloudinary signature. Defaults to the platform-admin
+   * endpoint; feature surfaces (e.g. attendance session photos) pass their own
+   * feature-scoped fetcher so non-platform users can upload too.
+   */
+  signatureFetcher?: () => Promise<UploadSignatureResponse>;
 }
 
 export function ImageUpload({
@@ -35,6 +43,7 @@ export function ImageUpload({
   onChange,
   disabled = false,
   accept = "image/*",
+  signatureFetcher = () => api.uploads.signature(),
 }: ImageUploadProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -47,7 +56,7 @@ export function ImageUpload({
     try {
       let sig;
       try {
-        sig = await api.uploads.signature();
+        sig = await signatureFetcher();
       } catch (err) {
         const parsed = parseApiError(err);
         setError(

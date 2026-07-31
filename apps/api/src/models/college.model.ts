@@ -62,6 +62,10 @@ const creditsSchema = new Schema(
     },
     // Explicit monthly credits; null = use the tier formula.
     monthlyOverride: { type: Number, default: null },
+    // OPT-IN per-student distribution. false → student AI draws the pool as
+    // before (unchanged); true → the admin allocates the pool to students and
+    // student AI is metered per student (no allocation → no AI).
+    perStudentDistribution: { type: Boolean, default: false },
   },
   { _id: false },
 );

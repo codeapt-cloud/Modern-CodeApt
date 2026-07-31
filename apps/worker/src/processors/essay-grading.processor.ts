@@ -40,7 +40,7 @@ export const essayGradingProcessor: Processor = async (
     );
     return { ok: false };
   }
-  const { jobId, attemptId, aiEnabled, collegeId } = parsed.data;
+  const { jobId, attemptId, aiEnabled, collegeId, userId } = parsed.data;
   const log = logger.child({ queue: "default", jobId, attemptId });
 
   const doc = await ExecutionJobModel.findOne({ jobId });
@@ -91,6 +91,9 @@ export const essayGradingProcessor: Processor = async (
       aiEnabled: aiEnabled ?? true,
       // Owning college (Stage-1 AI credits) — the seam charges this grade to it.
       collegeId,
+      // Set only when the college runs per-student distribution → the seam meters
+      // this grade against the STUDENT's own allocation instead of the pool.
+      userId,
     });
 
     await ExecutionJobModel.updateOne(

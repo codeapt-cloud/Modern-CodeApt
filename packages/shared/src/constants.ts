@@ -19,6 +19,12 @@ export const QueueName = {
    * is NEVER placed here — it runs immediately while allowed.
    */
   AI_PACED: "ai-paced",
+  /**
+   * Coding-profile refresh. Carries one job PER STUDENT (fetch their linked
+   * platform stats), drained by a RATE-LIMITED worker so a daily sweep of many
+   * students never bursts hundreds of outbound calls at the coding platforms.
+   */
+  CODING_REFRESH: "coding-refresh",
 } as const;
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
 export const QUEUE_NAME_VALUES = Object.values(QueueName);
@@ -40,6 +46,23 @@ export const DAILY_CHALLENGE_JOB_NAME = "generate-daily-challenge";
  */
 export const DAILY_CHALLENGE_CRON = "1 0 * * *";
 export const DAILY_CHALLENGE_CRON_TZ = "Asia/Kolkata";
+
+/**
+ * BullMQ job names for coding-profile refresh (shared so the api producer + the
+ * worker consumer agree). The SWEEP runs on the `default` queue (name-dispatched
+ * like the daily-challenge job) and fans out one STUDENT job per linked student
+ * onto the rate-limited `coding-refresh` queue.
+ */
+export const CODING_REFRESH_SWEEP_JOB_NAME = "coding-refresh-sweep";
+export const CODING_REFRESH_STUDENT_JOB_NAME = "coding-refresh-student";
+
+/**
+ * Cron for the daily coding-profile sweep: 02:10 IST (offset from the
+ * daily-challenge job at 00:01 so the two never register/fire together). Same
+ * IST timezone; the sweep is idempotent (re-enqueuing a student is de-duped).
+ */
+export const CODING_REFRESH_CRON = "10 2 * * *";
+export const CODING_REFRESH_CRON_TZ = "Asia/Kolkata";
 
 /**
  * Per-queue configuration. `timeoutSeconds` mirrors the django-rq job timeouts;
@@ -75,6 +98,11 @@ export const QUEUE_CONFIGS: Record<QueueName, QueueConfig> = {
   },
   [QueueName.AI_PACED]: {
     name: QueueName.AI_PACED,
+    timeoutSeconds: 120,
+    priority: false,
+  },
+  [QueueName.CODING_REFRESH]: {
+    name: QueueName.CODING_REFRESH,
     timeoutSeconds: 120,
     priority: false,
   },
@@ -285,6 +313,14 @@ export const AI_GOVERNOR_DEFAULTS = {
  * limiter; surfaced read-only on the governor panel. Tunable here (code-level).
  */
 export const AI_PACED_MAX_PER_MINUTE = 10;
+
+/**
+ * Max coding-profile STUDENT refresh jobs the coding-refresh worker drains per
+ * minute. Each job makes a small number of outbound calls (one per linked
+ * platform), so this paces the daily sweep well under the coding platforms'
+ * limits. Enforced by the worker's BullMQ limiter; tunable here (code-level).
+ */
+export const CODING_REFRESH_MAX_PER_MINUTE = 20;
 
 /** Assessments: malpractice flag raised when warnings exceed this count. */
 export const EXAM_MAX_WARNINGS = 2;
@@ -689,9 +725,35 @@ export const AttendanceErrorCode = {
   MEMBER_NOT_FOUND: "MEMBER_NOT_FOUND",
   /** No attendance session with that id in this college (Prompt 2). */
   SESSION_NOT_FOUND: "SESSION_NOT_FOUND",
+  /** No photo with that id on the session (optional session photos). */
+  PHOTO_NOT_FOUND: "PHOTO_NOT_FOUND",
 } as const;
 export type AttendanceErrorCode =
   (typeof AttendanceErrorCode)[keyof typeof AttendanceErrorCode];
+
+/** Machine-readable codes for per-student AI credit distribution. */
+export const AiCreditErrorCode = {
+  /** Allocating this amount would exceed the college's distributable pool. */
+  OVER_ALLOCATION: "OVER_ALLOCATION",
+  /** A selected student was not found in this college. */
+  STUDENT_NOT_FOUND: "STUDENT_NOT_FOUND",
+  /** A referenced org-unit was not found in this college. */
+  ORG_UNIT_NOT_FOUND: "ORG_UNIT_NOT_FOUND",
+} as const;
+export type AiCreditErrorCode =
+  (typeof AiCreditErrorCode)[keyof typeof AiCreditErrorCode];
+
+/** Machine-readable codes for the coding-profile surface (UI switches on these). */
+export const CodingProfileErrorCode = {
+  /** The caller is not a college student — only students keep coding profiles. */
+  NOT_A_STUDENT: "NOT_A_STUDENT",
+  /** No coding profile / linked student with that id in this college. */
+  PROFILE_NOT_FOUND: "PROFILE_NOT_FOUND",
+  /** A referenced student was not found in this college (admin refresh). */
+  STUDENT_NOT_FOUND: "STUDENT_NOT_FOUND",
+} as const;
+export type CodingProfileErrorCode =
+  (typeof CodingProfileErrorCode)[keyof typeof CodingProfileErrorCode];
 
 /**
  * Default low-attendance threshold (%) for the analytics "defaulters" flag

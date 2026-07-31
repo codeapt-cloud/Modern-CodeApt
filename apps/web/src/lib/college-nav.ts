@@ -35,6 +35,7 @@ export type CollegeNavIcon =
   | "jobs"
   | "analytics"
   | "attendance"
+  | "coding"
   | "results";
 
 export type SectionStatus = "available" | "locked" | "coming_soon";
@@ -135,6 +136,26 @@ export const COLLEGE_SECTIONS: readonly CollegeSection[] = [
     icon: "analytics",
     path: "attendance/analytics",
     feature: CollegeFeature.ATTENDANCE,
+    comingSoon: false,
+  },
+  {
+    key: "coding-leaderboard",
+    label: "Coding leaderboard",
+    description: "Rank students by coding stats, filter by section or group + Excel.",
+    group: "Insights",
+    icon: "coding",
+    path: "coding-leaderboard",
+    feature: CollegeFeature.CODING_PROFILES,
+    comingSoon: false,
+  },
+  {
+    key: "ai-credits",
+    label: "AI credits",
+    description: "Distribute the AI credit pool to specific students.",
+    group: "People",
+    icon: "analytics",
+    path: "ai-credits",
+    feature: CollegeFeature.AI,
     comingSoon: false,
   },
   {
@@ -311,6 +332,26 @@ export const STUDENT_COLLEGE_SECTIONS: readonly CollegeSection[] = [
     icon: "attendance",
     path: "attendance",
     feature: CollegeFeature.ATTENDANCE,
+    comingSoon: false,
+  },
+  {
+    key: "my-coding",
+    label: "Coding profile",
+    description: "Link your Codeforces / LeetCode / CodeChef handles.",
+    group: "Learning",
+    icon: "coding",
+    path: "coding",
+    feature: CollegeFeature.CODING_PROFILES,
+    comingSoon: false,
+  },
+  {
+    key: "my-ai-credits",
+    label: "AI credits",
+    description: "Your AI credit allocation this period.",
+    group: "Learning",
+    icon: "analytics",
+    path: "ai-credits",
+    feature: CollegeFeature.AI,
     comingSoon: false,
   },
   {

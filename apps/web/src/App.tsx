@@ -244,6 +244,22 @@ const CollegeStudentAttendancePage = named(
   () => import("./pages/colleges/CollegeStudentAttendancePage.js"),
   "CollegeStudentAttendancePage",
 );
+const CollegeCodingProfilePage = named(
+  () => import("./pages/colleges/CollegeCodingProfilePage.js"),
+  "CollegeCodingProfilePage",
+);
+const CollegeCodingLeaderboardPage = named(
+  () => import("./pages/colleges/CollegeCodingLeaderboardPage.js"),
+  "CollegeCodingLeaderboardPage",
+);
+const CollegeAiCreditsPage = named(
+  () => import("./pages/colleges/CollegeAiCreditsPage.js"),
+  "CollegeAiCreditsPage",
+);
+const CollegeStudentAiCreditsPage = named(
+  () => import("./pages/colleges/CollegeStudentAiCreditsPage.js"),
+  "CollegeStudentAiCreditsPage",
+);
 const CollegeCoursesPage = named(
   () => import("./pages/colleges/CollegeCoursesPage.js"),
   "CollegeCoursesPage",
@@ -439,6 +455,14 @@ function CollegeAttendanceRoute() {
     <CollegeAttendancePage />
   );
 }
+function CollegeAiCreditsRoute() {
+  const { context } = useCollege();
+  return context.membership.role === Role.STUDENT ? (
+    <CollegeStudentAiCreditsPage />
+  ) : (
+    <CollegeAiCreditsPage />
+  );
+}
 
 export function App() {
   return (
@@ -578,6 +602,12 @@ export function App() {
                 path="attendance/sessions/:sessionId"
                 element={<CollegeTakeAttendancePage />}
               />
+              <Route path="coding" element={<CollegeCodingProfilePage />} />
+              <Route
+                path="coding-leaderboard"
+                element={<CollegeCodingLeaderboardPage />}
+              />
+              <Route path="ai-credits" element={<CollegeAiCreditsRoute />} />
               <Route path="courses" element={<CollegeCoursesRoute />} />
               <Route path="exams" element={<CollegeExamsRoute />} />
               <Route

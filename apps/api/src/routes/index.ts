@@ -16,6 +16,8 @@ import { collegeChallengeRouter } from "./college-challenge.routes.js";
 import { collegeEssayRouter } from "./college-essay.routes.js";
 import { collegeExamRouter } from "./college-exam.routes.js";
 import { attendanceRouter } from "./attendance.routes.js";
+import { codingProfileRouter } from "./coding-profile.routes.js";
+import { studentAiCreditRouter } from "./student-ai-credit.routes.js";
 import { facultyRouter } from "./faculty.routes.js";
 import { orgUnitRouter } from "./org-unit.routes.js";
 import { questionBankAdminRouter } from "./question-bank-admin.routes.js";
@@ -75,6 +77,12 @@ apiRouter.use(collegeCourseRouter);
 apiRouter.use(collegeExamRouter);
 
 apiRouter.use(attendanceRouter);
+// Coding profiles (net-new): student handles + stored per-platform stats,
+// tenant + `coding_profiles`-feature gated. Worker refreshes the stats.
+apiRouter.use(codingProfileRouter);
+// Per-student AI credit distribution (net-new): the college_admin carves the
+// Stage-1 pool into per-student allocations; metered at the gateway seam.
+apiRouter.use(studentAiCreditRouter);
 // College essays (Phase 4c, tenant-scoped over the reused essay engine).
 apiRouter.use(collegeEssayRouter);
 // College challenges (Phase 4d, tenant-scoped leaderboard over the daily engine).

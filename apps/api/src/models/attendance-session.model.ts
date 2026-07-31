@@ -42,6 +42,25 @@ const attendanceSessionSchema = new Schema(
     /** Who recorded attendance + when (set on the first save → completed). */
     takenBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
     takenAt: { type: Date, default: null },
+    /**
+     * OPTIONAL filing/audit photos (usually empty). Uploaded via the shared
+     * Cloudinary flow; we keep only the returned URL. Never required — a session
+     * with no photos behaves exactly as before.
+     */
+    photos: {
+      type: [
+        new Schema(
+          {
+            url: { type: String, required: true, trim: true },
+            caption: { type: String, default: "", trim: true },
+            uploadedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+            uploadedAt: { type: Date, default: Date.now },
+          },
+          { _id: true },
+        ),
+      ],
+      default: [],
+    },
   },
   { timestamps: true },
 );

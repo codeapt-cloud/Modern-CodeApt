@@ -50,6 +50,7 @@ import { Types, type HydratedDocument } from "mongoose";
 import { env } from "../config/env.js";
 import { AppError } from "../errors/app-error.js";
 import { enqueueEssayGradingJob } from "../lib/execution-queue.js";
+import { resolveStudentMeterId } from "./student-ai-credit.service.js";
 import { CollegeModel } from "../models/college.model.js";
 import { hasCreditsFor } from "./ai-credit.service.js";
 import { normalizeEntitlements } from "./college.service.js";
@@ -498,11 +499,15 @@ export async function submitEssayForTopic(
   if (aiEnabled && collegeId) {
     aiEnabled = await hasCreditsFor(collegeId, "grading", new Date());
   }
+  // If the college runs per-student distribution, meter this grading against the
+  // STUDENT's own allocation at the worker seam (undefined → college pool).
+  const meterStudentId = await resolveStudentMeterId(collegeId, userId);
   await enqueueEssayGradingJob({
     jobId,
     attemptId: attempt._id.toString(),
     aiEnabled,
     collegeId: collegeId ?? undefined,
+    userId: meterStudentId,
   });
 
   return { jobId, status: JobStatus.QUEUED };
@@ -665,6 +670,12 @@ export async function generateEssayAiFeedbackForAttempt(
       maxTokens: 800,
       feature: "essay_feedback",
       collegeId: attempt.college ? attempt.college.toString() : undefined,
+      // If the college runs per-student credit distribution, meter this against
+      // the STUDENT's own allocation instead of the pool (undefined otherwise).
+      userId: await resolveStudentMeterId(
+        attempt.college ? attempt.college.toString() : undefined,
+        attempt.user ? attempt.user.toString() : undefined,
+      ),
     },
   );
 

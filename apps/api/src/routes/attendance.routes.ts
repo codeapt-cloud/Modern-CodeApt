@@ -15,11 +15,13 @@ import { Router } from "express";
 
 import {
   addAttendanceMembersController,
+  addSessionPhotosController,
   attendanceAnalyticsController,
   attendanceImportPreviewController,
   attendanceImportTemplateController,
   attendanceRegisterReportController,
   attendanceSummaryReportController,
+  attendanceUploadSignatureController,
   createAttendanceGroupController,
   createAttendanceSessionController,
   deleteAttendanceGroupController,
@@ -30,6 +32,7 @@ import {
   listAttendanceGroupsController,
   listAttendanceSessionsController,
   removeAttendanceMemberController,
+  removeSessionPhotoController,
   saveAttendanceController,
   setAttendanceSettingsController,
   updateAttendanceGroupController,
@@ -171,4 +174,24 @@ attendanceRouter.put(
   "/c/:collegeSlug/attendance/sessions/:sessionId/attendance",
   ...author,
   saveAttendanceController,
+);
+
+// OPTIONAL session photos (filing/audit) — same manager authority. A Cloudinary
+// upload signature (feature-scoped, since the platform one is admin-only), then
+// add/remove photos by their stored URL. `uploads/signature` is literal before
+// `sessions/:sessionId/...` — distinct segment, no capture risk.
+attendanceRouter.post(
+  "/c/:collegeSlug/attendance/uploads/signature",
+  ...author,
+  attendanceUploadSignatureController,
+);
+attendanceRouter.post(
+  "/c/:collegeSlug/attendance/sessions/:sessionId/photos",
+  ...author,
+  addSessionPhotosController,
+);
+attendanceRouter.delete(
+  "/c/:collegeSlug/attendance/sessions/:sessionId/photos/:photoId",
+  ...author,
+  removeSessionPhotoController,
 );

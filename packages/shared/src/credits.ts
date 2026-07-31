@@ -105,3 +105,16 @@ export function aiCreditPeriodBounds(periodKey: string): {
 export function aiCreditsRemaining(allocated: number, consumed: number): number {
   return Math.max(0, allocated - consumed);
 }
+
+/**
+ * Per-student distribution: how much of the college pool is still DISTRIBUTABLE
+ * to students this period = pool `allocated` − Σ(students' `allocated`). Never
+ * negative. The pool is committed to a student at ALLOCATION time (this sum),
+ * so student spend later debits the student ledger — never the pool again.
+ */
+export function distributableCredits(
+  poolAllocated: number,
+  allocatedToStudents: number,
+): number {
+  return Math.max(0, poolAllocated - allocatedToStudents);
+}

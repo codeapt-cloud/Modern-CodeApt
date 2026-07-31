@@ -49,6 +49,9 @@ export interface GradeWithAiInput {
   /** Owning college (Stage-1 AI credits) — charges this grade to that college at
    * the gateway seam. Absent for individual/B2C essays → uncharged. */
   collegeId?: string;
+  /** The STUDENT to charge, set only when the college runs per-student credit
+   * distribution → the seam meters this grade against the student's allocation. */
+  userId?: string;
 }
 
 export interface AiAnalysis {
@@ -276,6 +279,8 @@ export function createLlmGrader(): EssayGrader {
           feature: "grading",
           // Charge college essays to their AI credits (seam meters when set).
           collegeId: input.collegeId,
+          // Per-student distribution: charge the student's own allocation.
+          userId: input.userId,
         },
       );
       if (parsed === null) {
@@ -322,6 +327,8 @@ export interface GradeEssayInput {
   aiEnabled?: boolean;
   /** Owning college (Stage-1 AI credits); charged at the seam when set. */
   collegeId?: string;
+  /** The STUDENT to charge (per-student distribution); metered at the seam. */
+  userId?: string;
 }
 
 export interface GradeEssayResult {
@@ -371,6 +378,7 @@ export async function gradeEssay(
       rubric: input.rubric,
       referenceKeywords: input.referenceKeywords,
       collegeId: input.collegeId,
+      userId: input.userId,
     });
   } catch (err) {
     logger.warn({ err }, "essay AI adapter threw — using deterministic floor");

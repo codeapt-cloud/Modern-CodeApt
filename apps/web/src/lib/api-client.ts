@@ -36,6 +36,14 @@ import {
   type SaveAttendanceInput,
   type UpdateAttendanceSessionInput,
   type AttendanceAnalyticsResponse,
+  type CodingProfileResponse,
+  type SetCodingHandlesInput,
+  type CodingLeaderboardResponse,
+  type CodingPlatform,
+  type CodingMetric,
+  type AiCreditDistributionResponse,
+  type AllocateStudentCreditsInput,
+  type StudentOwnAiCredit,
   type DailyQuestionType,
   type RegenerateDailyChallengeResponse,
   type AdminEssayAnalyticsListQuery,
@@ -1382,6 +1390,182 @@ export const api = {
         blob: res.data as Blob,
         filename: match?.[1] ?? "attendance-summary.xlsx",
       };
+    },
+
+    /** OPTIONAL session photos — a feature-scoped Cloudinary upload signature +
+     * add/remove by URL. Manager authority enforced server-side. */
+    uploadSignature: async (slug: string): Promise<UploadSignatureResponse> => {
+      const { data } = await http.post<UploadSignatureResponse>(
+        `${API_PREFIX}/c/${slug}/attendance/uploads/signature`,
+      );
+      return data;
+    },
+    addSessionPhotos: async (
+      slug: string,
+      sessionId: string,
+      photos: { url: string; caption?: string }[],
+    ): Promise<AttendanceSession> => {
+      const { data } = await http.post<AttendanceSession>(
+        `${API_PREFIX}/c/${slug}/attendance/sessions/${sessionId}/photos`,
+        { photos },
+      );
+      return data;
+    },
+    removeSessionPhoto: async (
+      slug: string,
+      sessionId: string,
+      photoId: string,
+    ): Promise<AttendanceSession> => {
+      const { data } = await http.delete<AttendanceSession>(
+        `${API_PREFIX}/c/${slug}/attendance/sessions/${sessionId}/photos/${photoId}`,
+      );
+      return data;
+    },
+  },
+
+  /**
+   * Coding profiles (Prompt 1). A student links their Codeforces / LeetCode /
+   * CodeChef handles and sees the STORED per-platform stats (a scheduled worker
+   * job refreshes them). Own-data-only; requires the `coding_profiles` feature.
+   */
+  codingProfiles: {
+    getMine: async (slug: string): Promise<CodingProfileResponse> => {
+      const { data } = await http.get<CodingProfileResponse>(
+        `${API_PREFIX}/c/${slug}/coding-profiles/me`,
+      );
+      return data;
+    },
+    setHandles: async (
+      slug: string,
+      body: SetCodingHandlesInput,
+    ): Promise<CodingProfileResponse> => {
+      const { data } = await http.put<CodingProfileResponse>(
+        `${API_PREFIX}/c/${slug}/coding-profiles/me/handles`,
+        body,
+      );
+      return data;
+    },
+    refreshMine: async (slug: string): Promise<{ queued: boolean }> => {
+      const { data } = await http.post<{ queued: boolean }>(
+        `${API_PREFIX}/c/${slug}/coding-profiles/me/refresh`,
+      );
+      return data;
+    },
+    refreshStudent: async (
+      slug: string,
+      userId: string,
+    ): Promise<{ queued: boolean }> => {
+      const { data } = await http.post<{ queued: boolean }>(
+        `${API_PREFIX}/c/${slug}/coding-profiles/students/${userId}/refresh`,
+      );
+      return data;
+    },
+  },
+
+  /**
+   * Coding leaderboard (Prompt 2). Admin/faculty read-only ranking over the
+   * stored coding stats, filterable by platform+metric, org-unit, and attendance
+   * group, with an .xlsx export. Requires the `coding_profiles` feature.
+   */
+  codingLeaderboard: {
+    get: async (
+      slug: string,
+      params: {
+        platform: CodingPlatform;
+        metric: CodingMetric;
+        unitId?: string;
+        groupId?: string;
+      },
+    ): Promise<CodingLeaderboardResponse> => {
+      const { data } = await http.get<CodingLeaderboardResponse>(
+        `${API_PREFIX}/c/${slug}/coding-leaderboard`,
+        { params },
+      );
+      return data;
+    },
+    /** Download the filtered leaderboard .xlsx. */
+    report: async (
+      slug: string,
+      params: {
+        platform: CodingPlatform;
+        metric: CodingMetric;
+        unitId?: string;
+        groupId?: string;
+      },
+    ): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(`${API_PREFIX}/c/${slug}/coding-leaderboard/report`, {
+        params,
+        responseType: "blob",
+      });
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? "coding-leaderboard.xlsx",
+      };
+    },
+  },
+
+  /**
+   * Per-student AI credit distribution (Stage-1 pool → per-student allocations).
+   * Admin: view/allocate/toggle + reuse the roll-number Excel preview/template.
+   * Student: their OWN allocation. Requires the `ai` feature.
+   */
+  aiCreditDistribution: {
+    get: async (slug: string): Promise<AiCreditDistributionResponse> => {
+      const { data } = await http.get<AiCreditDistributionResponse>(
+        `${API_PREFIX}/c/${slug}/ai-credits/distribution`,
+      );
+      return data;
+    },
+    setEnabled: async (
+      slug: string,
+      enabled: boolean,
+    ): Promise<AiCreditDistributionResponse> => {
+      const { data } = await http.put<AiCreditDistributionResponse>(
+        `${API_PREFIX}/c/${slug}/ai-credits/distribution/settings`,
+        { enabled },
+      );
+      return data;
+    },
+    allocate: async (
+      slug: string,
+      body: AllocateStudentCreditsInput,
+    ): Promise<AiCreditDistributionResponse> => {
+      const { data } = await http.post<AiCreditDistributionResponse>(
+        `${API_PREFIX}/c/${slug}/ai-credits/distribution/allocate`,
+        body,
+      );
+      return data;
+    },
+    importPreview: async (
+      slug: string,
+      fileBase64: string,
+    ): Promise<AttendanceImportPreviewResponse> => {
+      const { data } = await http.post<AttendanceImportPreviewResponse>(
+        `${API_PREFIX}/c/${slug}/ai-credits/distribution/preview`,
+        { fileBase64 },
+      );
+      return data;
+    },
+    template: async (slug: string): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(
+        `${API_PREFIX}/c/${slug}/ai-credits/distribution/template`,
+        { responseType: "blob" },
+      );
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? "credit-roll-numbers-template.xlsx",
+      };
+    },
+    /** The calling student's OWN allocation this period. */
+    mine: async (slug: string): Promise<StudentOwnAiCredit> => {
+      const { data } = await http.get<StudentOwnAiCredit>(
+        `${API_PREFIX}/c/${slug}/student/ai-credits`,
+      );
+      return data;
     },
   },
 

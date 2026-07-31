@@ -96,6 +96,8 @@ export const SUB_CAPABILITY_CATALOG: Record<
   [CollegeFeature.AI]: ["essay_grading", "question_generation"],
   // Attendance groups + (later) sessions. No sub-capabilities in Prompt 1.
   [CollegeFeature.ATTENDANCE]: [],
+  // Coding-profile tracking. Leaderboard arrives in Prompt 2; none in Prompt 1.
+  [CollegeFeature.CODING_PROFILES]: [],
 };
 
 /** Canonical flat key for a sub-capability toggle. */
