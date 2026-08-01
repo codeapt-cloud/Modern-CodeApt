@@ -3,19 +3,19 @@ CodeApt Neon → Mongo migration — DRY-RUN validation report
 
 == Row counts (source vs inserted — must match) ==
   [OK ] program              source=5  inserted=5
-  [OK ] user                 source=1949  inserted=1949
+  [OK ] user                 source=1992  inserted=1992
   [OK ] subject              source=9  inserted=9
   [OK ] module               source=45  inserted=45
   [OK ] essaytopic           source=4  inserted=4
   [OK ] topic                source=314  inserted=314
-  [OK ] profile              source=1949  inserted=1949
+  [OK ] profile              source=1992  inserted=1992
   [OK ] question             source=3  inserted=3
   [OK ] choice               source=12  inserted=12
   [OK ] coupon               source=2  inserted=2
-  [OK ] enrollment           source=1916  inserted=1916
-  [OK ] order                source=157  inserted=157
+  [OK ] enrollment           source=1994  inserted=1994
+  [OK ] order                source=163  inserted=163
   [OK ] quizsubmission       source=2  inserted=2
-  [OK ] topicprogress        source=2625  inserted=2625
+  [OK ] topicprogress        source=2646  inserted=2646
   [OK ] job                  source=3  inserted=3
   [OK ] jobapplication       source=5  inserted=5
   [OK ] exam                 source=79  inserted=79
@@ -23,13 +23,13 @@ CodeApt Neon → Mongo migration — DRY-RUN validation report
   [OK ] examquestion         source=1307  inserted=1307
   [OK ] examtestcase         source=70  inserted=70
   [OK ] publiclink           source=17  inserted=17
-  [OK ] counter              source=153971  inserted=153971
+  [OK ] counter              source=157368  inserted=157368
   [OK ] resetlog             source=3  inserted=3
-  [OK ] studentattempt       source=16123  inserted=16123
+  [OK ] studentattempt       source=16160  inserted=16160
   [OK ] dailyquestion        source=206  inserted=206
   [OK ] dailytestcase        source=65  inserted=65
   [OK ] dailysubmission      source=1871  inserted=1871
-  [OK ] userstreak           source=616  inserted=616
+  [OK ] userstreak           source=641  inserted=641
   [OK ] essayattempt         source=5  inserted=5
   [OK ] essayanalytics       source=0  inserted=0
   [OK ] essaydraft           source=0  inserted=0
@@ -69,19 +69,19 @@ CodeApt Neon → Mongo migration — DRY-RUN validation report
 
 == Post-insert count verification (PG source vs REAL Mongo) ==
   [OK ] program              pg=5  mongo=5
-  [OK ] user                 pg=1949  mongo=1949
+  [OK ] user                 pg=1992  mongo=1992
   [OK ] subject              pg=9  mongo=9
   [OK ] module               pg=45  mongo=45
   [OK ] essaytopic           pg=4  mongo=4
   [OK ] topic                pg=314  mongo=314
-  [OK ] profile              pg=1949  mongo=1949
+  [OK ] profile              pg=1992  mongo=1992
   [OK ] question             pg=3  mongo=3
   [OK ] choice               pg=12  mongo=12
   [OK ] coupon               pg=2  mongo=2
-  [OK ] enrollment           pg=1916  mongo=1916
-  [OK ] order                pg=157  mongo=157
+  [OK ] enrollment           pg=1994  mongo=1994
+  [OK ] order                pg=163  mongo=163
   [OK ] quizsubmission       pg=2  mongo=2
-  [OK ] topicprogress        pg=2625  mongo=2625
+  [OK ] topicprogress        pg=2646  mongo=2646
   [OK ] job                  pg=3  mongo=3
   [OK ] jobapplication       pg=5  mongo=5
   [OK ] exam                 pg=79  mongo=79
@@ -89,13 +89,13 @@ CodeApt Neon → Mongo migration — DRY-RUN validation report
   [OK ] examquestion         pg=1307  mongo=1307
   [OK ] examtestcase         pg=70  mongo=70
   [OK ] publiclink           pg=17  mongo=17
-  [OK ] counter              pg=153971  mongo=153971
+  [OK ] counter              pg=157368  mongo=157368
   [OK ] resetlog             pg=3  mongo=3
-  [OK ] studentattempt       pg=16123  mongo=16123
+  [OK ] studentattempt       pg=16160  mongo=16160
   [OK ] dailyquestion        pg=206  mongo=206
   [OK ] dailytestcase        pg=65  mongo=65
   [OK ] dailysubmission      pg=1871  mongo=1871
-  [OK ] userstreak           pg=616  mongo=616
+  [OK ] userstreak           pg=641  mongo=641
   [OK ] essayattempt         pg=5  mongo=5
   [OK ] essayanalytics       pg=0  mongo=0
   [OK ] essaydraft           pg=0  mongo=0
@@ -105,10 +105,10 @@ CodeApt Neon → Mongo migration — DRY-RUN validation report
 
 == Index build results ==
   [OK ] users.username:1
-  [OK ] users.email:1
+  [FAIL] users.email:1 — Index build failed: d2c66f05-3505-4200-9888-b667d92c0443: Collection codeapt.users ( c335b6b7-b400-4f45-b3f5-2440d7a103ea ) :: caused by :: E11000 duplicate key error collection: codeapt.users index: email_1 dup key: { email: "amulyajangili006@gmail.com" }
   [OK ] users.role:1
   [OK ] profiles.user:1
-  [OK ] profiles.rollNumber:1
+  [FAIL] profiles.rollNumber:1 — Index build failed: 1cc12469-5445-437c-9bbd-1545ff1ef32b: Collection codeapt.profiles ( 93932395-848c-44e1-b7df-c84a6ddbc024 ) :: caused by :: E11000 duplicate key error collection: codeapt.profiles index: rollNumber_1 dup key: { rollNumber: "235U1A05H4" }
   [OK ] programs.slug:1
   [OK ] programs.isVisible:1
   [OK ] subjects.slug:1
@@ -154,6 +154,7 @@ CodeApt Neon → Mongo migration — DRY-RUN validation report
   [OK ] essayattempts.status:1
   [OK ] essayanalytics.attempt:1
   [OK ] essaydrafts.attempt:1,savedAt:-1
+  → 2 index build(s) FAILED (likely a real-data duplicate — investigate).
 
 == Admin users (role=admin — eyeball this list) ==
   vsrgunturi <vsrgunturi@gmail.com>
