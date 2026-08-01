@@ -40,6 +40,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
     "pg": "^8.22.0",
+    "pg-sdk-node": "^2.0.2",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "zod": "^3.24.1"

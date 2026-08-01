@@ -95,15 +95,11 @@ const envSchema = z.object({
 
   PHONEPE_CLIENT_ID: z.string().optional(),
   PHONEPE_CLIENT_SECRET: z.string().optional(),
-  PHONEPE_MERCHANT_ID: z.string().optional(),
-  PHONEPE_CLIENT_VERSION: z.string().optional(),
+  PHONEPE_CLIENT_VERSION: z.coerce.number().int().positive().default(1),
   PHONEPE_ENV: z.enum(["SANDBOX", "PRODUCTION"]).optional(),
-  PHONEPE_CALLBACK_URL: z.string().url().optional(),
-  // X-VERIFY signing material + hosted-checkout base URL (required only when
-  // PAYMENT_GATEWAY=phonepe; validated at that adapter's boundary).
-  PHONEPE_SALT_KEY: z.string().optional(),
-  PHONEPE_SALT_INDEX: z.string().default("1"),
-  PHONEPE_BASE_URL: z.string().url().optional(),
+  // Webhook credentials, configured on the PhonePe merchant dashboard.
+  PHONEPE_WEBHOOK_USERNAME: z.string().optional(),
+  PHONEPE_WEBHOOK_PASSWORD: z.string().optional(),
   PHONEPE_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 
   AI_SERVICE_URL: z.string().url().optional(),

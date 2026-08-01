@@ -1,16 +1,16 @@
 /**
  * Real PhonePe (Standard Checkout, hosted PAY_PAGE) adapter.
  *
- * Signing (X-VERIFY): `SHA256(base64Payload + endpoint + saltKey) ### saltIndex`
- * for pay/status; for the callback PhonePe signs `SHA256(base64Response +
- * saltKey) ### saltIndex`. verifyCallback RE-COMPUTES the signature over the
- * raw `response` field and constant-time compares — a mismatch returns null and
- * NEVER grants anything.
+ * Uses the official `pg-sdk-node` v2.
+ * Webhook validation uses `validateCallback` with configured username/password
+ * rather than the legacy X-VERIFY salt/hash mechanism.
  *
  * All credentials come from env; this adapter is only selected when
  * PAYMENT_GATEWAY=phonepe, and it fails fast if its config is incomplete.
  */
-import { createHash, timingSafeEqual } from "node:crypto";
+
+import { Env, StandardCheckoutClient } from "pg-sdk-node";
+import { StandardCheckoutPayRequest } from "pg-sdk-node/dist/payments/v2/models/request/StandardCheckoutPayRequest.js";
 
 import { PaymentStatus } from "@codeapt/shared";
 
@@ -25,201 +25,162 @@ import {
   type VerifiedCallback,
 } from "./types.js";
 
-const PAY_ENDPOINT = "/pg/v1/pay";
-const X_VERIFY_HEADER = "x-verify";
-
 interface PhonePeConfig {
-  baseUrl: string;
-  merchantId: string;
-  saltKey: string;
-  saltIndex: string;
+  clientId: string;
+  clientSecret: string;
+  clientVersion: number;
+  environment: Env;
+  webhookUsername?: string;
+  webhookPassword?: string;
 }
 
 function requireConfig(): PhonePeConfig {
-  const { PHONEPE_BASE_URL, PHONEPE_MERCHANT_ID, PHONEPE_SALT_KEY } = env;
-  if (!PHONEPE_BASE_URL || !PHONEPE_MERCHANT_ID || !PHONEPE_SALT_KEY) {
+  const {
+    PHONEPE_CLIENT_ID,
+    PHONEPE_CLIENT_SECRET,
+    PHONEPE_CLIENT_VERSION,
+    PHONEPE_ENV,
+    PHONEPE_WEBHOOK_USERNAME,
+    PHONEPE_WEBHOOK_PASSWORD,
+  } = env;
+
+  if (!PHONEPE_CLIENT_ID || !PHONEPE_CLIENT_SECRET || !PHONEPE_ENV) {
     throw new PaymentGatewayError(
-      "PhonePe gateway is not configured (need PHONEPE_BASE_URL, " +
-        "PHONEPE_MERCHANT_ID, PHONEPE_SALT_KEY).",
+      "PhonePe gateway is not configured (need PHONEPE_CLIENT_ID, PHONEPE_CLIENT_SECRET, PHONEPE_ENV).",
     );
   }
+
+  // Fail fast if missing webhook creds, as we can't safely grant enrollment without them
+  if (!PHONEPE_WEBHOOK_USERNAME || !PHONEPE_WEBHOOK_PASSWORD) {
+    throw new PaymentGatewayError(
+      "PhonePe webhook credentials are not configured (need PHONEPE_WEBHOOK_USERNAME, PHONEPE_WEBHOOK_PASSWORD).",
+    );
+  }
+
   return {
-    baseUrl: PHONEPE_BASE_URL.replace(/\/$/, ""),
-    merchantId: PHONEPE_MERCHANT_ID,
-    saltKey: PHONEPE_SALT_KEY,
-    saltIndex: env.PHONEPE_SALT_INDEX,
+    clientId: PHONEPE_CLIENT_ID,
+    clientSecret: PHONEPE_CLIENT_SECRET,
+    clientVersion: PHONEPE_CLIENT_VERSION ?? 1,
+    environment: PHONEPE_ENV === "PRODUCTION" ? Env.PRODUCTION : Env.SANDBOX,
+    webhookUsername: PHONEPE_WEBHOOK_USERNAME,
+    webhookPassword: PHONEPE_WEBHOOK_PASSWORD,
   };
 }
 
-const sha256 = (input: string): string =>
-  createHash("sha256").update(input).digest("hex");
+let pgClient: StandardCheckoutClient | null = null;
 
-/** `SHA256(payload + suffix + saltKey)###saltIndex`. */
-function xVerify(payload: string, suffix: string, cfg: PhonePeConfig): string {
-  return `${sha256(payload + suffix + cfg.saltKey)}###${cfg.saltIndex}`;
-}
-
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
-async function postJson(
-  url: string,
-  body: unknown,
-  headers: Record<string, string>,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), env.PHONEPE_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      throw new PaymentGatewayError(`PhonePe responded HTTP ${res.status}`);
-    }
-    return await res.json();
-  } catch (err) {
-    if (err instanceof PaymentGatewayError) throw err;
-    throw new PaymentGatewayError("Could not reach PhonePe", err);
-  } finally {
-    clearTimeout(timer);
+function getClient(cfg: PhonePeConfig): StandardCheckoutClient {
+  if (!pgClient) {
+    pgClient = StandardCheckoutClient.getInstance(
+      cfg.clientId,
+      cfg.clientSecret,
+      cfg.clientVersion,
+      cfg.environment,
+    );
   }
+  return pgClient;
 }
 
-/** Map PhonePe's `code` to our normalized terminal status. */
-function normalizeCode(code: unknown): "success" | "failed" {
-  return code === "PAYMENT_SUCCESS" ? "success" : "failed";
+/** Map PhonePe's state to our normalized terminal status. */
+function normalizeState(state: string | undefined): "success" | "failed" {
+  if (!state) return "failed";
+  const upper = state.toUpperCase();
+  return upper === "COMPLETED" || upper === "SUCCESS" || upper === "PAYMENT_SUCCESS"
+    ? "success"
+    : "failed";
 }
 
 export function createPhonePeGateway(): PaymentGateway {
+  // Validate config on instantiation to fail fast
+  const cfg = requireConfig();
+  const client = getClient(cfg);
+
   return {
     name: "phonepe",
 
     async createOrder(input: CreateOrderInput): Promise<CreateOrderResult> {
-      const cfg = requireConfig();
-      const payload = {
-        merchantId: cfg.merchantId,
-        merchantTransactionId: input.merchantOrderId,
-        amount: input.amountPaise, // PhonePe amount is in paise
-        redirectUrl: input.redirectUrl,
-        redirectMode: "REDIRECT",
-        callbackUrl: input.callbackUrl,
-        paymentInstrument: { type: "PAY_PAGE" },
-      };
-      const base64 = Buffer.from(JSON.stringify(payload)).toString("base64");
-      const body = await postJson(
-        `${cfg.baseUrl}${PAY_ENDPOINT}`,
-        { request: base64 },
-        { [X_VERIFY_HEADER]: xVerify(base64, PAY_ENDPOINT, cfg) },
-      );
+      try {
+        // NOTE: The modern SDK doesn't take callbackUrl dynamically in the pay request.
+        // It must be statically configured in the PhonePe merchant dashboard.
+        const request = StandardCheckoutPayRequest.builder()
+          .merchantOrderId(input.merchantOrderId)
+          .amount(input.amountPaise)
+          .redirectUrl(input.redirectUrl)
+          .build();
 
-      const url = (
-        body as {
-          data?: { instrumentResponse?: { redirectInfo?: { url?: string } } };
+        const response = await client.pay(request);
+
+        if (!response.redirectUrl) {
+          throw new PaymentGatewayError("PhonePe did not return a redirect URL");
         }
-      )?.data?.instrumentResponse?.redirectInfo?.url;
-      if (typeof url !== "string" || !url) {
-        throw new PaymentGatewayError("PhonePe did not return a redirect URL");
-      }
-      return { redirectUrl: url, gatewayOrderId: input.merchantOrderId };
-    },
-
-    verifyCallback(headers, rawBody): VerifiedCallback | null {
-      const cfg = requireConfig();
-      const provided = headers[X_VERIFY_HEADER];
-      if (!provided) {
-        logger.warn("PhonePe callback missing X-VERIFY");
-        return null;
-      }
-      // PhonePe posts { response: "<base64 json>" }; it signs the base64 string.
-      let responseB64: string;
-      try {
-        const outer = JSON.parse(rawBody) as { response?: unknown };
-        if (typeof outer.response !== "string") return null;
-        responseB64 = outer.response;
-      } catch (err) {
-        logger.warn({ err }, "PhonePe callback body not JSON");
-        return null;
-      }
-
-      const expected = `${sha256(responseB64 + cfg.saltKey)}###${cfg.saltIndex}`;
-      if (!safeEqual(provided, expected)) {
-        logger.warn("PhonePe callback signature mismatch — rejecting");
-        return null;
-      }
-
-      let decoded: {
-        code?: unknown;
-        data?: { merchantTransactionId?: unknown; transactionId?: unknown };
-      };
-      try {
-        decoded = JSON.parse(
-          Buffer.from(responseB64, "base64").toString("utf8"),
-        ) as typeof decoded;
-      } catch (err) {
-        logger.warn({ err }, "PhonePe callback response not decodable");
-        return null;
-      }
-      const merchantOrderId = decoded.data?.merchantTransactionId;
-      if (typeof merchantOrderId !== "string" || !merchantOrderId) return null;
-
-      return {
-        merchantOrderId,
-        status: normalizeCode(decoded.code),
-        gatewayTxnId:
-          typeof decoded.data?.transactionId === "string"
-            ? decoded.data.transactionId
-            : null,
-      };
-    },
-
-    async fetchStatus(merchantOrderId): Promise<FetchStatusResult> {
-      const cfg = requireConfig();
-      const endpoint = `/pg/v1/status/${cfg.merchantId}/${merchantOrderId}`;
-      const controller = new AbortController();
-      const timer = setTimeout(
-        () => controller.abort(),
-        env.PHONEPE_TIMEOUT_MS,
-      );
-      try {
-        const res = await fetch(`${cfg.baseUrl}${endpoint}`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            [X_VERIFY_HEADER]: xVerify("", endpoint, cfg),
-            "X-MERCHANT-ID": cfg.merchantId,
-          },
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          throw new PaymentGatewayError(`PhonePe status HTTP ${res.status}`);
-        }
-        const body = (await res.json()) as {
-          code?: unknown;
-          data?: { transactionId?: unknown };
-        };
-        const status =
-          normalizeCode(body.code) === "success"
-            ? PaymentStatus.SUCCESS
-            : PaymentStatus.FAILED;
         return {
-          status,
-          gatewayTxnId:
-            typeof body.data?.transactionId === "string"
-              ? body.data.transactionId
-              : null,
+          redirectUrl: response.redirectUrl,
+          gatewayOrderId: input.merchantOrderId, // standard checkout uses merchantOrderId
         };
       } catch (err) {
         if (err instanceof PaymentGatewayError) throw err;
+        throw new PaymentGatewayError("Could not reach PhonePe", err);
+      }
+    },
+
+    verifyCallback(headers, rawBody): VerifiedCallback | null {
+      const authorization = headers["authorization"] || headers["Authorization"];
+      if (!authorization) {
+        logger.warn("PhonePe callback missing Authorization header");
+        return null;
+      }
+
+      try {
+        const response = client.validateCallback(
+          cfg.webhookUsername!,
+          cfg.webhookPassword!,
+          authorization,
+          rawBody,
+        );
+
+        const { payload } = response;
+        if (!payload || !payload.merchantOrderId) {
+          logger.warn("PhonePe callback payload missing merchantOrderId");
+          return null;
+        }
+
+        // We assume we want the first transactionId from paymentDetails if available
+        let gatewayTxnId = null;
+        if (payload.paymentDetails && payload.paymentDetails.length > 0) {
+          gatewayTxnId = payload.paymentDetails[0]?.transactionId;
+        }
+
+        return {
+          merchantOrderId: payload.merchantOrderId,
+          status: normalizeState(payload.state),
+          gatewayTxnId: gatewayTxnId || null,
+        };
+      } catch (err) {
+        logger.warn({ err }, "PhonePe callback signature mismatch or invalid body — rejecting");
+        return null;
+      }
+    },
+
+    async fetchStatus(merchantOrderId): Promise<FetchStatusResult> {
+      try {
+        const response = await client.getOrderStatus(merchantOrderId);
+
+        const status =
+          normalizeState(response.state) === "success"
+            ? PaymentStatus.SUCCESS
+            : PaymentStatus.FAILED;
+
+        let gatewayTxnId = null;
+        if (response.paymentDetails && response.paymentDetails.length > 0) {
+          gatewayTxnId = response.paymentDetails[0]?.transactionId;
+        }
+
+        return {
+          status,
+          gatewayTxnId: gatewayTxnId || null,
+        };
+      } catch (err) {
         throw new PaymentGatewayError("Could not reach PhonePe status", err);
-      } finally {
-        clearTimeout(timer);
       }
     },
   };
