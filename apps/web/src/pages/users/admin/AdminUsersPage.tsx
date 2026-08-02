@@ -104,8 +104,8 @@ export function AdminUsersPage() {
         }
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div className="relative min-w-[16rem] flex-1">
+      <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
           <Input
             className="pl-9"
@@ -124,7 +124,7 @@ export function AdminUsersPage() {
             setRole(v);
           }}
         >
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -170,7 +170,7 @@ export function AdminUsersPage() {
                       <div className="font-medium text-ink">
                         {u.fullName || "—"}
                       </div>
-                      <div className="text-xs text-ink-muted">{u.email}</div>
+                      <div className="text-xs text-ink-muted truncate max-w-[10rem] sm:max-w-[16rem] md:max-w-xs">{u.email}</div>
                     </TableCell>
                     <TableCell className="text-ink-secondary">
                       {u.username}

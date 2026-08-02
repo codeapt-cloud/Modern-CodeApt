@@ -59,7 +59,7 @@ export function DialogFooter({
   return (
     <div
       className={cn(
-        "mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        "sticky bottom-[-1.5rem] -mx-6 -mb-6 mt-6 flex flex-col-reverse gap-2 border-t border-subtle bg-surface-overlay p-6 sm:flex-row sm:justify-end rounded-b-2xl z-10",
         className,
       )}
       {...props}

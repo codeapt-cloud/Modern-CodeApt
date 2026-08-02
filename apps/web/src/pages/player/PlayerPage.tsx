@@ -231,7 +231,7 @@ export function PlayerPage() {
 
       <div className="lg:grid lg:grid-cols-[320px_1fr]">
         {/* Desktop sidebar */}
-        <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] border-r border-subtle bg-surface-raised lg:block">
+        <aside className="sticky top-14 hidden h-[calc(100dvh-3.5rem)] border-r border-subtle bg-surface-raised lg:block">
           {sidebar}
         </aside>
 

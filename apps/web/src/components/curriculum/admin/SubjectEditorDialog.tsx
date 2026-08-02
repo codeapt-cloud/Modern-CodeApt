@@ -141,7 +141,7 @@ export function SubjectEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[calc(100dvh-4rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit course" : "New course"}</DialogTitle>
           <DialogDescription>

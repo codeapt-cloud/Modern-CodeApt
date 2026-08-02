@@ -156,7 +156,13 @@ export function PlaygroundPage() {
               to run
             </span>
           </div>
-          <div className="h-[52vh] min-h-[320px] overflow-auto">
+          
+          <div className="sm:hidden p-6 text-center">
+            <p className="text-sm font-medium text-ink">Code editor requires a larger screen.</p>
+            <p className="text-xs text-ink-muted mt-1">Please use a tablet, laptop, or desktop to write and run code.</p>
+          </div>
+
+          <div className="hidden sm:block h-[52dvh] min-h-[320px] overflow-auto">
             <CodeEditor
               value={source}
               language={language}

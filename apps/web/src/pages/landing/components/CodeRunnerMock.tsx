@@ -160,9 +160,9 @@ export function CodeRunnerMock({
       ) : null}
 
       {/* Editor body — visually a code block; a11y-exposed as one <pre>. */}
-      <div className="relative px-4 py-4">
+      <div className="relative px-4 py-4 overflow-x-auto">
         <pre className="sr-only">{plainCode}</pre>
-        <div aria-hidden="true" className="space-y-1 font-mono text-[13px] leading-6">
+        <div aria-hidden="true" className="space-y-1 font-mono text-[13px] leading-6 min-w-max">
           {lines.map((line, li) => (
             <div
               key={li}

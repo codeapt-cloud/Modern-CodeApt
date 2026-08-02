@@ -213,10 +213,10 @@ export function CollegeCodingLeaderboardPage() {
 
       {/* Filters */}
       <Card className="flex flex-wrap items-end gap-4 p-4">
-        <div className="space-y-1">
+        <div className="space-y-1 w-full sm:w-auto">
           <span className="text-xs font-medium text-ink-secondary">Platform</span>
           <Select value={platform} onValueChange={(v) => setPlatform(v as CodingPlatform)}>
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -229,9 +229,9 @@ export function CollegeCodingLeaderboardPage() {
           </Select>
         </div>
 
-        <div className="space-y-1">
+        <div className="space-y-1 w-full sm:w-auto flex-shrink-0 overflow-x-auto pb-1">
           <span className="text-xs font-medium text-ink-secondary">Rank by</span>
-          <div className="flex gap-1">
+          <div className="flex gap-1 w-max">
             {Object.values(CodingMetric).map((m) => (
               <Button
                 key={m}
@@ -245,10 +245,10 @@ export function CollegeCodingLeaderboardPage() {
           </div>
         </div>
 
-        <div className="space-y-1">
+        <div className="space-y-1 w-full sm:w-auto">
           <span className="text-xs font-medium text-ink-secondary">Org unit</span>
           <Select value={unitId || "all"} onValueChange={(v) => setUnitId(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-56">
               <SelectValue placeholder="All units" />
             </SelectTrigger>
             <SelectContent>

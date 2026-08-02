@@ -147,7 +147,7 @@ export function BankPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
+      <DialogContent className="flex max-h-[calc(100dvh-4rem)] max-w-3xl flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{SOURCE_TITLE[source]}</DialogTitle>
           <DialogDescription>

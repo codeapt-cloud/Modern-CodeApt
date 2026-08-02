@@ -90,7 +90,7 @@ export function AdminEssayAnalyticsPage() {
         student, changes a grade, or blocks a submission.
       </Alert>
 
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row flex-wrap gap-3">
         <Select
           value={topic}
           onValueChange={(v) => {
@@ -98,7 +98,7 @@ export function AdminEssayAnalyticsPage() {
             setTopic(v);
           }}
         >
-          <SelectTrigger className="w-56">
+          <SelectTrigger className="w-full sm:w-56">
             <SelectValue placeholder="All prompts" />
           </SelectTrigger>
           <SelectContent>
@@ -117,7 +117,7 @@ export function AdminEssayAnalyticsPage() {
             setStatus(v);
           }}
         >
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-full sm:w-44">
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>

@@ -325,7 +325,11 @@ function CodeChallenge({
             {busy ? "Grading…" : "Run & submit"}
           </Button>
         </div>
-        <div className="h-[40vh] min-h-[280px] overflow-auto">
+        <div className="sm:hidden p-6 text-center border-t border-subtle">
+          <p className="text-sm font-medium text-ink">Code editor requires a larger screen.</p>
+          <p className="text-xs text-ink-muted mt-1">Please use a tablet, laptop, or desktop to write and run code.</p>
+        </div>
+        <div className="hidden sm:block h-[40dvh] min-h-[280px] overflow-auto">
           <CodeEditor
             value={source}
             language={language}

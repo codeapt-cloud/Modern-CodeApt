@@ -436,7 +436,7 @@ export function EssayComposer({
           }}
           invalid={status.state === "over"}
           placeholder="Write your essay here…"
-          className="min-h-[46vh] resize-y text-[0.95rem] leading-7"
+          className="min-h-[46dvh] resize-y text-[0.95rem] leading-7"
           aria-label="Essay text"
         />
 

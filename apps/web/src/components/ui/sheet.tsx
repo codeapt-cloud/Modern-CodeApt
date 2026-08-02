@@ -43,7 +43,7 @@ export const SheetContent = forwardRef<
     <DialogPrimitive.Overlay className="fixed inset-0 z-modal bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
     <DialogPrimitive.Content
       ref={ref}
-      className={cn(sheetVariants({ side }), "p-6", className)}
+      className={cn(sheetVariants({ side }), "overflow-y-auto p-6", className)}
       {...props}
     >
       {children}

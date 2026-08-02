@@ -123,7 +123,7 @@ function CreateGroupDialog({
 
   return (
     <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[calc(100dvh-4rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New attendance group</DialogTitle>
           <DialogDescription>
@@ -289,7 +289,7 @@ function EditGroupDialog({
 
   return (
     <Dialog open onOpenChange={(o) => (!o ? onClose() : undefined)}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[calc(100dvh-4rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit attendance group</DialogTitle>
           <DialogDescription>

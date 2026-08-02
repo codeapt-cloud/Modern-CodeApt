@@ -176,9 +176,9 @@ export function HeroSection() {
         </div>
 
         {/* Visual column */}
-        <Reveal variant="scaleIn" delay={0.15} className="relative">
+        <Reveal variant="scaleIn" delay={0.15} className="relative min-w-0 w-full">
           <ParallaxLayer speed={-0.06}>
-            <div className="relative mx-auto max-w-md lg:mr-0">
+            <div className="relative mx-auto max-w-md w-full min-w-0 lg:mr-0">
               {/* Depth: stacked translucent panels behind the card. */}
               <div
                 aria-hidden="true"
@@ -201,7 +201,7 @@ export function HeroSection() {
                 {/* Floating delight chips */}
                 <div
                   aria-hidden="true"
-                  className="glass absolute -left-4 -top-4 flex items-center gap-2 rounded-xl px-3 py-2 shadow-md"
+                  className="glass absolute -left-4 -top-4 hidden sm:flex items-center gap-2 rounded-xl px-3 py-2 shadow-md"
                 >
                   <span className="text-base">🔥</span>
                   <span className="text-xs font-semibold text-ink">
@@ -210,7 +210,7 @@ export function HeroSection() {
                 </div>
                 <div
                   aria-hidden="true"
-                  className="glass absolute -bottom-4 -right-3 flex items-center gap-2 rounded-xl px-3 py-2 shadow-md"
+                  className="glass absolute -bottom-4 -right-3 hidden sm:flex items-center gap-2 rounded-xl px-3 py-2 shadow-md"
                 >
                   <span className="flex h-5 w-5 items-center justify-center rounded-full bg-success/20 text-success-fg">
                     ✓

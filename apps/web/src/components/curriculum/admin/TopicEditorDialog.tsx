@@ -161,7 +161,7 @@ export function TopicEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[calc(100dvh-4rem)] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit topic" : "New topic"}</DialogTitle>
           <DialogDescription>

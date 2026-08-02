@@ -79,8 +79,8 @@ export function AdminOrdersPage() {
         description="Review the payment ledger. Gateway-owned fields (transaction id, status) are read-only — the order lifecycle is owned by the verified payment flow."
       />
 
-      <div className="flex flex-wrap gap-3">
-        <div className="relative min-w-[16rem] flex-1">
+      <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
           <Input
             className="pl-9"
@@ -99,7 +99,7 @@ export function AdminOrdersPage() {
             setStatus(v);
           }}
         >
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-full sm:w-44">
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>

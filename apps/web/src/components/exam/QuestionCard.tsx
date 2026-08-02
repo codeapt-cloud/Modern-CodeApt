@@ -94,7 +94,7 @@ export function QuestionCard({
         <img
           src={imageUrl(question.image)}
           alt=""
-          className="mb-4 max-h-[60vh] w-auto max-w-full rounded-lg border border-subtle"
+          className="mb-4 max-h-[60dvh] w-auto max-w-full rounded-lg border border-subtle"
         />
       ) : null}
 
@@ -295,7 +295,12 @@ function CodeSection({
         </div>
       ) : null}
 
-      <div className="h-[38vh] min-h-[260px] overflow-auto rounded-lg border border-subtle">
+      <div className="sm:hidden rounded-lg border border-warning-subtle bg-warning-subtle/30 p-4 text-center mt-4">
+        <p className="text-sm font-medium text-warning-fg">Coding questions require a larger screen.</p>
+        <p className="text-xs text-warning-fg/80 mt-1">Please use a tablet, laptop, or desktop to complete this coding exam.</p>
+      </div>
+
+      <div className="hidden sm:block h-[38dvh] min-h-[260px] overflow-auto rounded-lg border border-subtle">
         <CodeEditor
           value={code}
           language={language}

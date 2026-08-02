@@ -145,10 +145,10 @@ export function CollegeStudentsPage() {
 
       {/* Filter */}
       {flat.length > 0 ? (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
           <span className="text-sm text-ink-muted">Org-unit</span>
           <Select value={orgUnitFilter} onValueChange={setOrgUnitFilter}>
-            <SelectTrigger className="w-72">
+            <SelectTrigger className="w-full sm:w-72">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

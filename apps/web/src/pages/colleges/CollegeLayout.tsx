@@ -89,7 +89,7 @@ export function CollegeLayout() {
         user={shellUser}
         onLogout={handleLogout}
       />
-      <main className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">
+      <main className="mx-auto w-full min-w-0 max-w-7xl p-4 sm:p-6 lg:p-8">
         <Outlet
           context={
             {
