@@ -13,6 +13,7 @@
  */
 import { Footer } from "../../components/layout/Footer.js";
 import { LandingHeader } from "./LandingHeader.js";
+import { IntroVideoOverlay } from "./components/IntroVideoOverlay.js";
 import { AudienceSection } from "./sections/AudienceSection.js";
 import { ExecutionSection } from "./sections/ExecutionSection.js";
 import { FeaturesSection } from "./sections/FeaturesSection.js";
@@ -23,6 +24,7 @@ import { StatsSection } from "./sections/StatsSection.js";
 export function LandingPage() {
   return (
     <div className="flex min-h-screen flex-col bg-surface">
+      <IntroVideoOverlay />
       <LandingHeader />
       <main className="flex-1">
         <HeroSection />
