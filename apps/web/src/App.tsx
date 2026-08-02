@@ -488,8 +488,6 @@ export function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/app" element={<DashboardPage />} />
-            <Route path="/courses" element={<CatalogPage />} />
-            <Route path="/courses/:slug" element={<CourseDetailPage />} />
             <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/challenge" element={<DailyChallengePage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
@@ -640,6 +638,8 @@ export function App() {
 
         {/* Public informational + legal pages (logged-out and logged-in) */}
         <Route element={<PublicLayout />}>
+          <Route path="/courses" element={<CatalogPage />} />
+          <Route path="/courses/:slug" element={<CourseDetailPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/contact" element={<ContactPage />} />
           <Route path="/training" element={<TrainingPage />} />

@@ -34,6 +34,7 @@ import { Skeleton } from "../components/ui/skeleton.js";
 import { useToast } from "../components/ui/toast.js";
 import { api, parseApiError } from "../lib/api-client.js";
 import { useQuery } from "../lib/use-query.js";
+import { useAuth } from "../providers/AuthProvider.js";
 
 const TOPIC_META: Record<TopicType, { icon: LucideIcon; label: string }> = {
   text: { icon: FileText, label: "Article" },
@@ -53,8 +54,14 @@ export function CourseDetailPage() {
   );
 
   const [enrolling, setEnrolling] = useState(false);
+  const { status } = useAuth();
 
   const handleEnroll = async () => {
+    if (status !== "authenticated") {
+      navigate(`/login?next=/courses/${slug}`);
+      return;
+    }
+
     setEnrolling(true);
     try {
       const res = await api.curriculum.enroll(slug);

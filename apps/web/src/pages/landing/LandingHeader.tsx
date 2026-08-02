@@ -22,7 +22,7 @@ const sections = [
   { label: "Features", href: "#features" },
   { label: "Execution", href: "#execution" },
   { label: "Why CodeApt", href: "#audience" },
-  { label: "About", href: "/about" },
+  { label: "Courses", href: "/courses" },
 ];
 
 export function LandingHeader() {
