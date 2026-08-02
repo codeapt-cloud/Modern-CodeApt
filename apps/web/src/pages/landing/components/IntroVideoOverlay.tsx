@@ -15,6 +15,11 @@ export function IntroVideoOverlay() {
       // Disable scrolling on the body while the video is playing
       document.body.style.overflow = "hidden";
     }
+
+    return () => {
+      // Ensure scroll is always restored if component unmounts
+      document.body.style.overflow = "";
+    };
   }, []);
 
   useEffect(() => {
