@@ -776,3 +776,48 @@ export function studentImportTemplateCsv(): string {
   ].map((cells) => cells.map(csvCell).join(","));
   return [header, ...examples].join("\r\n") + "\r\n";
 }
+
+export async function resetStudentPassword(
+  collegeId: string,
+  actor: StudentActor,
+  studentId: string,
+): Promise<{ ok: boolean }> {
+  const scope = createTenantScope(collegeId);
+  const actorScope = await resolveActorScope(scope, actor);
+
+  if (!Types.ObjectId.isValid(studentId)) {
+    throw new AppError(
+      "Student not found",
+      404,
+      StudentErrorCode.STUDENT_NOT_FOUND,
+    );
+  }
+
+  const user = await UserModel.findOne({
+    _id: studentId,
+    ...scope.filter(),
+  });
+
+  if (!user) {
+    throw new AppError(
+      "Student not found",
+      404,
+      StudentErrorCode.STUDENT_NOT_FOUND,
+    );
+  }
+
+  if (user.orgUnit && !inScope(actorScope, user.orgUnit.toString())) {
+    throw new AppError(
+      "You do not have permission to manage this student",
+      403,
+      StudentErrorCode.ORG_UNIT_OUT_OF_SCOPE,
+    );
+  }
+
+  user.passwordHash = await hashPassword("Welcome123!");
+  user.forcePasswordChange = true;
+  user.tokenVersion += 1;
+  await user.save();
+
+  return { ok: true };
+}

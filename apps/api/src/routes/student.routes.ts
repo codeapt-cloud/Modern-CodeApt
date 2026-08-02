@@ -21,6 +21,7 @@ import {
   previewStudentImportController,
   studentImportTemplateController,
   updateStudentController,
+  resetStudentPasswordController,
 } from "../controllers/student-admin.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
 import { requireAuth } from "../middleware/require-auth.js";
@@ -80,4 +81,10 @@ studentRouter.delete(
   ...tenant,
   requireFaculty,
   deactivateStudentController,
+);
+studentRouter.post(
+  "/c/:collegeSlug/students/:studentId/reset-password",
+  ...tenant,
+  requireFaculty,
+  resetStudentPasswordController,
 );

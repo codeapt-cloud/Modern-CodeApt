@@ -1126,6 +1126,11 @@ export const api = {
       );
       return data;
     },
+    resetPassword: async (slug: string, id: string): Promise<void> => {
+      await http.post(
+        `${API_PREFIX}/c/${slug}/students/${id}/reset-password`,
+      );
+    },
     /** Dry-run: per-row verdicts + summary. Writes nothing. */
     importPreview: async (
       slug: string,
@@ -2566,6 +2571,9 @@ export const api = {
         `${API_PREFIX}/admin/users/${id}/enrollments/${enrollmentId}`,
       );
       return data;
+    },
+    resetPassword: async (id: string): Promise<void> => {
+      await http.post(`${API_PREFIX}/admin/users/${id}/reset-password`);
     },
     /** Download the per-college performance workbook as a blob (auth cookie rides along). */
     performanceBlob: async (): Promise<{ blob: Blob; filename: string }> => {

@@ -98,6 +98,19 @@ export function CollegeStudentsPage() {
     }
   }
 
+  async function resetPassword(s: CollegeStudent) {
+    if (!confirm("Reset this student's password to 'Welcome123!'? They will be forced to change it on their next login.")) return;
+    setBusyId(s.id);
+    try {
+      await api.collegeStudents.resetPassword(slug, s.id);
+      toast({ variant: "success", title: `Password reset for ${s.fullName}` });
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function activate(s: CollegeStudent) {
     setBusyId(s.id);
     try {
@@ -248,6 +261,14 @@ export function CollegeStudentsPage() {
                           Activate
                         </Button>
                       )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === s.id}
+                        onClick={() => void resetPassword(s)}
+                      >
+                        Reset Password
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>

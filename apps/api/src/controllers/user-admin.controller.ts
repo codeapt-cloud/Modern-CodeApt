@@ -94,3 +94,13 @@ export const adminExportCollegePerformanceController = asyncHandler(
     res.status(200).send(buffer);
   },
 );
+
+export const adminResetUserPasswordController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await admin.resetUserPasswordAdmin(req.params.userId ?? ""),
+      );
+  },
+);

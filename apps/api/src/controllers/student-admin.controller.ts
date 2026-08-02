@@ -143,3 +143,17 @@ export const studentImportTemplateController = asyncHandler(
     res.status(200).send(csv);
   },
 );
+
+export const resetStudentPasswordController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await students.resetStudentPassword(
+          tenantCollegeId(req),
+          actor(req),
+          req.params.studentId ?? "",
+        ),
+      );
+  },
+);

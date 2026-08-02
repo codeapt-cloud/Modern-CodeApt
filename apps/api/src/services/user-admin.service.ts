@@ -24,6 +24,7 @@ import {
   buildCollegePerformanceWorkbook,
   type CollegePerformanceRow,
 } from "../lib/user-report-excel.js";
+import { hashPassword } from "../lib/password.js";
 import { StudentExamAttemptModel } from "../models/assessment.model.js";
 import {
   DailySubmissionModel,
@@ -580,4 +581,15 @@ export async function unenrollUser(
     );
   }
   return getUserDetailAdmin(targetId);
+}
+
+export async function resetUserPasswordAdmin(
+  userId: string,
+): Promise<{ ok: boolean }> {
+  const target = await loadUser(userId);
+  target.passwordHash = await hashPassword("Welcome123!");
+  target.forcePasswordChange = true;
+  target.tokenVersion += 1;
+  await target.save();
+  return { ok: true };
 }

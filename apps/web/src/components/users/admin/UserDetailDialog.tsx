@@ -225,6 +225,21 @@ export function UserDetailDialog({
                 >
                   Edit profile
                 </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirm({
+                      title: "Reset password?",
+                      body: "The password will be reset to 'Welcome123!' and the user will be forced to change it on their next login. This will also log them out of all active sessions.",
+                      confirmLabel: "Reset password",
+                      run: () => api.adminUsers.resetPassword(userId),
+                    });
+                  }}
+                >
+                  Reset password
+                </Button>
                 {isSelf ? (
                   <span className="text-xs text-ink-muted">
                     (this is you — self-deactivate / self-demote are blocked)

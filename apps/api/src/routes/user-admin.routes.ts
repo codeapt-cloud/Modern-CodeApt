@@ -18,6 +18,7 @@ import {
   adminSetUserRoleController,
   adminUnenrollUserController,
   adminUpdateUserProfileController,
+  adminResetUserPasswordController,
 } from "../controllers/user-admin.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
 import { requireAdmin } from "../middleware/require-role.js";
@@ -57,4 +58,9 @@ userAdminRouter.delete(
   "/admin/users/:userId/enrollments/:enrollmentId",
   ...admin,
   adminUnenrollUserController,
+);
+userAdminRouter.post(
+  "/admin/users/:userId/reset-password",
+  ...admin,
+  adminResetUserPasswordController,
 );
