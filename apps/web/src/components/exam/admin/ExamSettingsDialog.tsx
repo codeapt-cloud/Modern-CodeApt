@@ -113,7 +113,7 @@ export function ExamSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-4rem)] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Exam settings" : "Open an exam"}</DialogTitle>
           <DialogDescription>
