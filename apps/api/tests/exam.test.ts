@@ -206,6 +206,8 @@ describe("attempt lifecycle + grading", () => {
     const attemptId = start.body.attemptId as string;
     expect(start.body.totalSections).toBe(2);
     expect(start.body.sectionRemainingSeconds).toBeGreaterThan(0);
+    // Calculator defaults on, so the runner payload advertises it.
+    expect(start.body.calculatorEnabled).toBe(true);
     // Sanitization: no correctOptions anywhere in the section payload.
     expect(JSON.stringify(start.body)).not.toContain("correctOptions");
     const q1 = start.body.questions.find(
@@ -285,6 +287,20 @@ describe("attempt lifecycle + grading", () => {
       .set(auth(token));
     expect(fin2.body.score).toBe(20);
     expect(fin2.body.status).toBe("graded");
+  });
+
+  it("propagates a disabled calculator into the section view", async () => {
+    const { token, userId } = await registerAndLogin();
+    const { exam } = await makeExam({ enroll: userId });
+    await ExamModel.updateOne(
+      { _id: exam._id },
+      { $set: { calculatorEnabled: false } },
+    );
+    const start = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    expect(start.status).toBe(201);
+    expect(start.body.calculatorEnabled).toBe(false);
   });
 
   it("grades MCQ_SINGLE strictly and MCQ_MULTI by set equality", async () => {

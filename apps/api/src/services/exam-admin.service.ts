@@ -70,10 +70,17 @@ export async function upsertExam(input: {
   topicId: string;
   title: string;
   passPercentage: number;
+  calculatorEnabled: boolean;
 }): Promise<AdminExamDetail> {
   const exam = await ExamModel.findOneAndUpdate(
     { topic: new Types.ObjectId(input.topicId) },
-    { $set: { title: input.title, passPercentage: input.passPercentage } },
+    {
+      $set: {
+        title: input.title,
+        passPercentage: input.passPercentage,
+        calculatorEnabled: input.calculatorEnabled,
+      },
+    },
     { upsert: true, new: true },
   );
   return getAdminExamDetail(exam._id.toString());
@@ -170,6 +177,7 @@ export async function getAdminExamDetail(
     title: exam.title,
     totalMarks: exam.totalMarks,
     passPercentage: exam.passPercentage,
+    calculatorEnabled: exam.calculatorEnabled,
     sections: sections.map((s) => ({
       id: s._id.toString(),
       name: s.name,

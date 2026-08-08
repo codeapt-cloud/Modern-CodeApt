@@ -25,6 +25,7 @@ import {
 } from "../../ui/dialog.js";
 import { FormField } from "../../ui/form-field.js";
 import { Input } from "../../ui/input.js";
+import { Switch } from "../../ui/switch.js";
 import { useToast } from "../../ui/toast.js";
 import { OrgUnitTargetPicker } from "./OrgUnitTargetPicker.js";
 
@@ -32,6 +33,7 @@ export interface CollegeExamSettingsInitial {
   id: string;
   title: string;
   passPercentage: number;
+  calculatorEnabled: boolean;
   orgUnitIds: string[];
 }
 
@@ -62,6 +64,9 @@ export function CollegeExamSettingsDialog({
   const [passPercentage, setPassPercentage] = useState(
     initial?.passPercentage ?? 40,
   );
+  const [calculatorEnabled, setCalculatorEnabled] = useState(
+    initial?.calculatorEnabled ?? true,
+  );
   const [orgUnitIds, setOrgUnitIds] = useState<string[]>(
     initial?.orgUnitIds ?? [],
   );
@@ -78,6 +83,7 @@ export function CollegeExamSettingsDialog({
         await api.collegeExams.update(slug, initial.id, {
           title: title.trim(),
           passPercentage,
+          calculatorEnabled,
           orgUnitIds,
         });
         toast({ variant: "success", title: "Exam updated" });
@@ -87,6 +93,7 @@ export function CollegeExamSettingsDialog({
         const detail = await api.collegeExams.create(slug, {
           title: title.trim(),
           passPercentage,
+          calculatorEnabled,
           orgUnitIds,
         });
         toast({ variant: "success", title: "Exam created" });
@@ -140,6 +147,19 @@ export function CollegeExamSettingsDialog({
               }
             />
           </FormField>
+
+          <label className="flex items-center gap-2">
+            <Switch
+              checked={calculatorEnabled}
+              onCheckedChange={setCalculatorEnabled}
+            />
+            <span className="text-sm text-ink">
+              Calculator{" "}
+              <span className="text-ink-muted">
+                — show the in-exam calculator to candidates
+              </span>
+            </span>
+          </label>
 
           <FormField
             label="Target cohorts"

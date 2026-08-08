@@ -241,6 +241,7 @@ export async function createCollegeExam(
     scope.attach({
       title: input.title,
       passPercentage: input.passPercentage,
+      calculatorEnabled: input.calculatorEnabled,
       orgUnits,
       isPublished: false,
     }),
@@ -280,6 +281,7 @@ export async function listCollegeExams(
         title: exam.title,
         totalMarks: exam.totalMarks,
         passPercentage: exam.passPercentage,
+        calculatorEnabled: exam.calculatorEnabled,
         sectionCount,
         questionCount,
         isPublished: exam.isPublished,
@@ -315,6 +317,8 @@ export async function updateCollegeExam(
   if (input.title !== undefined) exam.title = input.title;
   if (input.passPercentage !== undefined)
     exam.passPercentage = input.passPercentage;
+  if (input.calculatorEnabled !== undefined)
+    exam.calculatorEnabled = input.calculatorEnabled;
   if (input.orgUnitIds !== undefined) {
     const actorScope = await resolveActorScope(scope, actor);
     exam.orgUnits = await validateTargetUnits(

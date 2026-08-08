@@ -172,14 +172,16 @@ export function ExamRunner({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCalcOpen(true)}
-              aria-label="Open calculator"
-            >
-              <CalculatorIcon className="h-4 w-4" /> Calculator
-            </Button>
+            {view.calculatorEnabled ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCalcOpen(true)}
+                aria-label="Open calculator"
+              >
+                <CalculatorIcon className="h-4 w-4" /> Calculator
+              </Button>
+            ) : null}
             {warnings > 0 ? (
               <span
                 className={cn(
@@ -359,8 +361,11 @@ export function ExamRunner({
         </DialogContent>
       </Dialog>
 
-      {/* Floating calculator — pure UI, opened on demand from the header. */}
-      {calcOpen ? <ExamCalculator onClose={() => setCalcOpen(false)} /> : null}
+      {/* Floating calculator — pure UI, opened on demand from the header.
+          Gated on the per-exam toggle so a disabled exam can never surface it. */}
+      {view.calculatorEnabled && calcOpen ? (
+        <ExamCalculator onClose={() => setCalcOpen(false)} />
+      ) : null}
     </div>
   );
 }

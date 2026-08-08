@@ -218,6 +218,7 @@ async function buildSectionView(
     status: attempt.status as ExamAttemptStatus,
     examId: exam._id.toString(),
     examTitle: await resolveExamDisplayTitle(exam),
+    calculatorEnabled: exam.calculatorEnabled,
     sectionIndex,
     totalSections: sections.length,
     section: {

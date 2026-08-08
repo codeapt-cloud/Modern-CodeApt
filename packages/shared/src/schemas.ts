@@ -844,6 +844,8 @@ export const attemptSectionViewSchema = z.object({
   status: attemptStatusSchema,
   examId: z.string(),
   examTitle: z.string(),
+  /** Whether the in-exam calculator is available for this exam. */
+  calculatorEnabled: z.boolean(),
   sectionIndex: z.number().int().nonnegative(),
   totalSections: z.number().int().positive(),
   section: z.object({
@@ -991,6 +993,7 @@ export const adminExamUpsertSchema = z.object({
   topicId: z.string().min(1),
   title: z.string().min(1),
   passPercentage: z.number().int().min(0).max(100).default(40),
+  calculatorEnabled: z.boolean().default(true),
 });
 export type AdminExamUpsert = z.infer<typeof adminExamUpsertSchema>;
 
@@ -1086,6 +1089,7 @@ export const adminExamDetailSchema = z.object({
   title: z.string(),
   totalMarks: z.number().int().nonnegative(),
   passPercentage: z.number().int().min(0).max(100),
+  calculatorEnabled: z.boolean(),
   sections: z.array(adminSectionSchema),
   publicLinks: z.array(publicLinkSchema),
 });
@@ -4720,6 +4724,7 @@ export type CollegeSummaryResponse = z.infer<
 export const createCollegeExamSchema = z.object({
   title: z.string().trim().min(1).max(200),
   passPercentage: z.number().int().min(0).max(100).default(40),
+  calculatorEnabled: z.boolean().default(true),
   /**
    * Target org-units (empty = the whole college). A college_admin may leave it
    * empty (college-wide) or target any units; a faculty member MUST target
@@ -4733,6 +4738,7 @@ export const updateCollegeExamSchema = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
     passPercentage: z.number().int().min(0).max(100).optional(),
+    calculatorEnabled: z.boolean().optional(),
     orgUnitIds: z.array(z.string().min(1)).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
@@ -4751,6 +4757,7 @@ export const collegeExamSummarySchema = z.object({
   title: z.string(),
   totalMarks: z.number().int().nonnegative(),
   passPercentage: z.number().int().min(0).max(100),
+  calculatorEnabled: z.boolean(),
   sectionCount: z.number().int().nonnegative(),
   questionCount: z.number().int().nonnegative(),
   isPublished: z.boolean(),

@@ -55,6 +55,10 @@ const examSchema = new Schema(
     title: { type: String, required: true, trim: true },
     totalMarks: { type: Number, default: 0, min: 0 },
     passPercentage: { type: Number, default: 40, min: 0, max: 100 },
+    // Whether the in-exam calculator is available to candidates. Defaults on to
+    // preserve the always-available calculator behavior for existing exams;
+    // staff can disable it per-exam.
+    calculatorEnabled: { type: Boolean, default: true },
   },
   { timestamps: true },
 );
