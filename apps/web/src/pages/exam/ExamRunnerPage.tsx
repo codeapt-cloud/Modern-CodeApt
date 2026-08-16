@@ -12,6 +12,7 @@ import { ExamRunner } from "../../components/exam/ExamRunner.js";
 import { ReadyScreen } from "../../components/exam/ReadyScreen.js";
 import { Alert } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
+import { Input } from "../../components/ui/input.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { api, parseApiError } from "../../lib/api-client.js";
 import { useQuery } from "../../lib/use-query.js";
@@ -40,8 +41,15 @@ export function ExamRunnerPage() {
   const [started, setStarted] = useState<StartAttemptResponse | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+
+  const needsCode = exam?.accessCodeEnabled ?? false;
 
   const begin = async (): Promise<void> => {
+    if (needsCode && !accessCode.trim()) {
+      setError("Enter the start code given by your invigilator.");
+      return;
+    }
     setStarting(true);
     setError("");
     // Request fullscreen from the user gesture (best-effort).
@@ -50,10 +58,11 @@ export function ExamRunnerPage() {
     } catch {
       /* fullscreen may be denied; the exam still runs */
     }
+    const code = accessCode.trim() || undefined;
     try {
       const res = collegeSlug
-        ? await api.collegeExams.studentStart(collegeSlug, examId)
-        : await api.exams.start(examId);
+        ? await api.collegeExams.studentStart(collegeSlug, examId, code)
+        : await api.exams.start(examId, code);
       setStarted(res);
     } catch (err) {
       setError(parseApiError(err).message);
@@ -101,9 +110,24 @@ export function ExamRunnerPage() {
         passPercentage: exam.passPercentage,
       }}
       action={
-        <div className="flex flex-col items-center gap-3">
+        <div className="flex w-full max-w-sm flex-col items-center gap-3">
+          {needsCode ? (
+            <Input
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              placeholder="Start code"
+              aria-label="Start code"
+              className="text-center"
+              maxLength={64}
+            />
+          ) : null}
           {error ? <Alert variant="error">{error}</Alert> : null}
-          <Button size="lg" onClick={() => void begin()} loading={starting}>
+          <Button
+            size="lg"
+            onClick={() => void begin()}
+            loading={starting}
+            disabled={needsCode && !accessCode.trim()}
+          >
             Begin exam
           </Button>
         </div>

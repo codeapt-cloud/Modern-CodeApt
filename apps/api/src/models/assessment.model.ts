@@ -59,6 +59,12 @@ const examSchema = new Schema(
     // preserve the always-available calculator behavior for existing exams;
     // staff can disable it per-exam.
     calculatorEnabled: { type: Boolean, default: true },
+    // Optional per-exam start-code gate (college exams). When enabled, a student
+    // must enter `accessCode` (announced by faculty right before the exam) to
+    // start. Defaults off → no gate, preserving existing behavior. The code is
+    // stored as-authored so faculty can read it back.
+    accessCodeEnabled: { type: Boolean, default: false },
+    accessCode: { type: String, default: "" },
   },
   { timestamps: true },
 );
@@ -210,6 +216,10 @@ const publicExamLinkSchema = new Schema(
     isActive: { type: Boolean, default: true },
     startTime: { type: Date },
     endTime: { type: Date },
+    // Optional start-code gate for anonymous takers (super-admin public links).
+    // When enabled, the organiser reads `accessCode` out right before the exam.
+    accessCodeEnabled: { type: Boolean, default: false },
+    accessCode: { type: String, default: "" },
   },
   { timestamps: true },
 );

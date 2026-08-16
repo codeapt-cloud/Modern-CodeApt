@@ -21,6 +21,7 @@ import {
   examBulkUploadKindSchema,
   examBulkUploadRequestSchema,
   setExamPublishSchema,
+  startAttemptRequestSchema,
   updateCollegeExamSchema,
 } from "@codeapt/shared";
 import type { Request, Response } from "express";
@@ -411,6 +412,7 @@ export const listStudentCollegeExamsController = asyncHandler(
 
 export const startStudentCollegeExamController = asyncHandler(
   async (req: Request, res: Response) => {
+    const { accessCode } = startAttemptRequestSchema.parse(req.body ?? {});
     res
       .status(201)
       .json(
@@ -418,6 +420,7 @@ export const startStudentCollegeExamController = asyncHandler(
           tenantId(req),
           actor(req).userId,
           req.params.examId ?? "",
+          accessCode,
         ),
       );
   },

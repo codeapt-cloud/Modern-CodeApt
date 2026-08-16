@@ -41,6 +41,7 @@ import { optionalAuth } from "../middleware/optional-auth.js";
 import {
   executeRateLimiter,
   publicExamRateLimiter,
+  startAttemptRateLimiter,
 } from "../middleware/rate-limit.js";
 import { requireAdmin } from "../middleware/require-role.js";
 import { requireAuth } from "../middleware/require-auth.js";
@@ -54,7 +55,12 @@ const engine = [optionalAuth];
 
 // --- Student browse + attempt start (requires login) ---
 examRouter.get("/exams", ...authed, listExamsController);
-examRouter.post("/exams/:examId/attempts", ...authed, startAttemptController);
+examRouter.post(
+  "/exams/:examId/attempts",
+  ...authed,
+  startAttemptRateLimiter,
+  startAttemptController,
+);
 
 // --- Attempt engine (owner session OR attempt token) ---
 examRouter.get("/attempts/:attemptId/section", ...engine, getSectionController);

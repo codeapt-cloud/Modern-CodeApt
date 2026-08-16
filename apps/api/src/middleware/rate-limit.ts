@@ -110,6 +110,28 @@ export const aiProviderTestRateLimiter = rateLimit({
   },
 });
 
+/**
+ * Per-user rate limit for AUTHENTICATED exam-attempt starts (individual +
+ * college). A start can be code-gated, so this throttles start-code guessing —
+ * the anonymous public start is already per-IP limited below. The cap is modest
+ * (a legitimate student starts an exam rarely, with a few retries for typos).
+ * Skipped under NODE_ENV=test.
+ */
+export const startAttemptRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => env.NODE_ENV === "test",
+  keyGenerator: (req) => req.auth?.userId ?? req.ip ?? "anonymous",
+  message: {
+    error: {
+      message: "Too many start attempts, please slow down and try again shortly",
+      code: "RATE_LIMITED",
+    },
+  },
+});
+
 /** Per-IP rate limit for anonymous public-exam starts. Skipped under test. */
 export const publicExamRateLimiter = rateLimit({
   windowMs: PUBLIC_EXAM_RATE_LIMIT_WINDOW_MS,

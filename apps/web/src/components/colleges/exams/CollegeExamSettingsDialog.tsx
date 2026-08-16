@@ -34,6 +34,8 @@ export interface CollegeExamSettingsInitial {
   title: string;
   passPercentage: number;
   calculatorEnabled: boolean;
+  accessCodeEnabled: boolean;
+  accessCode: string;
   orgUnitIds: string[];
 }
 
@@ -67,6 +69,10 @@ export function CollegeExamSettingsDialog({
   const [calculatorEnabled, setCalculatorEnabled] = useState(
     initial?.calculatorEnabled ?? true,
   );
+  const [accessCodeEnabled, setAccessCodeEnabled] = useState(
+    initial?.accessCodeEnabled ?? false,
+  );
+  const [accessCode, setAccessCode] = useState(initial?.accessCode ?? "");
   const [orgUnitIds, setOrgUnitIds] = useState<string[]>(
     initial?.orgUnitIds ?? [],
   );
@@ -74,6 +80,8 @@ export function CollegeExamSettingsDialog({
   const [submitting, setSubmitting] = useState(false);
 
   const targetingValid = canTarget(orgUnitIds, isAdmin);
+  // A code gate that's ON needs a code of at least 4 chars (server enforces too).
+  const accessCodeValid = !accessCodeEnabled || accessCode.trim().length >= 4;
 
   const submit = async (): Promise<void> => {
     setFormError("");
@@ -84,6 +92,8 @@ export function CollegeExamSettingsDialog({
           title: title.trim(),
           passPercentage,
           calculatorEnabled,
+          accessCodeEnabled,
+          accessCode: accessCodeEnabled ? accessCode.trim() : "",
           orgUnitIds,
         });
         toast({ variant: "success", title: "Exam updated" });
@@ -94,6 +104,8 @@ export function CollegeExamSettingsDialog({
           title: title.trim(),
           passPercentage,
           calculatorEnabled,
+          accessCodeEnabled,
+          accessCode: accessCodeEnabled ? accessCode.trim() : "",
           orgUnitIds,
         });
         toast({ variant: "success", title: "Exam created" });
@@ -161,6 +173,35 @@ export function CollegeExamSettingsDialog({
             </span>
           </label>
 
+          <div className="space-y-2">
+            <label className="flex items-center gap-2">
+              <Switch
+                checked={accessCodeEnabled}
+                onCheckedChange={setAccessCodeEnabled}
+              />
+              <span className="text-sm text-ink">
+                Require a start code{" "}
+                <span className="text-ink-muted">
+                  — students enter this code to start; read it out right before
+                  the exam
+                </span>
+              </span>
+            </label>
+            {accessCodeEnabled ? (
+              <FormField
+                label="Start code"
+                hint="At least 4 characters. Case-insensitive."
+              >
+                <Input
+                  value={accessCode}
+                  placeholder="e.g. TIGER24"
+                  onChange={(e) => setAccessCode(e.target.value)}
+                  maxLength={64}
+                />
+              </FormField>
+            ) : null}
+          </div>
+
           <FormField
             label="Target cohorts"
             hint={
@@ -185,7 +226,7 @@ export function CollegeExamSettingsDialog({
           <Button
             type="button"
             loading={submitting}
-            disabled={title.trim() === "" || !targetingValid}
+            disabled={title.trim() === "" || !targetingValid || !accessCodeValid}
             onClick={() => void submit()}
           >
             {isEdit ? "Save changes" : "Create exam"}

@@ -11,6 +11,7 @@ import {
 } from "@codeapt/shared";
 
 import { AppError } from "../errors/app-error.js";
+import { assertAccessCode } from "../lib/access-code.js";
 import { resolveExamDisplayTitle } from "../lib/exam-title.js";
 import { PublicExamLinkModel, type Exam } from "../models/assessment.model.js";
 import {
@@ -45,11 +46,15 @@ export async function getPublicAvailability(
     return {
       available: false,
       reason: ExamErrorCode.LINK_UNAVAILABLE,
+      accessCodeEnabled: false,
       exam: null,
     };
   }
   const reason = windowReason(link, new Date());
-  if (reason) return { available: false, reason, exam: null };
+  // Whether a start code is required — a boolean only, never the code itself.
+  const accessCodeEnabled = link.accessCodeEnabled && link.accessCode.length > 0;
+  if (reason)
+    return { available: false, reason, accessCodeEnabled, exam: null };
 
   const exam = (await requireExam(
     link.exam.toString(),
@@ -62,6 +67,7 @@ export async function getPublicAvailability(
   return {
     available: true,
     reason: null,
+    accessCodeEnabled,
     exam: {
       title: await resolveExamDisplayTitle(exam),
       totalMarks: exam.totalMarks,
@@ -74,7 +80,7 @@ export async function getPublicAvailability(
 
 export async function startPublicAttempt(
   token: string,
-  identity: { rollNumber: string; collegeName: string },
+  identity: { rollNumber: string; collegeName: string; accessCode?: string },
 ): Promise<StartAttemptResponse> {
   const link = await resolveLink(token);
   if (!link) {
@@ -92,6 +98,9 @@ export async function startPublicAttempt(
       ExamErrorCode.LINK_UNAVAILABLE,
     );
   }
+  // Optional per-link start-code gate (no attempt counter here, but validate
+  // before creating the attempt so a forged/blank code never starts one).
+  assertAccessCode(link.accessCodeEnabled, link.accessCode, identity.accessCode);
 
   const exam = (await requireExam(
     link.exam.toString(),

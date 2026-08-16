@@ -29,11 +29,18 @@ export function PublicExamPage() {
   const [started, setStarted] = useState<StartAttemptResponse | null>(null);
   const [rollNumber, setRollNumber] = useState("");
   const [collegeName, setCollegeName] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
 
+  const needsCode = data?.accessCodeEnabled ?? false;
+
   const begin = async (): Promise<void> => {
     if (!rollNumber.trim() || !collegeName.trim()) return;
+    if (needsCode && !accessCode.trim()) {
+      setError("Enter the start code given by the organiser.");
+      return;
+    }
     setStarting(true);
     setError("");
     try {
@@ -45,6 +52,7 @@ export function PublicExamPage() {
       const res = await api.exams.publicStart(token, {
         rollNumber: rollNumber.trim(),
         collegeName: collegeName.trim(),
+        accessCode: accessCode.trim() || undefined,
       });
       setStarted(res);
     } catch (err) {
@@ -118,12 +126,26 @@ export function PublicExamPage() {
             required
             aria-label="College name"
           />
+          {needsCode ? (
+            <Input
+              placeholder="Start code"
+              value={accessCode}
+              onChange={(e) => setAccessCode(e.target.value)}
+              required
+              aria-label="Start code"
+              maxLength={64}
+            />
+          ) : null}
           {error ? <Alert variant="error">{error}</Alert> : null}
           <Button
             type="submit"
             size="lg"
             loading={starting}
-            disabled={!rollNumber.trim() || !collegeName.trim()}
+            disabled={
+              !rollNumber.trim() ||
+              !collegeName.trim() ||
+              (needsCode && !accessCode.trim())
+            }
           >
             Begin exam
           </Button>

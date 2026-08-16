@@ -18,6 +18,7 @@ import {
   examBulkUploadRequestSchema,
   publicStartRequestSchema,
   saveSectionAnswersRequestSchema,
+  startAttemptRequestSchema,
   submitAttemptRequestSchema,
 } from "@codeapt/shared";
 import type { Request, Response } from "express";
@@ -60,9 +61,11 @@ export const listExamsController = asyncHandler(
 
 export const startAttemptController = asyncHandler(
   async (req: Request, res: Response) => {
+    const { accessCode } = startAttemptRequestSchema.parse(req.body ?? {});
     const data = await engine.startAttempt(
       requireUserId(req),
       req.params.examId ?? "",
+      accessCode,
     );
     res.status(201).json(data);
   },

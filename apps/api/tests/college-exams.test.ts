@@ -206,6 +206,42 @@ describe("college exams — authoring, taking, results (reused engine)", () => {
     expect(results.body.items[0].rollNumber).toBe("R1");
   });
 
+  it("gates a college exam start behind its per-exam access code", async () => {
+    const { adminToken } = await setupCollege("ce-code");
+    const dept = await createUnit("ce-code", adminToken, {
+      type: "department",
+      name: "CSE",
+    });
+    const examId = await authorPublishedExam("ce-code", adminToken);
+    // Turn the code gate on (faculty read the code out before the exam).
+    const upd = await request(app)
+      .patch(`/api/c/ce-code/exams/${examId}`)
+      .set(auth(adminToken))
+      .send({ accessCodeEnabled: true, accessCode: "GO1234" });
+    expect(upd.status).toBe(200);
+
+    const student = await addStudent("ce-code", adminToken, "s@ce.edu", "R1", dept);
+    const url = `/api/c/ce-code/exams/${examId}/attempts`;
+
+    const missing = await request(app).post(url).set(auth(student.token)).send({});
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe("ACCESS_CODE_REQUIRED");
+
+    const wrong = await request(app)
+      .post(url)
+      .set(auth(student.token))
+      .send({ accessCode: "nope" });
+    expect(wrong.status).toBe(403);
+    expect(wrong.body.error.code).toBe("ACCESS_CODE_INVALID");
+
+    const ok = await request(app)
+      .post(url)
+      .set(auth(student.token))
+      .send({ accessCode: "go1234" }); // case-insensitive
+    expect(ok.status).toBe(201);
+    expect(ok.body.attemptId).toBeTruthy();
+  });
+
   it("403s the whole surface when the `exams` feature is off", async () => {
     const { adminToken } = await setupCollege("ce-nofeat", {}); // no features
     const manage = await request(app)

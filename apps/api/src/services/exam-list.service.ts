@@ -85,6 +85,7 @@ export async function listExamsForUser(
       sectionCount,
       questionCount,
       totalDurationMinutes,
+      accessCodeEnabled: exam.accessCodeEnabled,
       attemptsUsed: counter?.attemptCount ?? 0,
       maxAttempts: counter?.maxAttempts ?? 1,
       lastAttempt: last

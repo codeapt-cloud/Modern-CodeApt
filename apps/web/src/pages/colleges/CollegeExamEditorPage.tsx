@@ -325,6 +325,8 @@ export function CollegeExamEditorPage() {
                 title: data.title,
                 passPercentage: data.passPercentage,
                 calculatorEnabled: data.calculatorEnabled,
+                accessCodeEnabled: data.accessCodeEnabled,
+                accessCode: data.accessCode,
                 orgUnitIds: summary.orgUnitIds,
               }}
               onSaved={refetchAll}

@@ -510,6 +510,81 @@ describe("public link (anonymous)", () => {
     expect(submit.body.status).toBe("graded");
     expect(submit.body.score).toBe(5); // only the single MCQ answered
   });
+
+  it("gates an anonymous start behind the link's access code", async () => {
+    const { userId } = await registerAndLogin();
+    const { exam } = await makeExam({ enroll: userId });
+    const link = await PublicExamLinkModel.create({
+      exam: exam._id,
+      accessToken: "tok-coded",
+      isActive: true,
+      accessCodeEnabled: true,
+      accessCode: "Tiger24",
+    });
+
+    // Availability advertises the gate but never the code itself.
+    const avail = await request(app).get(
+      `/api/public/exams/${link.accessToken}`,
+    );
+    expect(avail.body.available).toBe(true);
+    expect(avail.body.accessCodeEnabled).toBe(true);
+    expect(JSON.stringify(avail.body)).not.toContain("Tiger24");
+
+    const identity = { rollNumber: "R-1", collegeName: "Acme" };
+
+    // Missing code → 403 ACCESS_CODE_REQUIRED.
+    const missing = await request(app)
+      .post(`/api/public/exams/${link.accessToken}/attempts`)
+      .send(identity);
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe("ACCESS_CODE_REQUIRED");
+
+    // Wrong code → 403 ACCESS_CODE_INVALID.
+    const wrong = await request(app)
+      .post(`/api/public/exams/${link.accessToken}/attempts`)
+      .send({ ...identity, accessCode: "nope" });
+    expect(wrong.status).toBe(403);
+    expect(wrong.body.error.code).toBe("ACCESS_CODE_INVALID");
+
+    // Correct code (case-insensitive + trimmed) → 201.
+    const ok = await request(app)
+      .post(`/api/public/exams/${link.accessToken}/attempts`)
+      .send({ ...identity, accessCode: "  tiger24  " });
+    expect(ok.status).toBe(201);
+    expect(ok.body.attemptToken).toBeTruthy();
+  });
+});
+
+describe("per-exam access code (logged-in start)", () => {
+  it("rejects missing/wrong codes without burning an attempt, then accepts the right one", async () => {
+    const { token, userId } = await registerAndLogin();
+    const { exam } = await makeExam({ enroll: userId });
+    await ExamModel.updateOne(
+      { _id: exam._id },
+      { $set: { accessCodeEnabled: true, accessCode: "OPEN99" } },
+    );
+    const url = `/api/exams/${exam._id.toString()}/attempts`;
+
+    // No code → 403, and (critically) it must NOT consume the single attempt.
+    const missing = await request(app).post(url).set(auth(token)).send({});
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe("ACCESS_CODE_REQUIRED");
+
+    const wrong = await request(app)
+      .post(url)
+      .set(auth(token))
+      .send({ accessCode: "WRONG" });
+    expect(wrong.status).toBe(403);
+    expect(wrong.body.error.code).toBe("ACCESS_CODE_INVALID");
+
+    // Right code still works → the earlier rejections didn't spend the attempt.
+    const ok = await request(app)
+      .post(url)
+      .set(auth(token))
+      .send({ accessCode: "open99" });
+    expect(ok.status).toBe(201);
+    expect(ok.body.attemptId).toBeTruthy();
+  });
 });
 
 describe("warnings", () => {

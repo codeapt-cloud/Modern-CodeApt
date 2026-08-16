@@ -23,6 +23,7 @@ function item(over: Partial<ExamListItem> = {}): ExamListItem {
     sectionCount: 3,
     questionCount: 40,
     totalDurationMinutes: 90,
+    accessCodeEnabled: false,
     attemptsUsed: 0,
     maxAttempts: 1,
     lastAttempt: null,

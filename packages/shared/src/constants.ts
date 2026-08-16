@@ -470,6 +470,10 @@ export const ExamErrorCode = {
   ALREADY_SUBMITTED: "ALREADY_SUBMITTED",
   /** Public link inactive or outside its start/end window. */
   LINK_UNAVAILABLE: "LINK_UNAVAILABLE",
+  /** This exam/link is code-gated and no code was supplied. */
+  ACCESS_CODE_REQUIRED: "ACCESS_CODE_REQUIRED",
+  /** The supplied start code did not match. */
+  ACCESS_CODE_INVALID: "ACCESS_CODE_INVALID",
   /** Caller is neither the attempt's owner nor holds its attempt token. */
   NOT_AUTHORIZED: "NOT_AUTHORIZED",
   /** No next section to advance into. */

@@ -64,9 +64,14 @@ export function PublicLinksDialog({
   const [active, setActive] = useState(true);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [codeEnabled, setCodeEnabled] = useState(false);
+  const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
+
+  // A code gate that's ON needs ≥4 chars (the server enforces this too).
+  const codeValid = !codeEnabled || code.trim().length >= 4;
 
   const create = async (): Promise<void> => {
     setFormError("");
@@ -76,10 +81,14 @@ export function PublicLinksDialog({
         isActive: active,
         startTime: localToIso(start),
         endTime: localToIso(end),
+        accessCodeEnabled: codeEnabled,
+        accessCode: codeEnabled ? code.trim() : "",
       });
       setStart("");
       setEnd("");
       setActive(true);
+      setCodeEnabled(false);
+      setCode("");
       toast({ variant: "success", title: "Public link created" });
       onChanged();
     } catch (err) {
@@ -92,11 +101,13 @@ export function PublicLinksDialog({
   const toggle = async (link: PublicLink): Promise<void> => {
     setBusyId(link.id);
     try {
-      // Resend the window so PATCH doesn't clear it.
+      // Resend the window + code so PATCH doesn't clear them.
       await authApi.updatePublicLink(link.id, {
         isActive: !link.isActive,
         startTime: link.startTime,
         endTime: link.endTime,
+        accessCodeEnabled: link.accessCodeEnabled,
+        accessCode: link.accessCode,
       });
       toast({ title: link.isActive ? "Link deactivated" : "Link activated" });
       onChanged();
@@ -173,6 +184,15 @@ export function PublicLinksDialog({
                           : "—"}
                       </p>
                     ) : null}
+                    {link.accessCodeEnabled ? (
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Start code:{" "}
+                        <code className="font-mono text-ink-secondary">
+                          {link.accessCode}
+                        </code>{" "}
+                        — read out to takers before they begin
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button
@@ -229,6 +249,30 @@ export function PublicLinksDialog({
                 />
               </FormField>
             </div>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2">
+                <Switch checked={codeEnabled} onCheckedChange={setCodeEnabled} />
+                <span className="text-sm text-ink">
+                  Require a start code{" "}
+                  <span className="text-ink-muted">
+                    — takers enter this to begin; read it out right before the exam
+                  </span>
+                </span>
+              </label>
+              {codeEnabled ? (
+                <FormField
+                  label="Start code"
+                  hint="At least 4 characters. Case-insensitive."
+                >
+                  <Input
+                    value={code}
+                    placeholder="e.g. TIGER24"
+                    onChange={(e) => setCode(e.target.value)}
+                    maxLength={64}
+                  />
+                </FormField>
+              ) : null}
+            </div>
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2">
                 <Switch checked={active} onCheckedChange={setActive} />
@@ -238,6 +282,7 @@ export function PublicLinksDialog({
                 type="button"
                 size="sm"
                 loading={busy}
+                disabled={!codeValid}
                 onClick={() => void create()}
               >
                 <Plus className="h-4 w-4" /> Create link

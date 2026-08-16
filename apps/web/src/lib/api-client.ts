@@ -1743,9 +1743,11 @@ export const api = {
     studentStart: async (
       slug: string,
       examId: string,
+      accessCode?: string,
     ): Promise<StartAttemptResponse> => {
       const { data } = await http.post<StartAttemptResponse>(
         `${API_PREFIX}/c/${slug}/exams/${examId}/attempts`,
+        accessCode ? { accessCode } : undefined,
       );
       return data;
     },
@@ -3131,9 +3133,13 @@ export const api = {
       const { data } = await http.get<ExamListResponse>(`${API_PREFIX}/exams`);
       return data;
     },
-    start: async (examId: string): Promise<StartAttemptResponse> => {
+    start: async (
+      examId: string,
+      accessCode?: string,
+    ): Promise<StartAttemptResponse> => {
       const { data } = await http.post<StartAttemptResponse>(
         `${API_PREFIX}/exams/${examId}/attempts`,
+        accessCode ? { accessCode } : undefined,
       );
       return data;
     },

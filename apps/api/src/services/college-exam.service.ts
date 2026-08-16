@@ -242,6 +242,8 @@ export async function createCollegeExam(
       title: input.title,
       passPercentage: input.passPercentage,
       calculatorEnabled: input.calculatorEnabled,
+      accessCodeEnabled: input.accessCodeEnabled,
+      accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
       orgUnits,
       isPublished: false,
     }),
@@ -282,6 +284,8 @@ export async function listCollegeExams(
         totalMarks: exam.totalMarks,
         passPercentage: exam.passPercentage,
         calculatorEnabled: exam.calculatorEnabled,
+        accessCodeEnabled: exam.accessCodeEnabled,
+        accessCode: exam.accessCode,
         sectionCount,
         questionCount,
         isPublished: exam.isPublished,
@@ -319,6 +323,16 @@ export async function updateCollegeExam(
     exam.passPercentage = input.passPercentage;
   if (input.calculatorEnabled !== undefined)
     exam.calculatorEnabled = input.calculatorEnabled;
+  if (input.accessCodeEnabled !== undefined) {
+    exam.accessCodeEnabled = input.accessCodeEnabled;
+    // Clearing the gate also clears the stored code; enabling stores the trimmed
+    // code (the schema guarantees a ≥4-char code accompanies an enable).
+    if (!input.accessCodeEnabled) exam.accessCode = "";
+    else if (input.accessCode !== undefined)
+      exam.accessCode = input.accessCode.trim();
+  } else if (input.accessCode !== undefined) {
+    exam.accessCode = input.accessCode.trim();
+  }
   if (input.orgUnitIds !== undefined) {
     const actorScope = await resolveActorScope(scope, actor);
     exam.orgUnits = await validateTargetUnits(
@@ -640,6 +654,7 @@ export async function listStudentCollegeExams(
       sectionCount,
       questionCount,
       totalDurationMinutes,
+      accessCodeEnabled: exam.accessCodeEnabled,
       attemptsUsed: counter?.attemptCount ?? 0,
       maxAttempts: counter?.maxAttempts ?? 1,
       lastAttempt: last
@@ -659,6 +674,7 @@ export async function startStudentCollegeExam(
   collegeId: string,
   studentUserId: string,
   examId: string,
+  accessCode?: string,
 ): Promise<StartAttemptResponse> {
   const scope = createTenantScope(collegeId);
   if (!Types.ObjectId.isValid(examId)) throw NOT_FOUND();
@@ -680,5 +696,5 @@ export async function startStudentCollegeExam(
   // Reuse the engine: counter enforcement + attempt creation (which stamps the
   // tenant onto the attempt). Subsequent section/answer/submit/result calls use
   // the shared /attempts/* endpoints, authorized by attempt ownership.
-  return startAttempt(studentUserId, examId);
+  return startAttempt(studentUserId, examId, accessCode);
 }

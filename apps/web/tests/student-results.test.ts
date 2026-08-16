@@ -18,6 +18,7 @@ function exam(over: Partial<ExamListItem> & { id: string }): ExamListItem {
     sectionCount: 1,
     questionCount: 10,
     totalDurationMinutes: 60,
+    accessCodeEnabled: false,
     attemptsUsed: 1,
     maxAttempts: 1,
     lastAttempt: over.lastAttempt ?? null,

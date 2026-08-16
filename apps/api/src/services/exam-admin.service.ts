@@ -178,6 +178,8 @@ export async function getAdminExamDetail(
     totalMarks: exam.totalMarks,
     passPercentage: exam.passPercentage,
     calculatorEnabled: exam.calculatorEnabled,
+    accessCodeEnabled: exam.accessCodeEnabled,
+    accessCode: exam.accessCode,
     sections: sections.map((s) => ({
       id: s._id.toString(),
       name: s.name,
@@ -387,6 +389,8 @@ function toPublicLink(
     isActive: boolean;
     startTime?: Date | null;
     endTime?: Date | null;
+    accessCodeEnabled: boolean;
+    accessCode: string;
   }>,
 ): PublicLink {
   return {
@@ -395,6 +399,8 @@ function toPublicLink(
     isActive: link.isActive,
     startTime: link.startTime ? link.startTime.toISOString() : null,
     endTime: link.endTime ? link.endTime.toISOString() : null,
+    accessCodeEnabled: link.accessCodeEnabled,
+    accessCode: link.accessCode,
   };
 }
 
@@ -409,6 +415,8 @@ export async function createPublicLink(
     isActive: input.isActive,
     startTime: input.startTime ? new Date(input.startTime) : undefined,
     endTime: input.endTime ? new Date(input.endTime) : undefined,
+    accessCodeEnabled: input.accessCodeEnabled,
+    accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
   });
   return toPublicLink(link);
 }
@@ -424,6 +432,8 @@ export async function updatePublicLink(
         isActive: input.isActive,
         startTime: input.startTime ? new Date(input.startTime) : null,
         endTime: input.endTime ? new Date(input.endTime) : null,
+        accessCodeEnabled: input.accessCodeEnabled,
+        accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
       },
     },
     { new: true },

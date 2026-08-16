@@ -44,6 +44,7 @@ import {
   updateCollegeTestCaseController,
 } from "../controllers/college-exam-admin.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
+import { startAttemptRateLimiter } from "../middleware/rate-limit.js";
 import { requireAuth } from "../middleware/require-auth.js";
 import { requireFeature } from "../middleware/require-entitlement.js";
 import { requireFaculty } from "../middleware/require-role.js";
@@ -70,6 +71,7 @@ collegeExamRouter.get(
 collegeExamRouter.post(
   "/c/:collegeSlug/exams/:examId/attempts",
   ...member,
+  startAttemptRateLimiter,
   startStudentCollegeExamController,
 );
 

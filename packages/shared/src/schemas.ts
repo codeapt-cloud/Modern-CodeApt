@@ -949,6 +949,8 @@ export const examListItemSchema = z.object({
   sectionCount: z.number().int().nonnegative(),
   questionCount: z.number().int().nonnegative(),
   totalDurationMinutes: z.number().int().nonnegative(),
+  /** True → the student must enter a start code (the code itself is never sent). */
+  accessCodeEnabled: z.boolean(),
   attemptsUsed: z.number().int().nonnegative(),
   maxAttempts: z.number().int().nonnegative(),
   lastAttempt: z
@@ -977,6 +979,8 @@ export const publicExamSummarySchema = z.object({
 export const publicExamAvailabilitySchema = z.object({
   available: z.boolean(),
   reason: z.string().nullable(),
+  /** True → the taker must enter a start code (the code itself is never sent). */
+  accessCodeEnabled: z.boolean(),
   exam: publicExamSummarySchema.nullable(),
 });
 export type PublicExamAvailability = z.infer<
@@ -985,8 +989,19 @@ export type PublicExamAvailability = z.infer<
 export const publicStartRequestSchema = z.object({
   rollNumber: z.string().min(1, "Roll number is required").max(64),
   collegeName: z.string().min(1, "College name is required").max(200),
+  /** Start code, when the link is code-gated (validated server-side). */
+  accessCode: z.string().trim().max(64).optional(),
 });
 export type PublicStartRequest = z.infer<typeof publicStartRequestSchema>;
+
+/**
+ * Body for the authenticated attempt-start endpoints (individual + college).
+ * Carries only the optional start code; the exam id is a URL param.
+ */
+export const startAttemptRequestSchema = z.object({
+  accessCode: z.string().trim().max(64).optional(),
+});
+export type StartAttemptRequest = z.infer<typeof startAttemptRequestSchema>;
 
 // --- Admin authoring ---
 export const adminExamUpsertSchema = z.object({
@@ -1029,11 +1044,19 @@ export const adminTestCaseUpsertSchema = z.object({
 });
 export type AdminTestCaseUpsert = z.infer<typeof adminTestCaseUpsertSchema>;
 
-export const adminPublicLinkUpsertSchema = z.object({
-  isActive: z.boolean().default(true),
-  startTime: z.string().datetime().nullable().optional(),
-  endTime: z.string().datetime().nullable().optional(),
-});
+export const adminPublicLinkUpsertSchema = z
+  .object({
+    isActive: z.boolean().default(true),
+    startTime: z.string().datetime().nullable().optional(),
+    endTime: z.string().datetime().nullable().optional(),
+    /** Gate anonymous starts behind a code the organiser reads out. */
+    accessCodeEnabled: z.boolean().default(false),
+    accessCode: z.string().trim().max(64).default(""),
+  })
+  .refine((v) => !v.accessCodeEnabled || v.accessCode.length >= 4, {
+    message: "Enter a start code of at least 4 characters to enable the code gate",
+    path: ["accessCode"],
+  });
 export type AdminPublicLinkUpsert = z.infer<typeof adminPublicLinkUpsertSchema>;
 export const publicLinkSchema = z.object({
   id: z.string(),
@@ -1041,6 +1064,9 @@ export const publicLinkSchema = z.object({
   isActive: z.boolean(),
   startTime: z.string().datetime().nullable(),
   endTime: z.string().datetime().nullable(),
+  /** Author-only: echoed back so the organiser can read out / copy the code. */
+  accessCodeEnabled: z.boolean(),
+  accessCode: z.string(),
 });
 export type PublicLink = z.infer<typeof publicLinkSchema>;
 
@@ -1090,6 +1116,9 @@ export const adminExamDetailSchema = z.object({
   totalMarks: z.number().int().nonnegative(),
   passPercentage: z.number().int().min(0).max(100),
   calculatorEnabled: z.boolean(),
+  /** Author-only: per-exam start-code gate (echoed so faculty can read it out). */
+  accessCodeEnabled: z.boolean(),
+  accessCode: z.string(),
   sections: z.array(adminSectionSchema),
   publicLinks: z.array(publicLinkSchema),
 });
@@ -4725,13 +4754,20 @@ export const createCollegeExamSchema = z.object({
   title: z.string().trim().min(1).max(200),
   passPercentage: z.number().int().min(0).max(100).default(40),
   calculatorEnabled: z.boolean().default(true),
+  /** Per-exam start-code gate (faculty read the code out right before the exam). */
+  accessCodeEnabled: z.boolean().default(false),
+  accessCode: z.string().trim().max(64).default(""),
   /**
    * Target org-units (empty = the whole college). A college_admin may leave it
    * empty (college-wide) or target any units; a faculty member MUST target
    * units within their scope (enforced server-side).
    */
   orgUnitIds: z.array(z.string().min(1)).default([]),
-});
+})
+  .refine((v) => !v.accessCodeEnabled || v.accessCode.length >= 4, {
+    message: "Enter a start code of at least 4 characters to enable the code gate",
+    path: ["accessCode"],
+  });
 export type CreateCollegeExamInput = z.infer<typeof createCollegeExamSchema>;
 
 export const updateCollegeExamSchema = z
@@ -4739,11 +4775,21 @@ export const updateCollegeExamSchema = z
     title: z.string().trim().min(1).max(200).optional(),
     passPercentage: z.number().int().min(0).max(100).optional(),
     calculatorEnabled: z.boolean().optional(),
+    accessCodeEnabled: z.boolean().optional(),
+    accessCode: z.string().trim().max(64).optional(),
     orgUnitIds: z.array(z.string().min(1)).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: "Provide at least one field to update",
-  });
+  })
+  .refine(
+    // When turning the gate ON in an update, a code (≥4) must accompany it.
+    (v) => v.accessCodeEnabled !== true || (v.accessCode?.length ?? 0) >= 4,
+    {
+      message: "Enter a start code of at least 4 characters to enable the code gate",
+      path: ["accessCode"],
+    },
+  );
 export type UpdateCollegeExamInput = z.infer<typeof updateCollegeExamSchema>;
 
 export const setExamPublishSchema = z.object({
@@ -4758,6 +4804,9 @@ export const collegeExamSummarySchema = z.object({
   totalMarks: z.number().int().nonnegative(),
   passPercentage: z.number().int().min(0).max(100),
   calculatorEnabled: z.boolean(),
+  /** Per-exam start-code gate (author-scoped list, so the code is echoed). */
+  accessCodeEnabled: z.boolean(),
+  accessCode: z.string(),
   sectionCount: z.number().int().nonnegative(),
   questionCount: z.number().int().nonnegative(),
   isPublished: z.boolean(),

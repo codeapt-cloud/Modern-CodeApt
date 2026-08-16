@@ -19,6 +19,7 @@ function exam(id: string, title: string): ExamListItem {
     sectionCount: 1,
     questionCount: 5,
     totalDurationMinutes: 30,
+    accessCodeEnabled: false,
     attemptsUsed: 0,
     maxAttempts: 1,
     lastAttempt: null,

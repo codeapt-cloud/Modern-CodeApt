@@ -38,6 +38,7 @@ import {
 import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
+import { assertAccessCode } from "../lib/access-code.js";
 import { enqueueCodeJob } from "../lib/execution-queue.js";
 import { resolveExamDisplayTitle } from "../lib/exam-title.js";
 import {
@@ -258,6 +259,7 @@ function currentSectionIndex(
 export async function startAttempt(
   userId: string,
   examId: string,
+  accessCode?: string,
 ): Promise<StartAttemptResponse> {
   const exam = await requireExam(examId);
   const sections = await loadSections(exam._id);
@@ -268,6 +270,10 @@ export async function startAttempt(
       ExamErrorCode.EXAM_NOT_FOUND,
     );
   }
+
+  // Optional per-exam start-code gate — checked BEFORE the attempt counter so a
+  // wrong/missing code never consumes one of the student's attempts.
+  assertAccessCode(exam.accessCodeEnabled, exam.accessCode, accessCode);
 
   // Attempt-limit enforcement (per user+exam).
   const counter = await ExamAttemptCounterModel.findOneAndUpdate(
