@@ -5,11 +5,13 @@
  * toggle + optional [start, end] window; activate/deactivate via PATCH; copy the
  * shareable URL.
  *
- * NOTE: results are exported PER-EXAM (which already includes public-link
- * takers), not per-link — there is no per-link results endpoint in the backend.
+ * Results download two ways: the exam-wide export (all takers) elsewhere, and a
+ * PER-LINK export here (only that link's anonymous takers, filename from its
+ * tag) so sessions can be graded/differentiated separately. Existing links are
+ * also editable (window / tag / start-code) via the reused bottom form.
  */
 import type { AdminExamDetail, PublicLink } from "@codeapt/shared";
-import { Copy, Link2, Plus, Trash2 } from "lucide-react";
+import { Copy, Download, Link2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { api, parseApiError } from "../../../lib/api-client.js";
@@ -43,6 +45,17 @@ function localToIso(local: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/** ISO → datetime-local ("YYYY-MM-DDTHH:mm") in the browser's zone, or "". */
+function isoToLocal(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours(),
+  )}:${pad(d.getMinutes())}`;
+}
+
 export function PublicLinksDialog({
   open,
   onOpenChange,
@@ -66,35 +79,81 @@ export function PublicLinksDialog({
   const [end, setEnd] = useState("");
   const [codeEnabled, setCodeEnabled] = useState(false);
   const [code, setCode] = useState("");
+  const [tag, setTag] = useState("");
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
 
   // A code gate that's ON needs ≥4 chars (the server enforces this too).
   const codeValid = !codeEnabled || code.trim().length >= 4;
 
-  const create = async (): Promise<void> => {
+  const resetForm = (): void => {
+    setEditingId(null);
+    setStart("");
+    setEnd("");
+    setActive(true);
+    setCodeEnabled(false);
+    setCode("");
+    setTag("");
+    setFormError("");
+  };
+
+  /** Load an existing link into the bottom form to edit it. */
+  const startEdit = (link: PublicLink): void => {
+    setEditingId(link.id);
+    setFormError("");
+    setActive(link.isActive);
+    setStart(isoToLocal(link.startTime));
+    setEnd(isoToLocal(link.endTime));
+    setCodeEnabled(link.accessCodeEnabled);
+    setCode(link.accessCode);
+    setTag(link.tag);
+  };
+
+  const submit = async (): Promise<void> => {
     setFormError("");
     setBusy(true);
+    const body = {
+      isActive: active,
+      startTime: localToIso(start),
+      endTime: localToIso(end),
+      accessCodeEnabled: codeEnabled,
+      accessCode: codeEnabled ? code.trim() : "",
+      tag: tag.trim(),
+    };
     try {
-      await authApi.createPublicLink(examId, {
-        isActive: active,
-        startTime: localToIso(start),
-        endTime: localToIso(end),
-        accessCodeEnabled: codeEnabled,
-        accessCode: codeEnabled ? code.trim() : "",
-      });
-      setStart("");
-      setEnd("");
-      setActive(true);
-      setCodeEnabled(false);
-      setCode("");
-      toast({ variant: "success", title: "Public link created" });
+      if (editingId) {
+        await authApi.updatePublicLink(editingId, body);
+        toast({ variant: "success", title: "Public link updated" });
+      } else {
+        await authApi.createPublicLink(examId, body);
+        toast({ variant: "success", title: "Public link created" });
+      }
+      resetForm();
       onChanged();
     } catch (err) {
       setFormError(parseApiError(err).message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const downloadResults = async (link: PublicLink): Promise<void> => {
+    setDownloadingId(link.id);
+    try {
+      const { blob, filename } = await authApi.exportPublicLinkResults(link.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -108,6 +167,7 @@ export function PublicLinksDialog({
         endTime: link.endTime,
         accessCodeEnabled: link.accessCodeEnabled,
         accessCode: link.accessCode,
+        tag: link.tag,
       });
       toast({ title: link.isActive ? "Link deactivated" : "Link activated" });
       onChanged();
@@ -146,8 +206,9 @@ export function PublicLinksDialog({
         <DialogHeader>
           <DialogTitle>Public links</DialogTitle>
           <DialogDescription>
-            Share an exam with anonymous takers via a tokenized URL. Results for
-            these takers appear in the exam-wide results export.
+            Share an exam with anonymous takers via a tokenized URL. Download
+            each link&apos;s results on its own, or find every taker in the
+            exam-wide export. Tag a link to tell sessions apart.
           </DialogDescription>
         </DialogHeader>
 
@@ -169,6 +230,9 @@ export function PublicLinksDialog({
                       ) : (
                         <Badge variant="neutral">Inactive</Badge>
                       )}
+                      {link.tag ? (
+                        <Badge variant="info">{link.tag}</Badge>
+                      ) : null}
                       <code className="truncate font-mono text-xs text-ink-secondary">
                         /public/exam/{link.accessToken}
                       </code>
@@ -210,6 +274,21 @@ export function PublicLinksDialog({
                     >
                       {link.isActive ? "Deactivate" : "Activate"}
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      loading={downloadingId === link.id}
+                      onClick={() => void downloadResults(link)}
+                    >
+                      <Download className="h-4 w-4" /> Results
+                    </Button>
+                    <IconButton
+                      aria-label="Edit link"
+                      variant="ghost"
+                      size="sm"
+                      icon={<Pencil className="h-4 w-4" />}
+                      onClick={() => startEdit(link)}
+                    />
                     <IconButton
                       aria-label="Revoke link"
                       variant="ghost"
@@ -228,10 +307,18 @@ export function PublicLinksDialog({
             </p>
           )}
 
-          {/* Create */}
+          {/* Create / edit */}
           <div className="space-y-4 rounded-xl border border-subtle bg-surface-base p-4">
             <h4 className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <Link2 className="h-4 w-4" /> New link
+              {editingId ? (
+                <>
+                  <Pencil className="h-4 w-4" /> Edit link
+                </>
+              ) : (
+                <>
+                  <Link2 className="h-4 w-4" /> New link
+                </>
+              )}
             </h4>
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label="Opens at" hint="Optional. Blank = immediately.">
@@ -249,6 +336,17 @@ export function PublicLinksDialog({
                 />
               </FormField>
             </div>
+            <FormField
+              label="Tag"
+              hint="Admin-only label to tell sessions apart (e.g. 'Section 2 CSE'). Never shown to takers; appears in the results file."
+            >
+              <Input
+                value={tag}
+                placeholder="e.g. Section 2 CSE AVNIT"
+                onChange={(e) => setTag(e.target.value)}
+                maxLength={120}
+              />
+            </FormField>
             <div className="space-y-2">
               <label className="flex items-center gap-2">
                 <Switch checked={codeEnabled} onCheckedChange={setCodeEnabled} />
@@ -276,17 +374,37 @@ export function PublicLinksDialog({
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2">
                 <Switch checked={active} onCheckedChange={setActive} />
-                <span className="text-sm text-ink">Active immediately</span>
+                <span className="text-sm text-ink">
+                  {editingId ? "Active" : "Active immediately"}
+                </span>
               </label>
-              <Button
-                type="button"
-                size="sm"
-                loading={busy}
-                disabled={!codeValid}
-                onClick={() => void create()}
-              >
-                <Plus className="h-4 w-4" /> Create link
-              </Button>
+              <div className="flex items-center gap-2">
+                {editingId ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={resetForm}
+                  >
+                    Cancel
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  loading={busy}
+                  disabled={!codeValid}
+                  onClick={() => void submit()}
+                >
+                  {editingId ? (
+                    "Save changes"
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4" /> Create link
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

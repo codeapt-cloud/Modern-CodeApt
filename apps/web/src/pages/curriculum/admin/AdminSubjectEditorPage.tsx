@@ -13,6 +13,7 @@ import {
 } from "@codeapt/shared";
 import {
   ArrowLeft,
+  CalendarClock,
   ChevronDown,
   ChevronUp,
   Eye,
@@ -35,11 +36,20 @@ import { ConfirmDeleteDialog } from "../../../components/curriculum/admin/Confir
 import { ModuleEditorDialog } from "../../../components/curriculum/admin/ModuleEditorDialog.js";
 import { ModuleTopicsPanel } from "../../../components/curriculum/admin/ModuleTopicsPanel.js";
 import { SubjectEditorDialog } from "../../../components/curriculum/admin/SubjectEditorDialog.js";
+import { SubjectEnrollmentsTab } from "../../../components/curriculum/admin/SubjectEnrollmentsTab.js";
 import { PageHeader } from "../../../components/layout/PageHeader.js";
 import { Alert } from "../../../components/ui/alert.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card } from "../../../components/ui/card.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../../components/ui/dialog.js";
 import { EmptyState } from "../../../components/ui/empty-state.js";
 import { IconButton } from "../../../components/ui/icon-button.js";
 import { Skeleton } from "../../../components/ui/skeleton.js";
@@ -51,8 +61,14 @@ import {
   TableHeader,
   TableRow,
 } from "../../../components/ui/table.js";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../../../components/ui/tabs.js";
 import { useToast } from "../../../components/ui/toast.js";
-import { api } from "../../../lib/api-client.js";
+import { api, parseApiError } from "../../../lib/api-client.js";
 import { imageUrl } from "../../../lib/cloudinary.js";
 import { useQuery } from "../../../lib/use-query.js";
 
@@ -82,8 +98,30 @@ export function AdminSubjectEditorPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [reordering, setReordering] = useState(false);
+  const [recomputeOpen, setRecomputeOpen] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
 
   const openModule = modules.find((m) => m.id === openModuleId) ?? null;
+
+  const runRecompute = async (): Promise<void> => {
+    setRecomputing(true);
+    try {
+      const res =
+        await api.adminCurriculum.subjects.recomputeExpiry(subjectId);
+      toast({
+        variant: "success",
+        title:
+          `Updated ${res.updated} enrolment${res.updated === 1 ? "" : "s"}` +
+          (res.expired > 0 ? ` · ${res.expired} now expired` : ""),
+      });
+      setRecomputeOpen(false);
+      subjectQ.refetch();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setRecomputing(false);
+    }
+  };
 
   const moveModule = async (index: number, dir: -1 | 1): Promise<void> => {
     const next = index + dir;
@@ -135,6 +173,12 @@ export function AdminSubjectEditorPage() {
                 </Button>
                 <Button
                   variant="secondary"
+                  onClick={() => setRecomputeOpen(true)}
+                >
+                  <CalendarClock className="h-4 w-4" /> Update enrollments
+                </Button>
+                <Button
+                  variant="secondary"
                   onClick={() => setEditingDetails(true)}
                 >
                   <Pencil className="h-4 w-4" /> Edit details
@@ -180,6 +224,12 @@ export function AdminSubjectEditorPage() {
             ) : null}
           </Card>
 
+          <Tabs defaultValue="modules">
+            <TabsList>
+              <TabsTrigger value="modules">Modules</TabsTrigger>
+              <TabsTrigger value="enrollments">Enrollments</TabsTrigger>
+            </TabsList>
+            <TabsContent value="modules">
           {/* Modules */}
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -303,6 +353,11 @@ export function AdminSubjectEditorPage() {
               />
             ) : null}
           </section>
+            </TabsContent>
+            <TabsContent value="enrollments">
+              <SubjectEnrollmentsTab subjectId={subjectId} />
+            </TabsContent>
+          </Tabs>
         </>
       )}
 
@@ -335,6 +390,53 @@ export function AdminSubjectEditorPage() {
           initial={subject}
           onSaved={() => subjectQ.refetch()}
         />
+      ) : null}
+
+      {subject ? (
+        <Dialog open={recomputeOpen} onOpenChange={setRecomputeOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Update enrollments</DialogTitle>
+              <DialogDescription>
+                {subject.validityDays > 0 ? (
+                  <>
+                    Recompute access expiry for all {subject.enrollmentCount}{" "}
+                    enrolled learner
+                    {subject.enrollmentCount === 1 ? "" : "s"} to their
+                    enrolment date + <strong>{subject.validityDays} days</strong>
+                    . Learners already past that point lose access. This
+                    overwrites any current expiry on this course.
+                  </>
+                ) : (
+                  <>
+                    This course is set to <strong>lifetime access</strong> (0
+                    days). Running this clears any expiry for all{" "}
+                    {subject.enrollmentCount} enrolled learner
+                    {subject.enrollmentCount === 1 ? "" : "s"}, restoring
+                    permanent access.
+                  </>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setRecomputeOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                loading={recomputing}
+                onClick={() => void runRecompute()}
+              >
+                <CalendarClock className="h-4 w-4" /> Update {subject.enrollmentCount}{" "}
+                enrolment{subject.enrollmentCount === 1 ? "" : "s"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       {moduleEditing !== undefined ? (

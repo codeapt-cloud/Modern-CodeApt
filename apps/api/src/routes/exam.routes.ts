@@ -12,6 +12,7 @@ import {
   adminDeleteQuestionController,
   adminDeleteSectionController,
   adminDeleteTestCaseController,
+  adminExportPublicLinkResultsController,
   adminExportResultsController,
   adminGetExamController,
   adminGetUserExamAttemptsController,
@@ -176,6 +177,11 @@ examRouter.get(
   "/admin/exams/:examId/results.xlsx",
   ...adminGuard,
   adminExportResultsController,
+);
+examRouter.get(
+  "/admin/public-links/:linkId/results.xlsx",
+  ...adminGuard,
+  adminExportPublicLinkResultsController,
 );
 examRouter.post(
   "/admin/exams/:examId/reset-attempts",

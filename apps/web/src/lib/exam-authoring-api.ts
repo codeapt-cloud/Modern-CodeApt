@@ -66,6 +66,10 @@ export interface ExamAuthoringApi {
     body: AdminPublicLinkUpsert,
   ): Promise<PublicLink>;
   deletePublicLink(linkId: string): Promise<void>;
+  /** Download results for ONE public link (its anonymous takers only). */
+  exportPublicLinkResults(
+    linkId: string,
+  ): Promise<{ blob: Blob; filename: string }>;
 }
 
 /**
@@ -127,6 +131,10 @@ export interface CollegeExamAuthoringGroup {
     body: AdminPublicLinkUpsert,
   ): Promise<PublicLink>;
   deletePublicLink(slug: string, linkId: string): Promise<void>;
+  exportPublicLinkResults(
+    slug: string,
+    linkId: string,
+  ): Promise<{ blob: Blob; filename: string }>;
 }
 
 /**
@@ -160,5 +168,7 @@ export function collegeExamAuthoringApi(
     updatePublicLink: (linkId, body) =>
       group.updatePublicLink(slug, linkId, body),
     deletePublicLink: (linkId) => group.deletePublicLink(slug, linkId),
+    exportPublicLinkResults: (linkId) =>
+      group.exportPublicLinkResults(slug, linkId),
   };
 }

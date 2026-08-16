@@ -18,6 +18,7 @@ import {
   adminSectionUpsertSchema,
   adminTestCaseUpsertSchema,
   createCollegeExamSchema,
+  duplicateCollegeExamSchema,
   examBulkUploadKindSchema,
   examBulkUploadRequestSchema,
   setExamPublishSchema,
@@ -83,6 +84,22 @@ export const getCollegeExamController = asyncHandler(
           tenantId(req),
           actor(req),
           req.params.examId ?? "",
+        ),
+      );
+  },
+);
+
+export const duplicateCollegeExamController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = duplicateCollegeExamSchema.parse(req.body);
+    res
+      .status(201)
+      .json(
+        await exams.duplicateCollegeExam(
+          tenantId(req),
+          actor(req),
+          req.params.examId ?? "",
+          input,
         ),
       );
   },
@@ -335,6 +352,18 @@ export const deleteCollegePublicLinkController = asyncHandler(
           req.params.linkId ?? "",
         ),
       );
+  },
+);
+
+/** Results for ONE college public link (tenant + faculty-scope enforced). */
+export const collegeExportPublicLinkResultsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { buffer, filename } = await exams.exportPublicLinkResults(
+      tenantId(req),
+      actor(req),
+      req.params.linkId ?? "",
+    );
+    sendXlsxAttachment(res, buffer, filename);
   },
 );
 

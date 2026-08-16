@@ -823,4 +823,125 @@ describe("Excel round-trip", () => {
     expect(header).toContain("Total");
     expect(header).toContain("Passed");
   });
+
+  it("tags public-link takers in the single combined results export", async () => {
+    const admin = await registerAndLogin("admin");
+    const { userId } = await registerAndLogin();
+    const { exam, qSingle } = await makeExam({ enroll: userId });
+    const link = await PublicExamLinkModel.create({
+      exam: exam._id,
+      accessToken: "tok-tagged",
+      isActive: true,
+      tag: "Section 2 CSE",
+    });
+
+    const start = await request(app)
+      .post(`/api/public/exams/${link.accessToken}/attempts`)
+      .send({ rollNumber: "R-9", collegeName: "Acme" });
+    const attemptId = start.body.attemptId as string;
+    const attemptToken = start.body.attemptToken as string;
+    await request(app)
+      .post(`/api/attempts/${attemptId}/section/answers`)
+      .set("X-Attempt-Token", attemptToken)
+      .send({
+        answers: [{ questionId: qSingle._id.toString(), selectedOptions: [1] }],
+      });
+    await request(app)
+      .post(`/api/attempts/${attemptId}/advance`)
+      .set("X-Attempt-Token", attemptToken);
+    await request(app)
+      .post(`/api/attempts/${attemptId}/submit`)
+      .set("X-Attempt-Token", attemptToken)
+      .send({});
+
+    const res = await request(app)
+      .get(`/api/admin/exams/${exam._id.toString()}/results.xlsx`)
+      .set(auth(admin.token))
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => chunks.push(c));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body as Buffer);
+    const ws = wb.getWorksheet("Results")!;
+    const header = ws.getRow(1).values as unknown[];
+    expect(header).toContain("Tag/Session");
+    // The anonymous taker's row carries its link tag.
+    const allCells: unknown[] = [];
+    ws.eachRow((row) => allCells.push(...(row.values as unknown[])));
+    expect(allCells).toContain("Section 2 CSE");
+  });
+
+  it("exports per-link results with only that link's own takers", async () => {
+    const admin = await registerAndLogin("admin");
+    const { userId } = await registerAndLogin();
+    const { exam, qSingle } = await makeExam({ enroll: userId });
+    const linkA = await PublicExamLinkModel.create({
+      exam: exam._id,
+      accessToken: "tok-secA",
+      isActive: true,
+      tag: "Sec A",
+    });
+    const linkB = await PublicExamLinkModel.create({
+      exam: exam._id,
+      accessToken: "tok-secB",
+      isActive: true,
+      tag: "Sec B",
+    });
+
+    const runAttempt = async (token: string, roll: string): Promise<void> => {
+      const s = await request(app)
+        .post(`/api/public/exams/${token}/attempts`)
+        .send({ rollNumber: roll, collegeName: "Acme" });
+      const attemptId = s.body.attemptId as string;
+      const at = s.body.attemptToken as string;
+      await request(app)
+        .post(`/api/attempts/${attemptId}/section/answers`)
+        .set("X-Attempt-Token", at)
+        .send({
+          answers: [
+            { questionId: qSingle._id.toString(), selectedOptions: [1] },
+          ],
+        });
+      await request(app)
+        .post(`/api/attempts/${attemptId}/advance`)
+        .set("X-Attempt-Token", at);
+      await request(app)
+        .post(`/api/attempts/${attemptId}/submit`)
+        .set("X-Attempt-Token", at)
+        .send({});
+    };
+    await runAttempt("tok-secA", "AA-1");
+    await runAttempt("tok-secB", "BB-1");
+
+    const download = async (linkId: string): Promise<unknown[]> => {
+      const res = await request(app)
+        .get(`/api/admin/public-links/${linkId}/results.xlsx`)
+        .set(auth(admin.token))
+        .buffer(true)
+        .parse((r, cb) => {
+          const chunks: Buffer[] = [];
+          r.on("data", (c: Buffer) => chunks.push(c));
+          r.on("end", () => cb(null, Buffer.concat(chunks)));
+        });
+      expect(res.status).toBe(200);
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(res.body as Buffer);
+      const ws = wb.getWorksheet("Results")!;
+      const cells: unknown[] = [];
+      ws.eachRow((row) => cells.push(...(row.values as unknown[])));
+      return cells;
+    };
+
+    const aCells = await download(linkA._id.toString());
+    expect(aCells).toContain("AA-1");
+    expect(aCells).not.toContain("BB-1");
+    expect(aCells).toContain("Sec A");
+
+    const bCells = await download(linkB._id.toString());
+    expect(bCells).toContain("BB-1");
+    expect(bCells).not.toContain("AA-1");
+  });
 });

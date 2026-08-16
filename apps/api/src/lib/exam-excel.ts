@@ -518,6 +518,8 @@ export interface ResultRow {
   candidate: string;
   rollNumber: string;
   collegeName: string;
+  /** Admin-only public-link session label (blank for logged-in takers). */
+  tag: string;
   status: string;
   score: number;
   totalMarks: number;
@@ -542,6 +544,7 @@ export async function buildResultsWorkbook(
     { header: "Candidate", key: "candidate", width: 24 },
     { header: "Roll Number", key: "rollNumber", width: 16 },
     { header: "College", key: "collegeName", width: 24 },
+    { header: "Tag/Session", key: "tag", width: 22 },
     { header: "Status", key: "status", width: 12 },
     ...sectionNames.map((name, i) => ({
       header: name,
@@ -563,6 +566,7 @@ export async function buildResultsWorkbook(
       candidate: r.candidate,
       rollNumber: r.rollNumber,
       collegeName: r.collegeName,
+      tag: r.tag,
       status: r.status,
       score: r.score,
       totalMarks: r.totalMarks,

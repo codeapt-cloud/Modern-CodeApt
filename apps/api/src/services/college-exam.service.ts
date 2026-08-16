@@ -31,6 +31,7 @@ import {
   type CollegeExamListResponse,
   type CollegeExamResultsResponse,
   type CreateCollegeExamInput,
+  type DuplicateCollegeExamInput,
   type ExamBulkUploadKind,
   type ExamListItem,
   type ExamListResponse,
@@ -345,6 +346,44 @@ export async function updateCollegeExam(
   return examAdmin.getAdminExamDetail(exam._id.toString());
 }
 
+/**
+ * Duplicate an exam's whole paper into a NEW unpublished draft under a new
+ * title, same tenant + same targeting, with zero attempts. Copies exam-level
+ * settings (pass %, calculator, access-code gate) and the full section/question/
+ * test-case tree; does NOT copy public links or any attempt state.
+ */
+export async function duplicateCollegeExam(
+  collegeId: string,
+  actor: ExamActor,
+  examId: string,
+  input: DuplicateCollegeExamInput,
+): Promise<AdminExamDetail> {
+  const { scope, exam } = await forManage(collegeId, actor, (s) =>
+    requireTenantExam(s, examId),
+  );
+  // Re-validate the source's targeting under the actor's CURRENT scope so a
+  // faculty member can't clone an exam into units they no longer manage.
+  const actorScope = await resolveActorScope(scope, actor);
+  const orgUnits = await validateTargetUnits(
+    scope,
+    actorScope,
+    (exam.orgUnits ?? []).map((u) => u.toString()),
+  );
+  const copy = await ExamModel.create(
+    scope.attach({
+      title: input.title,
+      passPercentage: exam.passPercentage,
+      calculatorEnabled: exam.calculatorEnabled,
+      accessCodeEnabled: exam.accessCodeEnabled,
+      accessCode: exam.accessCode,
+      orgUnits,
+      isPublished: false,
+    }),
+  );
+  await examAdmin.cloneExamContent(exam._id, copy._id);
+  return examAdmin.getAdminExamDetail(copy._id.toString());
+}
+
 /** Publish / unpublish. Publishing requires at least one question. */
 export async function setCollegeExamPublished(
   collegeId: string,
@@ -529,6 +568,16 @@ export async function removePublicLink(
   await forManage(collegeId, actor, (s) => examOfLink(s, linkId));
   await examAdmin.deletePublicLink(linkId);
   return { deleted: true };
+}
+
+/** Export results for ONE public link (tenant + faculty-scope authorized). */
+export async function exportPublicLinkResults(
+  collegeId: string,
+  actor: ExamActor,
+  linkId: string,
+): Promise<{ buffer: Buffer; filename: string }> {
+  await forManage(collegeId, actor, (s) => examOfLink(s, linkId));
+  return examAdmin.exportPublicLinkResults(linkId);
 }
 
 export async function resetAttempts(

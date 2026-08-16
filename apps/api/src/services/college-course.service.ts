@@ -30,6 +30,7 @@ import {
 import { Types } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
+import { computeExpiresAt } from "../lib/enrollment-access.js";
 import { createTenantScope, type TenantScope } from "../lib/tenant-scope.js";
 import { EnrollmentModel, SubjectModel } from "../models/curriculum.model.js";
 import { ProfileModel, UserModel } from "../models/user.model.js";
@@ -175,6 +176,10 @@ export async function assignCourse(
   const subjectId = await assertGrantedCourse(courseId, grantedCourseIds);
   const students = await assertStudentsInScope(scope, actor, studentIds);
 
+  // Per-course access window, stamped only when a new assignment is inserted.
+  const subject = await SubjectModel.findById(subjectId).select("validityDays");
+  const expiresAt = computeExpiresAt(subject?.validityDays ?? 0);
+
   let assigned = 0;
   let alreadyAssigned = 0;
   for (const studentId of students) {
@@ -187,6 +192,7 @@ export async function assignCourse(
         $setOnInsert: {
           source: EnrollmentSource.COLLEGE,
           college: scope.collegeId,
+          expiresAt,
         },
       },
       { upsert: true },

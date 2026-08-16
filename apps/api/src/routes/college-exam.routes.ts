@@ -22,6 +22,7 @@ import {
   collegeExamAnalysisController,
   collegeExamAnalysisReportController,
   collegeExamResultsController,
+  collegeExportPublicLinkResultsController,
   collegeResetAttemptsController,
   createCollegeExamController,
   createCollegePublicLinkController,
@@ -32,6 +33,7 @@ import {
   deleteCollegeQuestionController,
   deleteCollegeSectionController,
   deleteCollegeTestCaseController,
+  duplicateCollegeExamController,
   getCollegeExamController,
   listCollegeExamsController,
   listStudentCollegeExamsController,
@@ -111,6 +113,11 @@ collegeExamRouter.post(
   "/c/:collegeSlug/exams/:examId/publish",
   ...author,
   setCollegeExamPublishController,
+);
+collegeExamRouter.post(
+  "/c/:collegeSlug/exams/:examId/duplicate",
+  ...author,
+  duplicateCollegeExamController,
 );
 collegeExamRouter.get(
   "/c/:collegeSlug/exams/:examId/results",
@@ -206,4 +213,9 @@ collegeExamRouter.delete(
   "/c/:collegeSlug/exam-public-links/:linkId",
   ...author,
   deleteCollegePublicLinkController,
+);
+collegeExamRouter.get(
+  "/c/:collegeSlug/exam-public-links/:linkId/results.xlsx",
+  ...author,
+  collegeExportPublicLinkResultsController,
 );

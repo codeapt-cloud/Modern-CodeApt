@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "seed:admin": "tsx src/scripts/seed-admin.ts",
     "backfill:tenancy": "tsx src/scripts/backfill-tenancy.ts",
+    "backfill:enrollment-expiry": "tsx src/scripts/backfill-enrollment-expiry.ts",
     "backfill:ai-entitlements": "tsx src/scripts/backfill-ai-entitlements.ts",
     "seed:curriculum": "tsx src/scripts/seed-curriculum.ts",
     "seed:challenges": "tsx src/scripts/seed-challenges.ts",

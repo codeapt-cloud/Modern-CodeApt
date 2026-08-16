@@ -35,6 +35,10 @@ import { Types, type HydratedDocument } from "mongoose";
 import { env } from "../config/env.js";
 import { AppError } from "../errors/app-error.js";
 import {
+  computeExpiresAt,
+  notExpiredFilter,
+} from "../lib/enrollment-access.js";
+import {
   getPaymentGateway,
   PaymentGatewayError,
 } from "../lib/payment-gateway/index.js";
@@ -95,8 +99,11 @@ async function isEnrolled(
   subjectId: Types.ObjectId,
 ): Promise<boolean> {
   return (
-    (await EnrollmentModel.exists({ user: userId, subject: subjectId })) !==
-    null
+    (await EnrollmentModel.exists({
+      user: userId,
+      subject: subjectId,
+      ...notExpiredFilter(),
+    })) !== null
   );
 }
 
@@ -188,15 +195,25 @@ async function grantEnrollment(
   subjectId: Types.ObjectId,
   orderId: Types.ObjectId,
 ): Promise<void> {
+  // Stamp the access window from the course's validity (null = lifetime). An
+  // upsert so a re-purchase after expiry EXTENDS access from now instead of
+  // colliding with the stale expired row.
+  const subject = await SubjectModel.findById(subjectId).select("validityDays");
+  const expiresAt = computeExpiresAt(subject?.validityDays ?? 0);
   try {
-    await EnrollmentModel.create({
-      user: userId,
-      subject: subjectId,
-      source: EnrollmentSource.ORDER,
-      order: orderId,
-    });
+    await EnrollmentModel.updateOne(
+      { user: userId, subject: subjectId },
+      {
+        $set: {
+          source: EnrollmentSource.ORDER,
+          order: orderId,
+          expiresAt,
+        },
+      },
+      { upsert: true },
+    );
   } catch (err) {
-    // Unique (user, subject): already enrolled (free path or a prior callback).
+    // Unique (user, subject): a concurrent grant raced us — safe to ignore.
     if (!isDuplicateKeyError(err)) throw err;
   }
 }

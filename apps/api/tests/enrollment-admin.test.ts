@@ -8,6 +8,7 @@
  */
 import ExcelJS from "exceljs";
 import type { Express } from "express";
+import { Types } from "mongoose";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
@@ -57,6 +58,25 @@ async function makeSubject(token: string): Promise<string> {
     .set(auth(token))
     .send({ name: `Enroll Subject ${counter}` });
   return res.body.id as string;
+}
+
+/** Register a plain student and return their user id. */
+async function makeStudent(collegeName = "Acme"): Promise<string> {
+  counter += 1;
+  const u = `enrstu${counter}`;
+  const res = await request(app)
+    .post("/api/auth/register")
+    .send({
+      username: u,
+      email: `${u}@example.com`,
+      password: "Password123",
+      fullName: `Stu ${counter}`,
+      rollNumber: `STU-${counter}`,
+      collegeName,
+      phoneNumber: "9999999999",
+      state: "KA",
+    });
+  return res.body.user.id as string;
 }
 
 type Row = Record<string, string>;
@@ -241,5 +261,158 @@ describe("admin bulk-enroll", () => {
       .set(auth(login.body.accessToken as string))
       .send({ subjectIds: [s1], fileBase64 });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("admin manage enrollments (per course)", () => {
+  it("adds existing users, lists/filters them, edits expiry, and removes", async () => {
+    const token = await adminToken();
+    const sid = await makeSubject(token);
+    const u1 = await makeStudent();
+    const u2 = await makeStudent();
+
+    const added = await request(app)
+      .post(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token))
+      .send({ userIds: [u1, u2] });
+    expect(added.status).toBe(200);
+    expect(added.body.added).toBe(2);
+
+    // Re-adding is idempotent (already enrolled → skipped, not duplicated).
+    const again = await request(app)
+      .post(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token))
+      .send({ userIds: [u1] });
+    expect(again.body.added).toBe(0);
+    expect(again.body.skipped).toBe(1);
+
+    const list = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token));
+    expect(list.status).toBe(200);
+    expect(list.body.total).toBe(2);
+    const row = list.body.items.find(
+      (i: { userId: string }) => i.userId === u1,
+    );
+    expect(row.source).toBe("manual");
+    expect(row.active).toBe(true);
+    expect(row.managed).toBe(true);
+
+    // Edit expiry to the past → the row becomes expired + shows in the filter.
+    const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const patched = await request(app)
+      .patch(`/api/admin/subjects/${sid}/enrollments/${row.enrollmentId}`)
+      .set(auth(token))
+      .send({ expiresAt: past });
+    expect(patched.status).toBe(200);
+    const expired = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollments`)
+      .query({ status: "expired" })
+      .set(auth(token));
+    expect(
+      expired.body.items.map((i: { userId: string }) => i.userId),
+    ).toContain(u1);
+
+    // Remove u2 → total drops to 1.
+    const removed = await request(app)
+      .delete(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token))
+      .send({ userIds: [u2] });
+    expect(removed.body.removed).toBe(1);
+    const after = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token));
+    expect(after.body.total).toBe(1);
+  });
+
+  it("protects college-assigned enrollments from removal + expiry edits", async () => {
+    const token = await adminToken();
+    const sid = await makeSubject(token);
+    const u = await makeStudent();
+    // Simulate a college assignment directly.
+    await EnrollmentModel.create({
+      user: u,
+      subject: sid,
+      source: "college",
+      college: new Types.ObjectId(),
+    });
+
+    const list = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token));
+    const row = list.body.items.find(
+      (i: { userId: string }) => i.userId === u,
+    );
+    expect(row.source).toBe("college");
+    expect(row.managed).toBe(false);
+
+    // Remove is a no-op for college rows; the enrollment survives.
+    const removed = await request(app)
+      .delete(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token))
+      .send({ userIds: [u] });
+    expect(removed.body.removed).toBe(0);
+    expect(
+      await EnrollmentModel.countDocuments({ subject: sid, user: u }),
+    ).toBe(1);
+
+    // Expiry edit is refused (404 — protected).
+    const patched = await request(app)
+      .patch(`/api/admin/subjects/${sid}/enrollments/${row.enrollmentId}`)
+      .set(auth(token))
+      .send({ expiresAt: null });
+    expect(patched.status).toBe(404);
+  });
+
+  it("lists a course's colleges and filters the roster by college", async () => {
+    const token = await adminToken();
+    const sid = await makeSubject(token);
+    const alpha = await makeStudent("Alpha Institute");
+    const beta = await makeStudent("Beta College");
+    await request(app)
+      .post(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token))
+      .send({ userIds: [alpha, beta] });
+
+    // Distinct colleges present in the roster (filter options).
+    const colleges = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollment-colleges`)
+      .set(auth(token));
+    expect(colleges.status).toBe(200);
+    expect(colleges.body.colleges).toEqual(
+      expect.arrayContaining(["Alpha Institute", "Beta College"]),
+    );
+
+    // Filtering by college narrows the roster to that college's learners.
+    const filtered = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollments`)
+      .query({ college: "Alpha Institute" })
+      .set(auth(token));
+    expect(filtered.body.total).toBe(1);
+    expect(filtered.body.items[0].userId).toBe(alpha);
+  });
+
+  it("exports the course roster as xlsx", async () => {
+    const token = await adminToken();
+    const sid = await makeSubject(token);
+    const u = await makeStudent();
+    await request(app)
+      .post(`/api/admin/subjects/${sid}/enrollments`)
+      .set(auth(token))
+      .send({ userIds: [u] });
+
+    const res = await request(app)
+      .get(`/api/admin/subjects/${sid}/enrollments/export.xlsx`)
+      .set(auth(token))
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => chunks.push(c));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body as Buffer);
+    expect(wb.getWorksheet("Enrollments")).toBeTruthy();
   });
 });

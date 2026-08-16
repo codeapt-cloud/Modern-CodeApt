@@ -36,6 +36,7 @@ function fakeGroup() {
     createPublicLink: vi.fn(rec("createPublicLink")),
     updatePublicLink: vi.fn(rec("updatePublicLink")),
     deletePublicLink: vi.fn(rec("deletePublicLink")),
+    exportPublicLinkResults: vi.fn(rec("exportPublicLinkResults")),
   } satisfies CollegeExamAuthoringGroup;
   return { group, calls };
 }
@@ -57,6 +58,7 @@ describe("collegeExamAuthoringApi", () => {
         "deleteQuestion",
         "deleteSection",
         "deleteTestCase",
+        "exportPublicLinkResults",
         "updatePublicLink",
         "updateQuestion",
         "updateSection",

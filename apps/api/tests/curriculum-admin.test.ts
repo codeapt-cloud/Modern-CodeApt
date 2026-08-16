@@ -6,6 +6,7 @@
  */
 import { TopicType } from "@codeapt/shared";
 import type { Express } from "express";
+import { Types } from "mongoose";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
@@ -216,6 +217,88 @@ describe("curriculum admin — Subject", () => {
     expect(updated.status).toBe(200);
     expect(updated.body.slug).toBe("data-structures"); // stable
     expect(updated.body.isVisible).toBe(false);
+  });
+
+  it("stores validityDays and stays editable with a legacy (non-URL) image", async () => {
+    const token = await adminToken();
+    // A legacy course whose image is NOT a strict URL must remain saveable.
+    const created = await request(app)
+      .post("/api/admin/subjects")
+      .set(auth(token))
+      .send({ name: "Legacy Course", image: "courses/legacy.png", validityDays: 180 });
+    expect(created.status).toBe(201);
+    expect(created.body.validityDays).toBe(180);
+    const sid = created.body.id as string;
+
+    // Editing (e.g. changing validity) round-trips the legacy image without 400.
+    const updated = await request(app)
+      .patch(`/api/admin/subjects/${sid}`)
+      .set(auth(token))
+      .send({ name: "Legacy Course", image: "courses/legacy.png", validityDays: 30 });
+    expect(updated.status).toBe(200);
+    expect(updated.body.validityDays).toBe(30);
+  });
+
+  it("recomputes enrollment expiry from each learner's own enrolment date", async () => {
+    const token = await adminToken();
+    const created = await request(app)
+      .post("/api/admin/subjects")
+      .set(auth(token))
+      .send({ name: "Expiring Course", validityDays: 180 });
+    const sid = created.body.id as string;
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    // One enrolled 300 days ago (expired under a 180-day window), one recent.
+    await EnrollmentModel.collection.insertMany([
+      {
+        user: new Types.ObjectId(),
+        subject: new Types.ObjectId(sid),
+        source: "manual",
+        expiresAt: null,
+        createdAt: new Date(now - 300 * DAY),
+        updatedAt: new Date(now - 300 * DAY),
+      },
+      {
+        user: new Types.ObjectId(),
+        subject: new Types.ObjectId(sid),
+        source: "manual",
+        expiresAt: null,
+        createdAt: new Date(now - 10 * DAY),
+        updatedAt: new Date(now - 10 * DAY),
+      },
+    ]);
+
+    const res = await request(app)
+      .post(`/api/admin/subjects/${sid}/recompute-expiry`)
+      .set(auth(token));
+    expect(res.status).toBe(200);
+    expect(res.body.updated).toBe(2);
+    expect(res.body.expired).toBe(1);
+
+    const rows = await EnrollmentModel.find({ subject: sid })
+      .sort({ createdAt: 1 })
+      .lean();
+    // Old enrolment → expiry already past; recent → still in the future.
+    expect(new Date(rows[0]!.expiresAt as Date).getTime()).toBeLessThan(now);
+    expect(new Date(rows[1]!.expiresAt as Date).getTime()).toBeGreaterThan(now);
+
+    // The admin "enrolled" count reflects CURRENTLY active only (expired drops).
+    const afterExpiry = await request(app)
+      .get(`/api/admin/subjects/${sid}`)
+      .set(auth(token));
+    expect(afterExpiry.body.enrollmentCount).toBe(1);
+
+    // Switching to lifetime (0) and recomputing clears every expiry.
+    await request(app)
+      .patch(`/api/admin/subjects/${sid}`)
+      .set(auth(token))
+      .send({ name: "Expiring Course", validityDays: 0 });
+    const res2 = await request(app)
+      .post(`/api/admin/subjects/${sid}/recompute-expiry`)
+      .set(auth(token));
+    expect(res2.body.expired).toBe(0);
+    const cleared = await EnrollmentModel.find({ subject: sid }).lean();
+    expect(cleared.every((r) => r.expiresAt == null)).toBe(true);
   });
 
   it("rejects an unknown programId with 404", async () => {

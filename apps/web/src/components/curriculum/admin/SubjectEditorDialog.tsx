@@ -52,6 +52,7 @@ interface SubjectFormValues {
   description: string;
   priceRupees: number;
   discountRupees: number;
+  validityDays: number;
   isPopular: boolean;
   isVisible: boolean;
 }
@@ -65,6 +66,7 @@ function toDefaults(subject: AdminSubject | null): SubjectFormValues {
     description: subject?.description ?? "",
     priceRupees: subject ? paiseToRupeeInput(subject.price) : 0,
     discountRupees: subject ? paiseToRupeeInput(subject.discountPrice) : 0,
+    validityDays: subject?.validityDays ?? 0,
     isPopular: subject?.isPopular ?? false,
     isVisible: subject?.isVisible ?? true,
   };
@@ -81,6 +83,7 @@ function toPayload(values: SubjectFormValues): AdminSubjectUpsert {
     description: values.description,
     price: rupeesToPaise(values.priceRupees),
     discountPrice: rupeesToPaise(values.discountRupees),
+    validityDays: Math.max(0, Math.trunc(values.validityDays) || 0),
     isPopular: values.isPopular,
     isVisible: values.isVisible,
   };
@@ -221,6 +224,19 @@ export function SubjectEditorDialog({
               />
             </FormField>
           </div>
+
+          <FormField
+            label="Access validity (days)"
+            hint="0 = lifetime access. Otherwise access ends this many days after each learner enrols."
+            error={errors.validityDays?.message}
+          >
+            <Input
+              type="number"
+              min={0}
+              step="1"
+              {...register("validityDays", { valueAsNumber: true })}
+            />
+          </FormField>
 
           <FormField
             label="Course image"

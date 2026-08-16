@@ -13,6 +13,7 @@ import { CourseThumb } from "../components/course/CourseThumb.js";
 import { PageHeader } from "../components/layout/PageHeader.js";
 import { Stagger, StaggerItem } from "../components/motion/index.js";
 import { Badge } from "../components/ui/badge.js";
+import { formatExpiry } from "../lib/expiry.js";
 import { Button } from "../components/ui/button.js";
 import { Card } from "../components/ui/card.js";
 import { EmptyState } from "../components/ui/empty-state.js";
@@ -228,6 +229,14 @@ function EnrollmentCard({ item }: { item: EnrollmentListItem }) {
             </span>
           ) : null}
           <h3 className="font-semibold text-ink">{item.subject.name}</h3>
+          {(() => {
+            const exp = formatExpiry(item.expiresAt);
+            return exp ? (
+              <Badge variant={exp.tone === "warning" ? "warning" : "neutral"}>
+                {exp.text}
+              </Badge>
+            ) : null;
+          })()}
           <div className="mt-auto space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="text-ink-muted">

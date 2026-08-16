@@ -509,6 +509,8 @@ export type ProgressInfo = z.infer<typeof progressInfoSchema>;
 export const enrollmentInfoSchema = z.object({
   isEnrolled: z.boolean(),
   enrolledAt: z.string().datetime().nullable(),
+  /** When access ends (null = no expiry). Drives the in-player countdown. */
+  expiresAt: z.string().datetime().nullable(),
 });
 export type EnrollmentInfo = z.infer<typeof enrollmentInfoSchema>;
 
@@ -524,6 +526,8 @@ export const subjectDetailSchema = z.object({
   isFree: z.boolean(),
   isPopular: z.boolean(),
   program: programSummarySchema.nullable(),
+  /** Access window granted on enrollment, in days (0 = lifetime). */
+  validityDays: z.number().int().nonnegative(),
   moduleCount: z.number().int().nonnegative(),
   topicCount: z.number().int().nonnegative(),
   modules: z.array(moduleNodeSchema),
@@ -550,6 +554,8 @@ export const enrollmentListItemSchema = z.object({
     program: programSummarySchema.nullable(),
   }),
   enrolledAt: z.string().datetime(),
+  /** When access ends (null = no expiry). Drives the days-left badge. */
+  expiresAt: z.string().datetime().nullable(),
   progress: progressInfoSchema,
 });
 export type EnrollmentListItem = z.infer<typeof enrollmentListItemSchema>;
@@ -1052,6 +1058,8 @@ export const adminPublicLinkUpsertSchema = z
     /** Gate anonymous starts behind a code the organiser reads out. */
     accessCodeEnabled: z.boolean().default(false),
     accessCode: z.string().trim().max(64).default(""),
+    /** Admin-only label to differentiate sessions (e.g. "Section 2 CSE"). */
+    tag: z.string().trim().max(120).default(""),
   })
   .refine((v) => !v.accessCodeEnabled || v.accessCode.length >= 4, {
     message: "Enter a start code of at least 4 characters to enable the code gate",
@@ -1067,6 +1075,8 @@ export const publicLinkSchema = z.object({
   /** Author-only: echoed back so the organiser can read out / copy the code. */
   accessCodeEnabled: z.boolean(),
   accessCode: z.string(),
+  /** Admin-only session label (never shown to takers). */
+  tag: z.string(),
 });
 export type PublicLink = z.infer<typeof publicLinkSchema>;
 
@@ -1199,16 +1209,17 @@ export const adminSubjectUpsertSchema = z.object({
   /** Program to file the subject under; null/omitted = unfiled. */
   programId: z.string().min(1).nullable().optional(),
   /**
-   * Stored as a URL string (or empty). Populated by the Cloudinary signed-upload
-   * pipeline (ImageUpload → secure_url); a pasted URL is still accepted for
-   * backward-compat with existing records.
+   * Image reference (or empty). Normally a Cloudinary secure_url from the
+   * signed-upload pipeline, but tolerant of legacy/non-URL values so existing
+   * records stay editable — a hard `.url()` check here blocks saving ANY edit
+   * (name, price, validity …) on a course whose stored image predates it.
    */
-  image: z
-    .union([z.string().trim().url(), z.literal("")])
-    .default(""),
+  image: z.string().trim().max(2048).default(""),
   description: z.string().default(""),
   price: z.number().int().nonnegative().default(0), // paise
   discountPrice: z.number().int().nonnegative().default(0), // paise
+  /** Access window granted on enrollment, in days (0 = lifetime, no expiry). */
+  validityDays: z.number().int().nonnegative().default(0),
   isPopular: z.boolean().default(false),
   isVisible: z.boolean().default(true),
 });
@@ -1224,12 +1235,24 @@ export const adminSubjectSchema = z.object({
   description: z.string(),
   price: z.number().int().nonnegative(),
   discountPrice: z.number().int().nonnegative(),
+  validityDays: z.number().int().nonnegative(),
   isPopular: z.boolean(),
   isVisible: z.boolean(),
   moduleCount: z.number().int().nonnegative(),
   enrollmentCount: z.number().int().nonnegative(),
 });
 export type AdminSubject = z.infer<typeof adminSubjectSchema>;
+
+/** Result of recomputing a course's enrollment expiries from its validity. */
+export const recomputeExpiryResponseSchema = z.object({
+  /** Enrollments whose expiry was recomputed. */
+  updated: z.number().int().nonnegative(),
+  /** Of those, how many are now past their expiry (access ended). */
+  expired: z.number().int().nonnegative(),
+});
+export type RecomputeExpiryResponse = z.infer<
+  typeof recomputeExpiryResponseSchema
+>;
 export const adminSubjectListResponseSchema = z.object({
   items: z.array(adminSubjectSchema),
 });
@@ -1835,6 +1858,97 @@ export const bulkEnrollResponseSchema = z.object({
   errors: z.array(topicRowErrorSchema),
 });
 export type BulkEnrollResponse = z.infer<typeof bulkEnrollResponseSchema>;
+
+// --- Admin: per-course enrollment management --------------------------------
+
+export const ADMIN_ENROLLMENT_DEFAULT_PAGE_SIZE = 25;
+export const ADMIN_ENROLLMENT_MAX_PAGE_SIZE = 100;
+
+/** Paginated/filtered roster query for one course's enrollments. */
+export const adminEnrollmentListQuerySchema = z.object({
+  q: z.string().trim().default(""),
+  status: z.enum(["all", "active", "expired"]).default("all"),
+  /** Exact-match on the learner's college (Profile.collegeName). */
+  college: z.string().trim().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(ADMIN_ENROLLMENT_MAX_PAGE_SIZE)
+    .default(ADMIN_ENROLLMENT_DEFAULT_PAGE_SIZE),
+});
+export type AdminEnrollmentListQuery = z.infer<
+  typeof adminEnrollmentListQuerySchema
+>;
+
+/** Distinct colleges present among a course's enrollments (filter options). */
+export const adminEnrollmentCollegesResponseSchema = z.object({
+  colleges: z.array(z.string()),
+});
+export type AdminEnrollmentCollegesResponse = z.infer<
+  typeof adminEnrollmentCollegesResponseSchema
+>;
+
+export const adminEnrollmentItemSchema = z.object({
+  enrollmentId: z.string(),
+  userId: z.string(),
+  fullName: z.string(),
+  email: z.string(),
+  rollNumber: z.string(),
+  /** "order" (paid) | "manual" (admin/roster) | "college" (tenant-assigned). */
+  source: z.enum(["order", "manual", "college"]),
+  enrolledAt: z.string().datetime(),
+  expiresAt: z.string().datetime().nullable(),
+  active: z.boolean(),
+  /** Admin may remove/edit this row (false for college-assigned enrollments). */
+  managed: z.boolean(),
+});
+export type AdminEnrollmentItem = z.infer<typeof adminEnrollmentItemSchema>;
+
+export const adminEnrollmentListResponseSchema = z.object({
+  items: z.array(adminEnrollmentItemSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+});
+export type AdminEnrollmentListResponse = z.infer<
+  typeof adminEnrollmentListResponseSchema
+>;
+
+/** Enroll existing users into a course (by user id). */
+export const adminEnrollmentAddSchema = z.object({
+  userIds: z.array(z.string().min(1)).min(1, "Select at least one user"),
+});
+export type AdminEnrollmentAdd = z.infer<typeof adminEnrollmentAddSchema>;
+export const adminEnrollmentAddResponseSchema = z.object({
+  added: z.number().int().nonnegative(),
+  /** Already enrolled (or protected college rows) — left untouched. */
+  skipped: z.number().int().nonnegative(),
+});
+export type AdminEnrollmentAddResponse = z.infer<
+  typeof adminEnrollmentAddResponseSchema
+>;
+
+/** Remove enrollments from a course (by user id); college rows are protected. */
+export const adminEnrollmentRemoveSchema = z.object({
+  userIds: z.array(z.string().min(1)).min(1, "Select at least one user"),
+});
+export type AdminEnrollmentRemove = z.infer<typeof adminEnrollmentRemoveSchema>;
+export const adminEnrollmentRemoveResponseSchema = z.object({
+  removed: z.number().int().nonnegative(),
+});
+export type AdminEnrollmentRemoveResponse = z.infer<
+  typeof adminEnrollmentRemoveResponseSchema
+>;
+
+/** Set/clear one enrollment's access expiry (null = lifetime). */
+export const adminEnrollmentSetExpirySchema = z.object({
+  expiresAt: z.string().datetime().nullable(),
+});
+export type AdminEnrollmentSetExpiry = z.infer<
+  typeof adminEnrollmentSetExpirySchema
+>;
 
 // ---------------------------------------------------------------------------
 // Generic API error envelope
@@ -4791,6 +4905,14 @@ export const updateCollegeExamSchema = z
     },
   );
 export type UpdateCollegeExamInput = z.infer<typeof updateCollegeExamSchema>;
+
+/** Duplicate a college exam's whole paper (sections/questions/test cases) under a new title. */
+export const duplicateCollegeExamSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+});
+export type DuplicateCollegeExamInput = z.infer<
+  typeof duplicateCollegeExamSchema
+>;
 
 export const setExamPublishSchema = z.object({
   isPublished: z.boolean(),

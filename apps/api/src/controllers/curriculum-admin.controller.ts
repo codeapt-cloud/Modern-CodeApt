@@ -101,6 +101,19 @@ export const adminDeleteSubjectController = asyncHandler(
   },
 );
 
+/** Recompute all enrollments' expiry from this course's current validity. */
+export const adminRecomputeSubjectExpiryController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await admin.recomputeSubjectEnrollmentExpiry(
+          req.params.subjectId ?? "",
+        ),
+      );
+  },
+);
+
 // --- Module ----------------------------------------------------------------
 
 export const adminListModulesController = asyncHandler(

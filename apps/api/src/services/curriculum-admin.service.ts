@@ -52,11 +52,13 @@ import {
   type AdminTopic,
   type AdminTopicListResponse,
   type AdminTopicUpsert,
+  type RecomputeExpiryResponse,
   type TopicExcelUploadResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument, type Model } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
+import { notExpiredFilter } from "../lib/enrollment-access.js";
 import { slugify } from "../lib/slug.js";
 import { parseTopicWorkbook } from "../lib/topic-excel.js";
 import { extractVideoId } from "../lib/youtube.js";
@@ -109,8 +111,10 @@ async function countBy(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- heterogeneous models; only aggregate() is used
   model: Model<any>,
   field: string,
+  match?: Record<string, unknown>,
 ): Promise<Map<string, number>> {
   const rows = await model.aggregate<{ _id: Types.ObjectId | null; c: number }>([
+    ...(match ? [{ $match: match }] : []),
     { $group: { _id: `$${field}`, c: { $sum: 1 } } },
   ]);
   return new Map(rows.filter((r) => r._id).map((r) => [r._id!.toString(), r.c]));
@@ -287,6 +291,7 @@ function toAdminSubject(
     description: s.description,
     price: s.price,
     discountPrice: s.discountPrice,
+    validityDays: s.validityDays,
     isPopular: s.isPopular,
     isVisible: s.isVisible,
     moduleCount,
@@ -332,7 +337,9 @@ export async function listSubjectsAdmin(
   const subjects = await SubjectModel.find(filter).sort({ createdAt: -1, _id: -1 });
   const [moduleCounts, enrollCounts, programs] = await Promise.all([
     countBy(ModuleModel, "subject"),
-    countBy(EnrollmentModel, "subject"),
+    // "Enrolled" = CURRENTLY active (expired enrollments are excluded, so the
+    // count drops after an expiry recompute).
+    countBy(EnrollmentModel, "subject", notExpiredFilter()),
     ProgramModel.find().select("name").lean<{ _id: Types.ObjectId; name: string }[]>(),
   ]);
   const programNames = new Map(programs.map((p) => [p._id.toString(), p.name]));
@@ -352,7 +359,11 @@ export async function getSubjectAdmin(id: string): Promise<AdminSubject> {
   const subject = await loadSubject(id);
   const [moduleCount, enrollmentCount, programName] = await Promise.all([
     ModuleModel.countDocuments({ subject: subject._id }),
-    EnrollmentModel.countDocuments({ subject: subject._id }),
+    // Currently active enrollments (expired excluded).
+    EnrollmentModel.countDocuments({
+      subject: subject._id,
+      ...notExpiredFilter(),
+    }),
     programNameFor(subject.program),
   ]);
   return toAdminSubject(subject, programName, moduleCount, enrollmentCount);
@@ -374,6 +385,7 @@ export async function createSubject(
     description: input.description,
     price: input.price,
     discountPrice: input.discountPrice,
+    validityDays: input.validityDays,
     isPopular: input.isPopular,
     isVisible: input.isVisible,
   });
@@ -400,13 +412,17 @@ export async function updateSubject(
     description: input.description,
     price: input.price,
     discountPrice: input.discountPrice,
+    validityDays: input.validityDays,
     isPopular: input.isPopular,
     isVisible: input.isVisible,
   });
   await subject.save();
   const [moduleCount, enrollmentCount] = await Promise.all([
     ModuleModel.countDocuments({ subject: subject._id }),
-    EnrollmentModel.countDocuments({ subject: subject._id }),
+    EnrollmentModel.countDocuments({
+      subject: subject._id,
+      ...notExpiredFilter(),
+    }),
   ]);
   return toAdminSubject(
     subject,
@@ -414,6 +430,46 @@ export async function updateSubject(
     moduleCount,
     enrollmentCount,
   );
+}
+
+/**
+ * Recompute every enrollment's `expiresAt` for this course from its OWN
+ * enrollment date + the course's CURRENT validity (0 = lifetime → clears the
+ * expiry). Run after changing a course's validity so existing learners are
+ * brought in line — overwrites prior expiries (unlike the null-only backfill).
+ * Returns how many enrollments were recomputed and how many are now expired.
+ */
+export async function recomputeSubjectEnrollmentExpiry(
+  id: string,
+): Promise<RecomputeExpiryResponse> {
+  const subject = await loadSubject(id);
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  if (subject.validityDays > 0) {
+    // Pipeline update so each row's expiry derives from its own createdAt.
+    await EnrollmentModel.updateMany({ subject: subject._id }, [
+      {
+        $set: {
+          expiresAt: { $add: ["$createdAt", subject.validityDays * DAY_MS] },
+        },
+      },
+    ]);
+  } else {
+    // Lifetime → no expiry.
+    await EnrollmentModel.updateMany(
+      { subject: subject._id },
+      { $set: { expiresAt: null } },
+    );
+  }
+  const [updated, expired] = await Promise.all([
+    EnrollmentModel.countDocuments({ subject: subject._id }),
+    subject.validityDays > 0
+      ? EnrollmentModel.countDocuments({
+          subject: subject._id,
+          expiresAt: { $ne: null, $lte: new Date() },
+        })
+      : Promise.resolve(0),
+  ]);
+  return { updated, expired };
 }
 
 export async function deleteSubject(id: string): Promise<{ deleted: true }> {

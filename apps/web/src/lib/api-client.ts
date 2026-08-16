@@ -152,9 +152,14 @@ import {
   type AdminQuizQuestionListResponse,
   type AdminQuizQuestionUpsert,
   type AdminReorder,
+  type AdminEnrollmentAddResponse,
+  type AdminEnrollmentCollegesResponse,
+  type AdminEnrollmentListResponse,
+  type AdminEnrollmentRemoveResponse,
   type AdminSubject,
   type AdminSubjectListResponse,
   type AdminSubjectUpsert,
+  type RecomputeExpiryResponse,
   type AdminTopic,
   type BulkEnrollResponse,
   type AdminTopicListResponse,
@@ -1686,6 +1691,18 @@ export const api = {
       );
       return data;
     },
+    /** Duplicate the whole paper into a new unpublished draft under a new title. */
+    duplicate: async (
+      slug: string,
+      examId: string,
+      title: string,
+    ): Promise<AdminExamDetail> => {
+      const { data } = await http.post<AdminExamDetail>(
+        `${API_PREFIX}/c/${slug}/exams/${examId}/duplicate`,
+        { title },
+      );
+      return data;
+    },
     /** Tenant-scoped per-student results (no xlsx — JSON table). */
     results: async (
       slug: string,
@@ -1890,6 +1907,21 @@ export const api = {
     },
     deletePublicLink: async (slug: string, linkId: string): Promise<void> => {
       await http.delete(`${API_PREFIX}/c/${slug}/exam-public-links/${linkId}`);
+    },
+    exportPublicLinkResults: async (
+      slug: string,
+      linkId: string,
+    ): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(
+        `${API_PREFIX}/c/${slug}/exam-public-links/${linkId}/results.xlsx`,
+        { responseType: "blob" },
+      );
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? "results.xlsx",
+      };
     },
   },
 
@@ -2786,6 +2818,21 @@ export const api = {
     deletePublicLink: async (linkId: string): Promise<void> => {
       await http.delete(`${API_PREFIX}/admin/public-links/${linkId}`);
     },
+    /** Download results for ONE public link (its anonymous takers only). */
+    exportPublicLinkResults: async (
+      linkId: string,
+    ): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(
+        `${API_PREFIX}/admin/public-links/${linkId}/results.xlsx`,
+        { responseType: "blob" },
+      );
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? "results.xlsx",
+      };
+    },
     /** Per-user attempt-counter reset (audited). Returns the reset counter. */
     resetAttempts: async (
       examId: string,
@@ -2920,6 +2967,15 @@ export const api = {
       remove: async (id: string): Promise<{ deleted: true }> => {
         const { data } = await http.delete<{ deleted: true }>(
           `${API_PREFIX}/admin/subjects/${id}`,
+        );
+        return data;
+      },
+      /** Recompute existing enrollments' expiry from this course's validity. */
+      recomputeExpiry: async (
+        id: string,
+      ): Promise<RecomputeExpiryResponse> => {
+        const { data } = await http.post<RecomputeExpiryResponse>(
+          `${API_PREFIX}/admin/subjects/${id}/recompute-expiry`,
         );
         return data;
       },
@@ -3122,6 +3178,81 @@ export const api = {
         return {
           blob: res.data as Blob,
           filename: match?.[1] ?? "bulk-enroll-roster-template.xlsx",
+        };
+      },
+      /** Paginated/filtered roster of a course's enrollments (admin). */
+      list: async (
+        subjectId: string,
+        params: {
+          q?: string;
+          status?: "all" | "active" | "expired";
+          college?: string;
+          page?: number;
+          pageSize?: number;
+        },
+      ): Promise<AdminEnrollmentListResponse> => {
+        const { data } = await http.get<AdminEnrollmentListResponse>(
+          `${API_PREFIX}/admin/subjects/${subjectId}/enrollments`,
+          { params },
+        );
+        return data;
+      },
+      /** Distinct colleges present in this course's roster (filter options). */
+      colleges: async (
+        subjectId: string,
+      ): Promise<AdminEnrollmentCollegesResponse> => {
+        const { data } = await http.get<AdminEnrollmentCollegesResponse>(
+          `${API_PREFIX}/admin/subjects/${subjectId}/enrollment-colleges`,
+        );
+        return data;
+      },
+      /** Enroll existing users (by id) into a course. */
+      add: async (
+        subjectId: string,
+        userIds: string[],
+      ): Promise<AdminEnrollmentAddResponse> => {
+        const { data } = await http.post<AdminEnrollmentAddResponse>(
+          `${API_PREFIX}/admin/subjects/${subjectId}/enrollments`,
+          { userIds },
+        );
+        return data;
+      },
+      /** Remove enrollments (by user id) — college-assigned rows are protected. */
+      remove: async (
+        subjectId: string,
+        userIds: string[],
+      ): Promise<AdminEnrollmentRemoveResponse> => {
+        const { data } = await http.delete<AdminEnrollmentRemoveResponse>(
+          `${API_PREFIX}/admin/subjects/${subjectId}/enrollments`,
+          { data: { userIds } },
+        );
+        return data;
+      },
+      /** Set/clear one enrollment's access expiry (null = lifetime). */
+      setExpiry: async (
+        subjectId: string,
+        enrollmentId: string,
+        expiresAt: string | null,
+      ): Promise<{ updated: true }> => {
+        const { data } = await http.patch<{ updated: true }>(
+          `${API_PREFIX}/admin/subjects/${subjectId}/enrollments/${enrollmentId}`,
+          { expiresAt },
+        );
+        return data;
+      },
+      /** Download the course's enrollment roster as .xlsx. */
+      exportRoster: async (
+        subjectId: string,
+      ): Promise<{ blob: Blob; filename: string }> => {
+        const res = await http.get(
+          `${API_PREFIX}/admin/subjects/${subjectId}/enrollments/export.xlsx`,
+          { responseType: "blob" },
+        );
+        const disposition = String(res.headers["content-disposition"] ?? "");
+        const match = /filename="?([^"]+)"?/.exec(disposition);
+        return {
+          blob: res.data as Blob,
+          filename: match?.[1] ?? "enrolments.xlsx",
         };
       },
     },

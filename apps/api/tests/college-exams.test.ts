@@ -206,6 +206,44 @@ describe("college exams — authoring, taking, results (reused engine)", () => {
     expect(results.body.items[0].rollNumber).toBe("R1");
   });
 
+  it("duplicates an exam's whole paper into a fresh unpublished draft", async () => {
+    const { adminToken } = await setupCollege("ce-dup");
+    const examId = await authorPublishedExam("ce-dup", adminToken);
+
+    const dup = await request(app)
+      .post(`/api/c/ce-dup/exams/${examId}/duplicate`)
+      .set(auth(adminToken))
+      .send({ title: "Copy — Set B" });
+    expect(dup.status).toBe(201);
+    expect(dup.body.id).not.toBe(examId);
+    expect(dup.body.title).toBe("Copy — Set B");
+
+    // Source detail to compare the copied tree.
+    const src = await request(app)
+      .get(`/api/c/ce-dup/exams/${examId}`)
+      .set(auth(adminToken));
+    expect(dup.body.sections).toHaveLength(src.body.sections.length);
+    expect(dup.body.sections[0].questions).toHaveLength(
+      src.body.sections[0].questions.length,
+    );
+    // Correct answers carried over; marks re-summed.
+    expect(dup.body.sections[0].questions[0].correctOptions).toEqual(
+      src.body.sections[0].questions[0].correctOptions,
+    );
+    expect(dup.body.totalMarks).toBe(src.body.totalMarks);
+
+    // It's a fresh DRAFT with no attempts — it must not appear published, and
+    // starting it (as an unpublished exam) is refused.
+    const list = await request(app)
+      .get("/api/c/ce-dup/exams/manage")
+      .set(auth(adminToken));
+    const copyRow = list.body.items.find(
+      (e: { id: string }) => e.id === dup.body.id,
+    );
+    expect(copyRow.isPublished).toBe(false);
+    expect(copyRow.attemptCount).toBe(0);
+  });
+
   it("gates a college exam start behind its per-exam access code", async () => {
     const { adminToken } = await setupCollege("ce-code");
     const dept = await createUnit("ce-code", adminToken, {

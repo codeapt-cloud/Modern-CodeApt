@@ -54,6 +54,68 @@ async function requireExamDoc(examId: string): Promise<ExamDoc> {
   return exam;
 }
 
+/**
+ * Deep-copy the whole paper (sections → questions → test cases, incl. hidden
+ * cases and correctOptions) from one exam onto another, EMPTY target exam,
+ * re-linking every child to the new parents. Used by the college "duplicate
+ * exam" flow. Does NOT copy attempts/counters/public links — the caller creates
+ * the target as a fresh unpublished draft. Recomputes the target's totalMarks.
+ */
+export async function cloneExamContent(
+  sourceExamId: Types.ObjectId,
+  targetExamId: Types.ObjectId,
+): Promise<void> {
+  const sections = await ExamSectionModel.find({ exam: sourceExamId }).sort({
+    order: 1,
+    _id: 1,
+  });
+  for (const s of sections) {
+    const newSection = await ExamSectionModel.create({
+      exam: targetExamId,
+      name: s.name,
+      order: s.order,
+      durationMinutes: s.durationMinutes,
+      description: s.description,
+    });
+    const questions = await ExamQuestionModel.find({ section: s._id }).sort({
+      order: 1,
+      _id: 1,
+    });
+    for (const q of questions) {
+      const newQuestion = await ExamQuestionModel.create({
+        section: newSection._id,
+        exam: targetExamId,
+        questionType: q.questionType,
+        text: q.text,
+        order: q.order,
+        options: q.options,
+        correctOptions: q.correctOptions,
+        starterCode: q.starterCode,
+        language: q.language,
+        allowedLanguages: q.allowedLanguages,
+        image: q.image,
+        marks: q.marks,
+      });
+      const testCases = await ExamTestCaseModel.find({ question: q._id }).sort({
+        order: 1,
+        _id: 1,
+      });
+      if (testCases.length > 0) {
+        await ExamTestCaseModel.insertMany(
+          testCases.map((tc) => ({
+            question: newQuestion._id,
+            inputData: tc.inputData,
+            expectedOutput: tc.expectedOutput,
+            isHidden: tc.isHidden,
+            order: tc.order,
+          })),
+        );
+      }
+    }
+  }
+  await recomputeTotal(targetExamId);
+}
+
 /** Keep exam.totalMarks in sync with the sum of its question marks. */
 async function recomputeTotal(examId: Types.ObjectId): Promise<number> {
   const questions = await ExamQuestionModel.find({ exam: examId }).select(
@@ -391,6 +453,7 @@ function toPublicLink(
     endTime?: Date | null;
     accessCodeEnabled: boolean;
     accessCode: string;
+    tag: string;
   }>,
 ): PublicLink {
   return {
@@ -401,6 +464,7 @@ function toPublicLink(
     endTime: link.endTime ? link.endTime.toISOString() : null,
     accessCodeEnabled: link.accessCodeEnabled,
     accessCode: link.accessCode,
+    tag: link.tag,
   };
 }
 
@@ -417,6 +481,7 @@ export async function createPublicLink(
     endTime: input.endTime ? new Date(input.endTime) : undefined,
     accessCodeEnabled: input.accessCodeEnabled,
     accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
+    tag: input.tag.trim(),
   });
   return toPublicLink(link);
 }
@@ -434,6 +499,7 @@ export async function updatePublicLink(
         endTime: input.endTime ? new Date(input.endTime) : null,
         accessCodeEnabled: input.accessCodeEnabled,
         accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
+        tag: input.tag.trim(),
       },
     },
     { new: true },
@@ -549,6 +615,7 @@ export async function bulkUploadQuestionsWithParsed(
 
 export async function exportResults(
   examId: string,
+  opts?: { publicLinkId?: Types.ObjectId; filenameLabel?: string },
 ): Promise<{ buffer: Buffer; filename: string }> {
   const exam = await requireExamDoc(examId);
   const sections = await ExamSectionModel.find({ exam: exam._id }).sort({
@@ -557,7 +624,11 @@ export async function exportResults(
   });
   const sectionNames = sections.map((s) => s.name);
 
-  const attempts = await StudentExamAttemptModel.find({ exam: exam._id }).sort({
+  const attempts = await StudentExamAttemptModel.find({
+    exam: exam._id,
+    // When scoped to one public link, export ONLY that link's takers.
+    ...(opts?.publicLinkId ? { publicLink: opts.publicLinkId } : {}),
+  }).sort({
     createdAt: 1,
   });
   const userIds = attempts
@@ -568,6 +639,11 @@ export async function exportResults(
   >();
   const profileByUser = new Map(profiles.map((p) => [p.user.toString(), p]));
 
+  // Public-link tag per attempt — one combined file across all links, with a
+  // Tag/Session column so an admin can tell which link a taker came through.
+  const links = await PublicExamLinkModel.find({ exam: exam._id }).select("tag");
+  const tagByLink = new Map(links.map((l) => [l._id.toString(), l.tag]));
+
   const rows: ResultRow[] = attempts.map((a) => {
     const breakdown =
       (a.responseData as { breakdown?: { name: string; score: number }[] })
@@ -577,6 +653,7 @@ export async function exportResults(
       candidate: profile?.fullName ?? (a.user ? "User" : "Anonymous"),
       rollNumber: profile?.rollNumber ?? a.rollNumber,
       collegeName: a.collegeName,
+      tag: a.publicLink ? (tagByLink.get(a.publicLink.toString()) ?? "") : "",
       status: a.status,
       score: a.score,
       totalMarks: exam.totalMarks,
@@ -589,8 +666,43 @@ export async function exportResults(
   });
 
   const buffer = await buildResultsWorkbook(exam.title, sectionNames, rows);
-  const filename = `results-${exam._id.toString()}.xlsx`;
+  const filename = opts?.filenameLabel
+    ? `results-${opts.filenameLabel}.xlsx`
+    : `results-${exam._id.toString()}.xlsx`;
   return { buffer, filename };
+}
+
+/** Filename-safe slug of a free-text tag (falls back to "" when empty). */
+function fileSlug(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+/**
+ * Export results for a SINGLE public link (only its anonymous takers). Reuses
+ * the exam-wide builder filtered to the link, with a filename derived from the
+ * link's tag (or a token prefix) so downloads for different sessions are
+ * distinguishable on disk.
+ */
+export async function exportPublicLinkResults(
+  linkId: string,
+): Promise<{ buffer: Buffer; filename: string }> {
+  if (!Types.ObjectId.isValid(linkId)) {
+    throw new AppError("Link not found", 404, ExamErrorCode.LINK_UNAVAILABLE);
+  }
+  const link = await PublicExamLinkModel.findById(linkId);
+  if (!link) {
+    throw new AppError("Link not found", 404, ExamErrorCode.LINK_UNAVAILABLE);
+  }
+  const label = fileSlug(link.tag) || `link-${link.accessToken.slice(0, 8)}`;
+  return exportResults(link.exam.toString(), {
+    publicLinkId: link._id,
+    filenameLabel: label,
+  });
 }
 
 // --- Attempt-limit reset (audited) ------------------------------------------

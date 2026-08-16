@@ -220,6 +220,10 @@ const publicExamLinkSchema = new Schema(
     // When enabled, the organiser reads `accessCode` out right before the exam.
     accessCodeEnabled: { type: Boolean, default: false },
     accessCode: { type: String, default: "" },
+    // Admin-only session label to differentiate links of the same exam (e.g.
+    // "Section 2 CSE"). Surfaces in the admin UI + results export; NEVER shown
+    // to takers.
+    tag: { type: String, default: "" },
   },
   { timestamps: true },
 );

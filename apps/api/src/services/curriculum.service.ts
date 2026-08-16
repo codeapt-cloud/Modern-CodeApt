@@ -30,6 +30,10 @@ import { Types, type HydratedDocument, type PipelineStage } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
 import {
+  computeExpiresAt,
+  notExpiredFilter,
+} from "../lib/enrollment-access.js";
+import {
   ChoiceModel,
   EnrollmentModel,
   ModuleModel,
@@ -116,7 +120,13 @@ async function computeProgress(
 }
 
 async function findEnrollment(userId: string, subjectId: Types.ObjectId) {
-  return EnrollmentModel.findOne({ user: userId, subject: subjectId });
+  // Expiry-aware: an expired enrollment reads as "not enrolled" everywhere this
+  // is used (content gate, subject-detail lock, enrolledAt display).
+  return EnrollmentModel.findOne({
+    user: userId,
+    subject: subjectId,
+    ...notExpiredFilter(),
+  });
 }
 
 async function ensureEnrolled(
@@ -291,6 +301,7 @@ export async function getCatalog(
     const enrollments = await EnrollmentModel.find({
       user: userId,
       subject: { $in: rows.map((r) => r._id) },
+      ...notExpiredFilter(),
     })
       .select("subject")
       .lean();
@@ -406,6 +417,7 @@ export async function getSubjectDetail(
     isFree: isFree(price, discountPrice),
     isPopular: subject.isPopular,
     program: toProgramSummary(subject.program),
+    validityDays: subject.validityDays,
     moduleCount: modules.length,
     topicCount: topics.length,
     modules: modules.map((m) => ({
@@ -426,6 +438,9 @@ export async function getSubjectDetail(
       isEnrolled,
       enrolledAt: enrollment?.createdAt
         ? enrollment.createdAt.toISOString()
+        : null,
+      expiresAt: enrollment?.expiresAt
+        ? enrollment.expiresAt.toISOString()
         : null,
     },
     // Progress only meaningful for a signed-in user; anonymous sees zero.
@@ -470,11 +485,16 @@ export async function enroll(
   }
 
   try {
-    await EnrollmentModel.create({
-      user: userId,
-      subject: subject._id,
-      source: "manual",
-    });
+    // Upsert (not create) so a lapsed free enrollment is refreshed with a new
+    // window from now, rather than colliding with the stale expired row.
+    await EnrollmentModel.updateOne(
+      { user: userId, subject: subject._id },
+      {
+        $set: { expiresAt: computeExpiresAt(subject.validityDays) },
+        $setOnInsert: { source: "manual" },
+      },
+      { upsert: true },
+    );
   } catch (err) {
     // Unique (user, subject) — a race means someone already enrolled us.
     if (
@@ -505,7 +525,11 @@ async function shapeEnrollments(
   userId: string,
   filter: Record<string, unknown>,
 ): Promise<MyEnrollmentsResponse> {
-  const enrollments = await EnrollmentModel.find(filter)
+  // Hide expired enrollments from "my courses" (soft — the row is kept).
+  const enrollments = await EnrollmentModel.find({
+    ...filter,
+    ...notExpiredFilter(),
+  })
     .sort({ createdAt: -1 })
     .populate<{
       subject:
@@ -529,6 +553,9 @@ async function shapeEnrollments(
         program: toProgramSummary(subject.program),
       },
       enrolledAt: (enrollment.createdAt ?? new Date()).toISOString(),
+      expiresAt: enrollment.expiresAt
+        ? enrollment.expiresAt.toISOString()
+        : null,
       progress: await computeProgress(userId, topicIds),
     });
   }

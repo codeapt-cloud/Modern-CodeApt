@@ -11,6 +11,7 @@ import {
   BarChart3,
   ClipboardCheck,
   ClipboardList,
+  Copy,
   Eye,
   EyeOff,
   Plus,
@@ -27,8 +28,18 @@ import { Alert } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Card } from "../../components/ui/card.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
 import { EmptyState } from "../../components/ui/empty-state.js";
+import { FormField } from "../../components/ui/form-field.js";
 import { IconButton } from "../../components/ui/icon-button.js";
+import { Input } from "../../components/ui/input.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
 import { useToast } from "../../components/ui/toast.js";
 import { api, parseApiError } from "../../lib/api-client.js";
@@ -61,6 +72,29 @@ export function CollegeExamsPage() {
   const [deleting, setDeleting] = useState<{ id: string; title: string } | null>(
     null,
   );
+  const [duplicating, setDuplicating] = useState<{ id: string } | null>(null);
+  const [dupTitle, setDupTitle] = useState("");
+  const [dupBusy, setDupBusy] = useState(false);
+
+  const openDuplicate = (exam: CollegeExamSummary): void => {
+    setDuplicating({ id: exam.id });
+    setDupTitle(`Copy of ${exam.title}`);
+  };
+
+  const runDuplicate = async (): Promise<void> => {
+    if (!duplicating || dupTitle.trim() === "") return;
+    setDupBusy(true);
+    try {
+      await api.collegeExams.duplicate(slug, duplicating.id, dupTitle.trim());
+      toast({ variant: "success", title: "Exam duplicated (as a draft)" });
+      setDuplicating(null);
+      examsQuery.refetch();
+    } catch (err) {
+      toast({ variant: "error", title: parseApiError(err).message });
+    } finally {
+      setDupBusy(false);
+    }
+  };
 
   const togglePublish = async (exam: CollegeExamSummary): Promise<void> => {
     setPublishingId(exam.id);
@@ -201,6 +235,13 @@ export function CollegeExamsPage() {
                       )}
                     </Button>
                     <IconButton
+                      aria-label="Duplicate exam"
+                      variant="ghost"
+                      size="sm"
+                      icon={<Copy className="h-4 w-4" />}
+                      onClick={() => openDuplicate(exam)}
+                    />
+                    <IconButton
                       aria-label="Manage exam"
                       variant="ghost"
                       size="sm"
@@ -235,6 +276,49 @@ export function CollegeExamsPage() {
           onSaved={() => examsQuery.refetch()}
         />
       ) : null}
+
+      <Dialog
+        open={duplicating !== null}
+        onOpenChange={(o) => {
+          if (!o) setDuplicating(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Duplicate exam</DialogTitle>
+            <DialogDescription>
+              Copies the whole paper — sections, questions, and test cases — into
+              a new <strong>unpublished draft</strong> with zero attempts. Public
+              links are not copied.
+            </DialogDescription>
+          </DialogHeader>
+          <FormField label="New exam title" required>
+            <Input
+              value={dupTitle}
+              onChange={(e) => setDupTitle(e.target.value)}
+              placeholder="e.g. Placement Mock — Set B"
+              autoFocus
+            />
+          </FormField>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setDuplicating(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              loading={dupBusy}
+              disabled={dupTitle.trim() === ""}
+              onClick={() => void runDuplicate()}
+            >
+              <Copy className="h-4 w-4" /> Duplicate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDeleteDialog
         open={deleting !== null}

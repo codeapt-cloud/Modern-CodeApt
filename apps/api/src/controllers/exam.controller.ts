@@ -326,6 +326,16 @@ export const adminExportResultsController = asyncHandler(
   },
 );
 
+/** Results for ONE public link only (its anonymous takers). */
+export const adminExportPublicLinkResultsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { buffer, filename } = await admin.exportPublicLinkResults(
+      req.params.linkId ?? "",
+    );
+    sendXlsxAttachment(res, buffer, filename);
+  },
+);
+
 export const adminResetAttemptsController = asyncHandler(
   async (req: Request, res: Response) => {
     const input = adminResetAttemptsRequestSchema.parse(req.body);

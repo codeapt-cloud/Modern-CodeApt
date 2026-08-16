@@ -23,6 +23,7 @@ import {
   adminListQuizQuestionsController,
   adminListSubjectsController,
   adminListTopicsController,
+  adminRecomputeSubjectExpiryController,
   adminReorderModulesController,
   adminReorderProgramsController,
   adminReorderTopicsController,
@@ -33,8 +34,14 @@ import {
   adminUpdateTopicController,
 } from "../controllers/curriculum-admin.controller.js";
 import {
+  adminAddSubjectEnrollmentsController,
   adminBulkEnrollController,
   adminBulkEnrollTemplateController,
+  adminExportSubjectEnrollmentsController,
+  adminListSubjectEnrollmentCollegesController,
+  adminListSubjectEnrollmentsController,
+  adminRemoveSubjectEnrollmentsController,
+  adminSetEnrollmentExpiryController,
 } from "../controllers/enrollment-admin.controller.js";
 import {
   completeTopicController,
@@ -182,6 +189,42 @@ curriculumRouter.delete(
   "/admin/subjects/:subjectId",
   ...admin,
   adminDeleteSubjectController,
+);
+curriculumRouter.post(
+  "/admin/subjects/:subjectId/recompute-expiry",
+  ...admin,
+  adminRecomputeSubjectExpiryController,
+);
+// Per-course enrollment management (list / add / remove / edit expiry / export).
+curriculumRouter.get(
+  "/admin/subjects/:subjectId/enrollments/export.xlsx",
+  ...admin,
+  adminExportSubjectEnrollmentsController,
+);
+curriculumRouter.get(
+  "/admin/subjects/:subjectId/enrollment-colleges",
+  ...admin,
+  adminListSubjectEnrollmentCollegesController,
+);
+curriculumRouter.get(
+  "/admin/subjects/:subjectId/enrollments",
+  ...admin,
+  adminListSubjectEnrollmentsController,
+);
+curriculumRouter.post(
+  "/admin/subjects/:subjectId/enrollments",
+  ...admin,
+  adminAddSubjectEnrollmentsController,
+);
+curriculumRouter.delete(
+  "/admin/subjects/:subjectId/enrollments",
+  ...admin,
+  adminRemoveSubjectEnrollmentsController,
+);
+curriculumRouter.patch(
+  "/admin/subjects/:subjectId/enrollments/:enrollmentId",
+  ...admin,
+  adminSetEnrollmentExpiryController,
 );
 
 // --- Module (flat by id) ---

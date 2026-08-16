@@ -46,6 +46,9 @@ const subjectSchema = new Schema(
     // Prices in paise.
     price: { type: Number, default: 0, min: 0 },
     discountPrice: { type: Number, default: 0, min: 0 },
+    // Access window granted on enrollment, in days. 0 = lifetime (no expiry),
+    // preserving the existing behavior for every current course.
+    validityDays: { type: Number, default: 0, min: 0 },
     isPopular: { type: Boolean, default: false },
     isVisible: { type: Boolean, default: true },
   },
@@ -142,6 +145,9 @@ const enrollmentSchema = new Schema(
     // Tenant scope for a college assignment (source "college"); null for
     // individual (B2C) enrollments — which are completely unaffected.
     college: { type: Schema.Types.ObjectId, ref: "College", default: null },
+    // Access end (createdAt + subject.validityDays at enrollment time). null =
+    // never expires (lifetime), which is the default for every existing row.
+    expiresAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
