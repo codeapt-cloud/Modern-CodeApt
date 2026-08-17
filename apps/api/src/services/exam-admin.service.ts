@@ -133,6 +133,8 @@ export async function upsertExam(input: {
   title: string;
   passPercentage: number;
   calculatorEnabled: boolean;
+  shuffleQuestions: boolean;
+  shuffleOptions: boolean;
 }): Promise<AdminExamDetail> {
   const exam = await ExamModel.findOneAndUpdate(
     { topic: new Types.ObjectId(input.topicId) },
@@ -141,6 +143,8 @@ export async function upsertExam(input: {
         title: input.title,
         passPercentage: input.passPercentage,
         calculatorEnabled: input.calculatorEnabled,
+        shuffleQuestions: input.shuffleQuestions,
+        shuffleOptions: input.shuffleOptions,
       },
     },
     { upsert: true, new: true },
@@ -240,6 +244,8 @@ export async function getAdminExamDetail(
     totalMarks: exam.totalMarks,
     passPercentage: exam.passPercentage,
     calculatorEnabled: exam.calculatorEnabled,
+    shuffleQuestions: exam.shuffleQuestions,
+    shuffleOptions: exam.shuffleOptions,
     accessCodeEnabled: exam.accessCodeEnabled,
     accessCode: exam.accessCode,
     sections: sections.map((s) => ({

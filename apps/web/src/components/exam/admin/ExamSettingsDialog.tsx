@@ -75,6 +75,12 @@ export function ExamSettingsDialog({
   const [calculatorEnabled, setCalculatorEnabled] = useState(
     initial?.calculatorEnabled ?? true,
   );
+  const [shuffleQuestions, setShuffleQuestions] = useState(
+    initial?.shuffleQuestions ?? false,
+  );
+  const [shuffleOptions, setShuffleOptions] = useState(
+    initial?.shuffleOptions ?? false,
+  );
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -94,6 +100,8 @@ export function ExamSettingsDialog({
         title: title.trim(),
         passPercentage,
         calculatorEnabled,
+        shuffleQuestions,
+        shuffleOptions,
       });
       toast({
         variant: "success",
@@ -192,6 +200,32 @@ export function ExamSettingsDialog({
                   Calculator{" "}
                   <span className="text-ink-muted">
                     — show the in-exam calculator to candidates
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <Switch
+                  checked={shuffleQuestions}
+                  onCheckedChange={setShuffleQuestions}
+                />
+                <span className="text-sm text-ink">
+                  Shuffle questions{" "}
+                  <span className="text-ink-muted">
+                    — randomize question order within each section (per candidate)
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <Switch
+                  checked={shuffleOptions}
+                  onCheckedChange={setShuffleOptions}
+                />
+                <span className="text-sm text-ink">
+                  Shuffle options{" "}
+                  <span className="text-ink-muted">
+                    — randomize each MCQ&apos;s option order (per candidate)
                   </span>
                 </span>
               </label>

@@ -587,6 +587,78 @@ describe("per-exam access code (logged-in start)", () => {
   });
 });
 
+describe("question + option shuffle", () => {
+  it("shuffles within a section, stays stable, and grades option-shuffled MCQs correctly", async () => {
+    const { token, userId } = await registerAndLogin();
+    const { exam, qSingle, qMulti } = await makeExam({ enroll: userId });
+    await ExamModel.updateOne(
+      { _id: exam._id },
+      { $set: { shuffleQuestions: true, shuffleOptions: true } },
+    );
+
+    const start = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    expect(start.status).toBe(201);
+    const attemptId = start.body.attemptId as string;
+
+    // Section 1 contains ONLY its own two questions (shuffle never leaks the
+    // coding section's question in).
+    const ids = (start.body.questions as { id: string }[])
+      .map((q) => q.id)
+      .sort();
+    expect(ids).toEqual(
+      [qSingle._id.toString(), qMulti._id.toString()].sort(),
+    );
+
+    // Stability: a re-fetch returns the SAME question + option order (persisted).
+    const section = await request(app)
+      .get(`/api/attempts/${attemptId}/section`)
+      .set(auth(token));
+    type ViewQ = { id: string; options: string[] };
+    const startQs = start.body.questions as ViewQ[];
+    const sectionQs = section.body.questions as ViewQ[];
+    expect(sectionQs.map((q) => q.id)).toEqual(startQs.map((q) => q.id));
+    const findQ = (id: string): ViewQ =>
+      sectionQs.find((q) => q.id === id)!;
+    const single = findQ(qSingle._id.toString());
+    expect(single.options).toEqual(
+      startQs.find((q) => q.id === qSingle._id.toString())!.options,
+    );
+
+    // Answer each MCQ by the DISPLAYED position of the correct value.
+    const singlePick = single.options.indexOf("O(log n)");
+    const multi = findQ(qMulti._id.toString());
+    const multiPick = [
+      multi.options.indexOf("Array"),
+      multi.options.indexOf("Linked list"),
+    ];
+    expect(singlePick).toBeGreaterThanOrEqual(0);
+    expect(multiPick.every((i) => i >= 0)).toBe(true);
+
+    await request(app)
+      .post(`/api/attempts/${attemptId}/section/answers`)
+      .set(auth(token))
+      .send({
+        answers: [
+          { questionId: qSingle._id.toString(), selectedOptions: [singlePick] },
+          { questionId: qMulti._id.toString(), selectedOptions: multiPick },
+        ],
+      });
+    await request(app)
+      .post(`/api/attempts/${attemptId}/advance`)
+      .set(auth(token));
+    const submit = await request(app)
+      .post(`/api/attempts/${attemptId}/submit`)
+      .set(auth(token))
+      .send({});
+    expect(submit.body.status).toBe("graded");
+    // Both MCQs graded correct (5 + 5) despite the shuffled option order —
+    // proving display→original index mapping on save.
+    expect(submit.body.score).toBe(10);
+  });
+});
+
 describe("warnings", () => {
   async function startAttempt(): Promise<{ token: string; attemptId: string }> {
     const { token, userId } = await registerAndLogin();

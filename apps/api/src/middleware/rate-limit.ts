@@ -126,8 +126,9 @@ export const startAttemptRateLimiter = rateLimit({
   keyGenerator: (req) => req.auth?.userId ?? req.ip ?? "anonymous",
   message: {
     error: {
-      message: "Too many start attempts, please slow down and try again shortly",
+      message: "Too many start attempts. Please wait a minute and try again.",
       code: "RATE_LIMITED",
+      details: { retryAfterSeconds: 60 },
     },
   },
 });
@@ -141,8 +142,13 @@ export const publicExamRateLimiter = rateLimit({
   skip: () => env.NODE_ENV === "test",
   message: {
     error: {
-      message: "Too many attempts from this network, please try again later",
+      message:
+        "Too many attempts from this network. Please wait a minute and try again.",
       code: "RATE_LIMITED",
+      // The window is one minute; tell the client how long to hold off.
+      details: {
+        retryAfterSeconds: Math.ceil(PUBLIC_EXAM_RATE_LIMIT_WINDOW_MS / 1000),
+      },
     },
   },
 });

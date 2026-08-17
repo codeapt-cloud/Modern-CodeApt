@@ -34,6 +34,8 @@ export interface CollegeExamSettingsInitial {
   title: string;
   passPercentage: number;
   calculatorEnabled: boolean;
+  shuffleQuestions: boolean;
+  shuffleOptions: boolean;
   accessCodeEnabled: boolean;
   accessCode: string;
   orgUnitIds: string[];
@@ -69,6 +71,12 @@ export function CollegeExamSettingsDialog({
   const [calculatorEnabled, setCalculatorEnabled] = useState(
     initial?.calculatorEnabled ?? true,
   );
+  const [shuffleQuestions, setShuffleQuestions] = useState(
+    initial?.shuffleQuestions ?? false,
+  );
+  const [shuffleOptions, setShuffleOptions] = useState(
+    initial?.shuffleOptions ?? false,
+  );
   const [accessCodeEnabled, setAccessCodeEnabled] = useState(
     initial?.accessCodeEnabled ?? false,
   );
@@ -92,6 +100,8 @@ export function CollegeExamSettingsDialog({
           title: title.trim(),
           passPercentage,
           calculatorEnabled,
+          shuffleQuestions,
+          shuffleOptions,
           accessCodeEnabled,
           accessCode: accessCodeEnabled ? accessCode.trim() : "",
           orgUnitIds,
@@ -104,6 +114,8 @@ export function CollegeExamSettingsDialog({
           title: title.trim(),
           passPercentage,
           calculatorEnabled,
+          shuffleQuestions,
+          shuffleOptions,
           accessCodeEnabled,
           accessCode: accessCodeEnabled ? accessCode.trim() : "",
           orgUnitIds,
@@ -169,6 +181,32 @@ export function CollegeExamSettingsDialog({
               Calculator{" "}
               <span className="text-ink-muted">
                 — show the in-exam calculator to candidates
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2">
+            <Switch
+              checked={shuffleQuestions}
+              onCheckedChange={setShuffleQuestions}
+            />
+            <span className="text-sm text-ink">
+              Shuffle questions{" "}
+              <span className="text-ink-muted">
+                — randomize question order within each section (per student)
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2">
+            <Switch
+              checked={shuffleOptions}
+              onCheckedChange={setShuffleOptions}
+            />
+            <span className="text-sm text-ink">
+              Shuffle options{" "}
+              <span className="text-ink-muted">
+                — randomize each MCQ&apos;s option order (per student)
               </span>
             </span>
           </label>

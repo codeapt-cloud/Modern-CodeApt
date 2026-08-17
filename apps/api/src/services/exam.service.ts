@@ -67,6 +67,17 @@ interface StoredAnswer {
   code?: string;
   language?: CodeLanguage;
 }
+/**
+ * Per-attempt shuffle permutation, computed once and PERSISTED so the order is
+ * stable across re-fetches. `questionOrder` is per-section ordered question ids;
+ * `optionOrder[qId][displayIndex] = originalIndex` maps a displayed MCQ option
+ * back to its stored index (so grading — which compares to correctOptions in the
+ * ORIGINAL order — never changes).
+ */
+interface ShuffleState {
+  questionOrder?: Record<string, string[]>;
+  optionOrder?: Record<string, number[]>;
+}
 interface ResponseData {
   answers: Record<string, StoredAnswer>;
   finishedSections: string[];
@@ -74,6 +85,7 @@ interface ResponseData {
   /** Question ids flagged for review by the candidate (across sections). */
   markedForReview: string[];
   breakdown?: SectionResult[];
+  shuffle?: ShuffleState;
 }
 
 function readResponseData(attempt: AttemptDoc): ResponseData {
@@ -84,7 +96,18 @@ function readResponseData(attempt: AttemptDoc): ResponseData {
     codeJobs: raw.codeJobs ?? {},
     markedForReview: raw.markedForReview ?? [],
     breakdown: raw.breakdown,
+    shuffle: raw.shuffle,
   };
+}
+
+/** In-place Fisher–Yates on a copy (app code — Math.random is fine here). */
+function shuffled<T>(input: readonly T[]): T[] {
+  const a = [...input];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
 }
 
 // --- Loading + authorization ------------------------------------------------
@@ -138,11 +161,30 @@ function sanitizeQuestion(
   q: QuestionDoc,
   saved: StoredAnswer | undefined,
   visibleCases: { input: string; expectedOutput: string }[],
+  /** display→original option map when this exam shuffles MCQ options. */
+  optionOrder?: number[],
 ): SanitizedQuestion {
   const isCode = q.questionType === ExamQuestionType.CODE;
+  const rawOptions = q.options ?? [];
+  const shuffleOpts =
+    !isCode &&
+    !!optionOrder &&
+    optionOrder.length === rawOptions.length &&
+    rawOptions.length > 0;
+  // Options in DISPLAY order; the saved answer (stored as ORIGINAL indices) is
+  // mapped back to display indices so the right shuffled option stays selected.
+  const displayOptions = shuffleOpts
+    ? optionOrder.map((orig) => rawOptions[orig] ?? "")
+    : rawOptions;
+  const savedSelected =
+    saved?.selectedOptions && shuffleOpts
+      ? saved.selectedOptions
+          .map((orig) => optionOrder.indexOf(orig))
+          .filter((i) => i >= 0)
+      : (saved?.selectedOptions ?? null);
   const savedAnswer: SavedAnswer | null = saved
     ? {
-        selectedOptions: saved.selectedOptions ?? null,
+        selectedOptions: savedSelected,
         code: saved.code ?? null,
         language: saved.language ?? null,
       }
@@ -155,7 +197,7 @@ function sanitizeQuestion(
     marks: q.marks,
     image: q.image,
     // MCQ options WITHOUT correctOptions; null for CODE.
-    options: isCode ? null : (q.options ?? []),
+    options: isCode ? null : displayOptions,
     starterCode: isCode ? q.starterCode : null,
     language: isCode ? (q.language as CodeLanguage) : null,
     // Language policy: [] = open, [lang] = locked. Empty for MCQ.
@@ -214,6 +256,17 @@ async function buildSectionView(
       )
     : section.durationMinutes * 60;
 
+  // Per-attempt shuffle (persisted once for stability). Question shuffle is
+  // WITHIN this section; option shuffle is per MCQ. Both no-ops unless enabled.
+  const orderedQuestions = await applyShuffle(
+    attempt,
+    exam,
+    section,
+    questions,
+    data,
+  );
+  const optionOrder = data.shuffle?.optionOrder ?? {};
+
   return {
     attemptId: attempt._id.toString(),
     status: attempt.status as ExamAttemptStatus,
@@ -230,11 +283,12 @@ async function buildSectionView(
       durationMinutes: section.durationMinutes,
     },
     sectionRemainingSeconds: remaining,
-    questions: questions.map((q) =>
+    questions: orderedQuestions.map((q) =>
       sanitizeQuestion(
         q,
         data.answers[q._id.toString()],
         visibleByQ.get(q._id.toString()) ?? [],
+        exam.shuffleOptions ? optionOrder[q._id.toString()] : undefined,
       ),
     ),
     // Only this section's marked ids (the navigator shows one section at a time).
@@ -242,6 +296,68 @@ async function buildSectionView(
       questions.some((q) => q._id.toString() === id),
     ),
   };
+}
+
+/**
+ * Ensure this section's shuffle exists (computing + persisting it on first
+ * serve), then return the section's questions in DISPLAY order. `data` is
+ * mutated in place with the shuffle so the caller sees option maps too.
+ */
+async function applyShuffle(
+  attempt: AttemptDoc,
+  exam: ExamDoc,
+  section: SectionDoc,
+  questions: QuestionDoc[],
+  data: ResponseData,
+): Promise<QuestionDoc[]> {
+  if (!exam.shuffleQuestions && !exam.shuffleOptions) return questions;
+
+  const shuffle: ShuffleState = data.shuffle ?? {};
+  const sectionId = section._id.toString();
+  const canonicalIds = questions.map((q) => q._id.toString());
+  let mutated = false;
+
+  // Question order within the section (recomputed if the question set changed).
+  let ordered = questions;
+  if (exam.shuffleQuestions) {
+    const existing = shuffle.questionOrder?.[sectionId];
+    const stale =
+      !existing ||
+      existing.length !== canonicalIds.length ||
+      !canonicalIds.every((id) => existing.includes(id));
+    const order = stale ? shuffled(canonicalIds) : existing;
+    if (stale) {
+      shuffle.questionOrder = { ...(shuffle.questionOrder ?? {}), [sectionId]: order };
+      mutated = true;
+    }
+    const byId = new Map(questions.map((q) => [q._id.toString(), q]));
+    ordered = order.map((id) => byId.get(id)).filter((q): q is QuestionDoc => !!q);
+  }
+
+  // Option order per MCQ (skip CODE / empty-option questions).
+  if (exam.shuffleOptions) {
+    const optionOrder = { ...(shuffle.optionOrder ?? {}) };
+    for (const q of ordered) {
+      if (q.questionType === ExamQuestionType.CODE) continue;
+      const count = (q.options ?? []).length;
+      if (count === 0) continue;
+      const qid = q._id.toString();
+      const perm = optionOrder[qid];
+      if (!perm || perm.length !== count) {
+        optionOrder[qid] = shuffled(Array.from({ length: count }, (_, i) => i));
+        mutated = true;
+      }
+    }
+    shuffle.optionOrder = optionOrder;
+  }
+
+  if (mutated) {
+    data.shuffle = shuffle;
+    attempt.responseData = data;
+    attempt.markModified("responseData");
+    await attempt.save();
+  }
+  return ordered;
 }
 
 function currentSectionIndex(
@@ -376,11 +492,22 @@ export async function saveAnswers(
     ),
   );
   const data = readResponseData(attempt);
+  const optionOrder = data.shuffle?.optionOrder ?? {};
   let saved = 0;
   for (const a of answers) {
     if (!sectionQuestionIds.has(a.questionId)) continue;
     const entry: StoredAnswer = {};
-    if (a.selectedOptions) entry.selectedOptions = a.selectedOptions;
+    if (a.selectedOptions) {
+      // Incoming indices are DISPLAY positions; store ORIGINAL indices so
+      // grading (which uses correctOptions in the original order) is unchanged.
+      const perm = optionOrder[a.questionId];
+      entry.selectedOptions =
+        perm && perm.length > 0
+          ? a.selectedOptions.map((d) =>
+              d >= 0 && d < perm.length ? perm[d]! : d,
+            )
+          : a.selectedOptions;
+    }
     if (a.code !== undefined) entry.code = a.code;
     if (a.language) entry.language = a.language;
     data.answers[a.questionId] = entry;

@@ -489,9 +489,14 @@ export const ExamErrorCode = {
 } as const;
 export type ExamErrorCode = (typeof ExamErrorCode)[keyof typeof ExamErrorCode];
 
-/** Anonymous public-exam starts allowed per IP inside the window. */
+/**
+ * Anonymous public-exam starts allowed per IP inside the window. Set high
+ * because a whole lab/campus of takers usually shares ONE public IP (NAT) — a
+ * low cap locks out a legitimate cohort starting together ("too many attempts
+ * from this network").
+ */
 export const PUBLIC_EXAM_RATE_LIMIT_WINDOW_MS = 60 * 1000;
-export const PUBLIC_EXAM_RATE_LIMIT_MAX = 10;
+export const PUBLIC_EXAM_RATE_LIMIT_MAX = 500;
 
 // ---------------------------------------------------------------------------
 // Daily challenges

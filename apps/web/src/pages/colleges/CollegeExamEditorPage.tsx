@@ -325,6 +325,8 @@ export function CollegeExamEditorPage() {
                 title: data.title,
                 passPercentage: data.passPercentage,
                 calculatorEnabled: data.calculatorEnabled,
+                shuffleQuestions: data.shuffleQuestions,
+                shuffleOptions: data.shuffleOptions,
                 accessCodeEnabled: data.accessCodeEnabled,
                 accessCode: data.accessCode,
                 orgUnitIds: summary.orgUnitIds,

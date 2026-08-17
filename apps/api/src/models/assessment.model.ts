@@ -65,6 +65,11 @@ const examSchema = new Schema(
     // stored as-authored so faculty can read it back.
     accessCodeEnabled: { type: Boolean, default: false },
     accessCode: { type: String, default: "" },
+    // Randomize question order WITHIN each section (never across sections), and
+    // MCQ option order per question. Both default off (unchanged behavior); the
+    // per-attempt permutation is persisted on the attempt so it stays stable.
+    shuffleQuestions: { type: Boolean, default: false },
+    shuffleOptions: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

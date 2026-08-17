@@ -1015,6 +1015,8 @@ export const adminExamUpsertSchema = z.object({
   title: z.string().min(1),
   passPercentage: z.number().int().min(0).max(100).default(40),
   calculatorEnabled: z.boolean().default(true),
+  shuffleQuestions: z.boolean().default(false),
+  shuffleOptions: z.boolean().default(false),
 });
 export type AdminExamUpsert = z.infer<typeof adminExamUpsertSchema>;
 
@@ -1126,6 +1128,8 @@ export const adminExamDetailSchema = z.object({
   totalMarks: z.number().int().nonnegative(),
   passPercentage: z.number().int().min(0).max(100),
   calculatorEnabled: z.boolean(),
+  shuffleQuestions: z.boolean(),
+  shuffleOptions: z.boolean(),
   /** Author-only: per-exam start-code gate (echoed so faculty can read it out). */
   accessCodeEnabled: z.boolean(),
   accessCode: z.string(),
@@ -4868,6 +4872,8 @@ export const createCollegeExamSchema = z.object({
   title: z.string().trim().min(1).max(200),
   passPercentage: z.number().int().min(0).max(100).default(40),
   calculatorEnabled: z.boolean().default(true),
+  shuffleQuestions: z.boolean().default(false),
+  shuffleOptions: z.boolean().default(false),
   /** Per-exam start-code gate (faculty read the code out right before the exam). */
   accessCodeEnabled: z.boolean().default(false),
   accessCode: z.string().trim().max(64).default(""),
@@ -4889,6 +4895,8 @@ export const updateCollegeExamSchema = z
     title: z.string().trim().min(1).max(200).optional(),
     passPercentage: z.number().int().min(0).max(100).optional(),
     calculatorEnabled: z.boolean().optional(),
+    shuffleQuestions: z.boolean().optional(),
+    shuffleOptions: z.boolean().optional(),
     accessCodeEnabled: z.boolean().optional(),
     accessCode: z.string().trim().max(64).optional(),
     orgUnitIds: z.array(z.string().min(1)).optional(),

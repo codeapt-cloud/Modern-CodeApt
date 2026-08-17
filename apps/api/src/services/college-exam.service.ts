@@ -243,6 +243,8 @@ export async function createCollegeExam(
       title: input.title,
       passPercentage: input.passPercentage,
       calculatorEnabled: input.calculatorEnabled,
+      shuffleQuestions: input.shuffleQuestions,
+      shuffleOptions: input.shuffleOptions,
       accessCodeEnabled: input.accessCodeEnabled,
       accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
       orgUnits,
@@ -324,6 +326,10 @@ export async function updateCollegeExam(
     exam.passPercentage = input.passPercentage;
   if (input.calculatorEnabled !== undefined)
     exam.calculatorEnabled = input.calculatorEnabled;
+  if (input.shuffleQuestions !== undefined)
+    exam.shuffleQuestions = input.shuffleQuestions;
+  if (input.shuffleOptions !== undefined)
+    exam.shuffleOptions = input.shuffleOptions;
   if (input.accessCodeEnabled !== undefined) {
     exam.accessCodeEnabled = input.accessCodeEnabled;
     // Clearing the gate also clears the stored code; enabling stores the trimmed
@@ -374,6 +380,8 @@ export async function duplicateCollegeExam(
       title: input.title,
       passPercentage: exam.passPercentage,
       calculatorEnabled: exam.calculatorEnabled,
+      shuffleQuestions: exam.shuffleQuestions,
+      shuffleOptions: exam.shuffleOptions,
       accessCodeEnabled: exam.accessCodeEnabled,
       accessCode: exam.accessCode,
       orgUnits,

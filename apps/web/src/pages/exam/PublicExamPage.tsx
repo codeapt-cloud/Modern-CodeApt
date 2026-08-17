@@ -6,7 +6,7 @@
  */
 import type { StartAttemptResponse } from "@codeapt/shared";
 import { CalendarX2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { Logo } from "../../components/brand/Logo.js";
@@ -17,6 +17,7 @@ import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { api, parseApiError } from "../../lib/api-client.js";
+import { rateLimitRetrySeconds } from "../../lib/rate-limit.js";
 import { useQuery } from "../../lib/use-query.js";
 
 export function PublicExamPage() {
@@ -32,8 +33,16 @@ export function PublicExamPage() {
   const [accessCode, setAccessCode] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
+  const [cooldown, setCooldown] = useState(0);
 
   const needsCode = data?.accessCodeEnabled ?? false;
+
+  // Count down the "try again" timer after a rate-limit rejection.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const begin = async (): Promise<void> => {
     if (!rollNumber.trim() || !collegeName.trim()) return;
@@ -56,7 +65,10 @@ export function PublicExamPage() {
       });
       setStarted(res);
     } catch (err) {
-      setError(parseApiError(err).message);
+      const parsed = parseApiError(err);
+      const retry = rateLimitRetrySeconds(parsed);
+      if (retry) setCooldown(retry);
+      setError(parsed.message);
     } finally {
       setStarting(false);
     }
@@ -142,12 +154,13 @@ export function PublicExamPage() {
             size="lg"
             loading={starting}
             disabled={
+              cooldown > 0 ||
               !rollNumber.trim() ||
               !collegeName.trim() ||
               (needsCode && !accessCode.trim())
             }
           >
-            Begin exam
+            {cooldown > 0 ? `Try again in ${cooldown}s` : "Begin exam"}
           </Button>
         </form>
       }

@@ -5,7 +5,7 @@
  * attempt to <ExamRunner>. Rendered outside the AppShell.
  */
 import type { StartAttemptResponse } from "@codeapt/shared";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { ExamRunner } from "../../components/exam/ExamRunner.js";
@@ -15,6 +15,7 @@ import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { api, parseApiError } from "../../lib/api-client.js";
+import { rateLimitRetrySeconds } from "../../lib/rate-limit.js";
 import { useQuery } from "../../lib/use-query.js";
 
 export function ExamRunnerPage() {
@@ -42,8 +43,16 @@ export function ExamRunnerPage() {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [accessCode, setAccessCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
 
   const needsCode = exam?.accessCodeEnabled ?? false;
+
+  // Count down the "try again" timer after a rate-limit rejection.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   const begin = async (): Promise<void> => {
     if (needsCode && !accessCode.trim()) {
@@ -65,7 +74,10 @@ export function ExamRunnerPage() {
         : await api.exams.start(examId, code);
       setStarted(res);
     } catch (err) {
-      setError(parseApiError(err).message);
+      const parsed = parseApiError(err);
+      const retry = rateLimitRetrySeconds(parsed);
+      if (retry) setCooldown(retry);
+      setError(parsed.message);
     } finally {
       setStarting(false);
     }
@@ -126,9 +138,9 @@ export function ExamRunnerPage() {
             size="lg"
             onClick={() => void begin()}
             loading={starting}
-            disabled={needsCode && !accessCode.trim()}
+            disabled={cooldown > 0 || (needsCode && !accessCode.trim())}
           >
-            Begin exam
+            {cooldown > 0 ? `Try again in ${cooldown}s` : "Begin exam"}
           </Button>
         </div>
       }
