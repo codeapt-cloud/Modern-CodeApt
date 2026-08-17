@@ -135,6 +135,7 @@ export async function upsertExam(input: {
   calculatorEnabled: boolean;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
+  resultsVisible: boolean;
 }): Promise<AdminExamDetail> {
   const exam = await ExamModel.findOneAndUpdate(
     { topic: new Types.ObjectId(input.topicId) },
@@ -145,6 +146,7 @@ export async function upsertExam(input: {
         calculatorEnabled: input.calculatorEnabled,
         shuffleQuestions: input.shuffleQuestions,
         shuffleOptions: input.shuffleOptions,
+        resultsVisible: input.resultsVisible,
       },
     },
     { upsert: true, new: true },
@@ -246,6 +248,7 @@ export async function getAdminExamDetail(
     calculatorEnabled: exam.calculatorEnabled,
     shuffleQuestions: exam.shuffleQuestions,
     shuffleOptions: exam.shuffleOptions,
+    resultsVisible: exam.resultsVisible,
     accessCodeEnabled: exam.accessCodeEnabled,
     accessCode: exam.accessCode,
     sections: sections.map((s) => ({
@@ -460,6 +463,9 @@ function toPublicLink(
     accessCodeEnabled: boolean;
     accessCode: string;
     tag: string;
+    shuffleQuestions: boolean;
+    shuffleOptions: boolean;
+    resultsVisible: boolean;
   }>,
 ): PublicLink {
   return {
@@ -471,6 +477,9 @@ function toPublicLink(
     accessCodeEnabled: link.accessCodeEnabled,
     accessCode: link.accessCode,
     tag: link.tag,
+    shuffleQuestions: link.shuffleQuestions,
+    shuffleOptions: link.shuffleOptions,
+    resultsVisible: link.resultsVisible,
   };
 }
 
@@ -488,6 +497,9 @@ export async function createPublicLink(
     accessCodeEnabled: input.accessCodeEnabled,
     accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
     tag: input.tag.trim(),
+    shuffleQuestions: input.shuffleQuestions,
+    shuffleOptions: input.shuffleOptions,
+    resultsVisible: input.resultsVisible,
   });
   return toPublicLink(link);
 }
@@ -506,6 +518,9 @@ export async function updatePublicLink(
         accessCodeEnabled: input.accessCodeEnabled,
         accessCode: input.accessCodeEnabled ? input.accessCode.trim() : "",
         tag: input.tag.trim(),
+        shuffleQuestions: input.shuffleQuestions,
+        shuffleOptions: input.shuffleOptions,
+        resultsVisible: input.resultsVisible,
       },
     },
     { new: true },
@@ -656,7 +671,10 @@ export async function exportResults(
         ?.breakdown ?? [];
     const profile = a.user ? profileByUser.get(a.user.toString()) : undefined;
     return {
-      candidate: profile?.fullName ?? (a.user ? "User" : "Anonymous"),
+      candidate:
+        profile?.fullName ??
+        (a.user ? "User" : a.candidateName || "Anonymous"),
+      gender: a.gender ?? "",
       rollNumber: profile?.rollNumber ?? a.rollNumber,
       collegeName: a.collegeName,
       tag: a.publicLink ? (tagByLink.get(a.publicLink.toString()) ?? "") : "",

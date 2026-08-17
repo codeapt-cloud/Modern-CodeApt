@@ -47,6 +47,7 @@ import {
   ExamSectionModel,
   ExamTestCaseModel,
   ExamAttemptCounterModel,
+  PublicExamLinkModel,
   StudentExamAttemptModel,
   type Exam,
   type ExamQuestion,
@@ -108,6 +109,41 @@ function shuffled<T>(input: readonly T[]): T[] {
     [a[i], a[j]] = [a[j]!, a[i]!];
   }
   return a;
+}
+
+interface RuntimeFlags {
+  shuffleQuestions: boolean;
+  shuffleOptions: boolean;
+  resultsVisible: boolean;
+}
+
+/**
+ * The shuffle + result-visibility flags that govern THIS attempt. For a
+ * public-link attempt they come from the LINK (each link is configured
+ * independently); otherwise from the exam. Nullish-coalesced so links/exams
+ * predating these fields behave safely (shuffle off, results visible).
+ */
+async function effectiveFlags(
+  attempt: AttemptDoc,
+  exam: ExamDoc,
+): Promise<RuntimeFlags> {
+  if (attempt.publicLink) {
+    const link = await PublicExamLinkModel.findById(attempt.publicLink).select(
+      "shuffleQuestions shuffleOptions resultsVisible",
+    );
+    if (link) {
+      return {
+        shuffleQuestions: link.shuffleQuestions ?? false,
+        shuffleOptions: link.shuffleOptions ?? false,
+        resultsVisible: link.resultsVisible ?? true,
+      };
+    }
+  }
+  return {
+    shuffleQuestions: exam.shuffleQuestions,
+    shuffleOptions: exam.shuffleOptions,
+    resultsVisible: exam.resultsVisible,
+  };
 }
 
 // --- Loading + authorization ------------------------------------------------
@@ -257,10 +293,12 @@ async function buildSectionView(
     : section.durationMinutes * 60;
 
   // Per-attempt shuffle (persisted once for stability). Question shuffle is
-  // WITHIN this section; option shuffle is per MCQ. Both no-ops unless enabled.
+  // WITHIN this section; option shuffle is per MCQ. Flags come from the public
+  // link (if any) or the exam. Both no-ops unless enabled.
+  const flags = await effectiveFlags(attempt, exam);
   const orderedQuestions = await applyShuffle(
     attempt,
-    exam,
+    flags,
     section,
     questions,
     data,
@@ -288,7 +326,7 @@ async function buildSectionView(
         q,
         data.answers[q._id.toString()],
         visibleByQ.get(q._id.toString()) ?? [],
-        exam.shuffleOptions ? optionOrder[q._id.toString()] : undefined,
+        flags.shuffleOptions ? optionOrder[q._id.toString()] : undefined,
       ),
     ),
     // Only this section's marked ids (the navigator shows one section at a time).
@@ -305,12 +343,12 @@ async function buildSectionView(
  */
 async function applyShuffle(
   attempt: AttemptDoc,
-  exam: ExamDoc,
+  flags: RuntimeFlags,
   section: SectionDoc,
   questions: QuestionDoc[],
   data: ResponseData,
 ): Promise<QuestionDoc[]> {
-  if (!exam.shuffleQuestions && !exam.shuffleOptions) return questions;
+  if (!flags.shuffleQuestions && !flags.shuffleOptions) return questions;
 
   const shuffle: ShuffleState = data.shuffle ?? {};
   const sectionId = section._id.toString();
@@ -319,7 +357,7 @@ async function applyShuffle(
 
   // Question order within the section (recomputed if the question set changed).
   let ordered = questions;
-  if (exam.shuffleQuestions) {
+  if (flags.shuffleQuestions) {
     const existing = shuffle.questionOrder?.[sectionId];
     const stale =
       !existing ||
@@ -335,7 +373,7 @@ async function applyShuffle(
   }
 
   // Option order per MCQ (skip CODE / empty-option questions).
-  if (exam.shuffleOptions) {
+  if (flags.shuffleOptions) {
     const optionOrder = { ...(shuffle.optionOrder ?? {}) };
     for (const q of ordered) {
       if (q.questionType === ExamQuestionType.CODE) continue;
@@ -419,6 +457,8 @@ interface CreateAttemptExtra {
   publicLink?: Types.ObjectId;
   rollNumber?: string;
   collegeName?: string;
+  candidateName?: string;
+  gender?: string;
 }
 async function createAttempt(
   exam: ExamDoc,
@@ -440,6 +480,8 @@ async function createAttempt(
     publicLink: extra.publicLink,
     rollNumber: extra.rollNumber ?? "",
     collegeName: extra.collegeName ?? "",
+    candidateName: extra.candidateName ?? "",
+    gender: extra.gender ?? "",
     attemptToken: randomUUID(),
     status: ExamAttemptStatus.IN_PROGRESS,
     currentSection: firstSection._id,
@@ -703,6 +745,8 @@ export async function finalizeAttempt(
 ): Promise<ExamResult> {
   const attempt = await loadAndAuthorize(attemptId, caller);
   const exam = await requireExam(attempt.exam.toString());
+  // Result visibility comes from the public link (if any) or the exam.
+  const { resultsVisible } = await effectiveFlags(attempt, exam);
 
   if (attempt.status === ExamAttemptStatus.IN_PROGRESS) {
     throw new AppError(
@@ -716,6 +760,7 @@ export async function finalizeAttempt(
       attempt,
       exam,
       readResponseData(attempt).breakdown ?? [],
+      resultsVisible,
     );
   }
 
@@ -735,7 +780,7 @@ export async function finalizeAttempt(
   );
   if (anyPending) {
     // Not ready — report pending without grading.
-    return pendingResult(attempt, exam);
+    return pendingResult(attempt, exam, resultsVisible);
   }
 
   // All terminal — compute the full breakdown.
@@ -792,6 +837,7 @@ export async function finalizeAttempt(
     fresh,
     exam,
     readResponseData(fresh).breakdown ?? breakdown,
+    resultsVisible,
   );
 }
 
@@ -880,7 +926,27 @@ function buildResult(
   attempt: AttemptDoc,
   exam: ExamDoc,
   breakdown: SectionResult[],
+  resultsVisible: boolean,
 ): ExamResult {
+  // Organiser turned result display off → student sees "coming soon". The
+  // attempt is still fully graded; score/sections are redacted from THIS
+  // (student-facing) DTO only. Admin/faculty result reads are a separate path.
+  if (!resultsVisible) {
+    return {
+      attemptId: attempt._id.toString(),
+      status: attempt.status as ExamAttemptStatus,
+      score: 0,
+      totalMarks: 0,
+      passPercentage: exam.passPercentage,
+      passed: false,
+      autoSubmitted: attempt.isAutoSubmitted,
+      warnings: attempt.warningsTriggered,
+      isMalpractice: attempt.isMalpractice,
+      gradingPending: false,
+      resultsHidden: true,
+      sections: null,
+    };
+  }
   const totalMarks = breakdown.reduce((s, sec) => s + sec.maxScore, 0);
   return {
     attemptId: attempt._id.toString(),
@@ -893,11 +959,16 @@ function buildResult(
     warnings: attempt.warningsTriggered,
     isMalpractice: attempt.isMalpractice,
     gradingPending: false,
+    resultsHidden: false,
     sections: breakdown,
   };
 }
 
-function pendingResult(attempt: AttemptDoc, exam: ExamDoc): ExamResult {
+function pendingResult(
+  attempt: AttemptDoc,
+  exam: ExamDoc,
+  resultsVisible: boolean,
+): ExamResult {
   return {
     attemptId: attempt._id.toString(),
     status: attempt.status as ExamAttemptStatus,
@@ -909,6 +980,8 @@ function pendingResult(attempt: AttemptDoc, exam: ExamDoc): ExamResult {
     warnings: attempt.warningsTriggered,
     isMalpractice: attempt.isMalpractice,
     gradingPending: true,
+    // If results are hidden, show "coming soon" rather than a grading spinner.
+    resultsHidden: !resultsVisible,
     sections: null,
   };
 }

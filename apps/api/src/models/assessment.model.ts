@@ -70,6 +70,9 @@ const examSchema = new Schema(
     // per-attempt permutation is persisted on the attempt so it stays stable.
     shuffleQuestions: { type: Boolean, default: false },
     shuffleOptions: { type: Boolean, default: false },
+    // Whether a student sees their result after submitting. Off → "coming soon"
+    // (the attempt is still graded; admins/faculty always see the real result).
+    resultsVisible: { type: Boolean, default: true },
   },
   { timestamps: true },
 );
@@ -180,6 +183,8 @@ const studentExamAttemptSchema = new Schema(
     // Captured for anonymous takers (no account).
     rollNumber: { type: String, default: "" },
     collegeName: { type: String, default: "" },
+    candidateName: { type: String, default: "" },
+    gender: { type: String, default: "" }, // "male" | "female" | ""
     status: {
       type: String,
       enum: EXAM_ATTEMPT_STATUS_VALUES,
@@ -229,6 +234,12 @@ const publicExamLinkSchema = new Schema(
     // "Section 2 CSE"). Surfaces in the admin UI + results export; NEVER shown
     // to takers.
     tag: { type: String, default: "" },
+    // PER-LINK overrides for takers of THIS link (independent of the exam's own
+    // settings and of sibling links). Existing links default to shuffle off +
+    // results visible, preserving prior behavior.
+    shuffleQuestions: { type: Boolean, default: false },
+    shuffleOptions: { type: Boolean, default: false },
+    resultsVisible: { type: Boolean, default: true },
   },
   { timestamps: true },
 );

@@ -83,6 +83,10 @@ export function PublicLinksDialog({
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // Per-link overrides (create form / edit).
+  const [shuffleQuestions, setShuffleQuestions] = useState(false);
+  const [shuffleOptions, setShuffleOptions] = useState(false);
+  const [resultsVisible, setResultsVisible] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
 
@@ -97,6 +101,9 @@ export function PublicLinksDialog({
     setCodeEnabled(false);
     setCode("");
     setTag("");
+    setShuffleQuestions(false);
+    setShuffleOptions(false);
+    setResultsVisible(true);
     setFormError("");
   };
 
@@ -110,6 +117,9 @@ export function PublicLinksDialog({
     setCodeEnabled(link.accessCodeEnabled);
     setCode(link.accessCode);
     setTag(link.tag);
+    setShuffleQuestions(link.shuffleQuestions);
+    setShuffleOptions(link.shuffleOptions);
+    setResultsVisible(link.resultsVisible);
   };
 
   const submit = async (): Promise<void> => {
@@ -122,6 +132,9 @@ export function PublicLinksDialog({
       accessCodeEnabled: codeEnabled,
       accessCode: codeEnabled ? code.trim() : "",
       tag: tag.trim(),
+      shuffleQuestions,
+      shuffleOptions,
+      resultsVisible,
     };
     try {
       if (editingId) {
@@ -160,7 +173,7 @@ export function PublicLinksDialog({
   const toggle = async (link: PublicLink): Promise<void> => {
     setBusyId(link.id);
     try {
-      // Resend the window + code so PATCH doesn't clear them.
+      // Resend the window + code + per-link settings so PATCH doesn't clear them.
       await authApi.updatePublicLink(link.id, {
         isActive: !link.isActive,
         startTime: link.startTime,
@@ -168,6 +181,9 @@ export function PublicLinksDialog({
         accessCodeEnabled: link.accessCodeEnabled,
         accessCode: link.accessCode,
         tag: link.tag,
+        shuffleQuestions: link.shuffleQuestions,
+        shuffleOptions: link.shuffleOptions,
+        resultsVisible: link.resultsVisible,
       });
       toast({ title: link.isActive ? "Link deactivated" : "Link activated" });
       onChanged();
@@ -232,6 +248,12 @@ export function PublicLinksDialog({
                       )}
                       {link.tag ? (
                         <Badge variant="info">{link.tag}</Badge>
+                      ) : null}
+                      {link.shuffleQuestions || link.shuffleOptions ? (
+                        <Badge variant="neutral">Shuffled</Badge>
+                      ) : null}
+                      {!link.resultsVisible ? (
+                        <Badge variant="warning">Results hidden</Badge>
                       ) : null}
                       <code className="truncate font-mono text-xs text-ink-secondary">
                         /public/exam/{link.accessToken}
@@ -347,6 +369,48 @@ export function PublicLinksDialog({
                 maxLength={120}
               />
             </FormField>
+
+            {/* Per-link exam behavior (independent of other links). */}
+            <div className="space-y-2 border-t border-subtle pt-3">
+              <label className="flex items-center gap-2">
+                <Switch
+                  checked={shuffleQuestions}
+                  onCheckedChange={setShuffleQuestions}
+                />
+                <span className="text-sm text-ink">
+                  Shuffle questions{" "}
+                  <span className="text-ink-muted">
+                    — randomize order within each section (per taker)
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2">
+                <Switch
+                  checked={shuffleOptions}
+                  onCheckedChange={setShuffleOptions}
+                />
+                <span className="text-sm text-ink">
+                  Shuffle options{" "}
+                  <span className="text-ink-muted">
+                    — randomize each MCQ&apos;s option order (per taker)
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-center gap-2">
+                <Switch
+                  checked={resultsVisible}
+                  onCheckedChange={setResultsVisible}
+                />
+                <span className="text-sm text-ink">
+                  Show results{" "}
+                  <span className="text-ink-muted">
+                    — display the score after submission; off shows &ldquo;coming
+                    soon&rdquo;
+                  </span>
+                </span>
+              </label>
+            </div>
+
             <div className="space-y-2">
               <label className="flex items-center gap-2">
                 <Switch checked={codeEnabled} onCheckedChange={setCodeEnabled} />

@@ -81,6 +81,9 @@ export function ExamSettingsDialog({
   const [shuffleOptions, setShuffleOptions] = useState(
     initial?.shuffleOptions ?? false,
   );
+  const [resultsVisible, setResultsVisible] = useState(
+    initial?.resultsVisible ?? true,
+  );
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -102,6 +105,7 @@ export function ExamSettingsDialog({
         calculatorEnabled,
         shuffleQuestions,
         shuffleOptions,
+        resultsVisible,
       });
       toast({
         variant: "success",
@@ -226,6 +230,20 @@ export function ExamSettingsDialog({
                   Shuffle options{" "}
                   <span className="text-ink-muted">
                     — randomize each MCQ&apos;s option order (per candidate)
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2">
+                <Switch
+                  checked={resultsVisible}
+                  onCheckedChange={setResultsVisible}
+                />
+                <span className="text-sm text-ink">
+                  Show results{" "}
+                  <span className="text-ink-muted">
+                    — display the score after submission; off shows &ldquo;coming
+                    soon&rdquo;
                   </span>
                 </span>
               </label>

@@ -516,6 +516,8 @@ function parseLanguagePolicy(raw: string): CodeLanguage[] {
 
 export interface ResultRow {
   candidate: string;
+  /** "male" | "female" | "" (captured from public takers). */
+  gender: string;
   rollNumber: string;
   collegeName: string;
   /** Admin-only public-link session label (blank for logged-in takers). */
@@ -542,6 +544,7 @@ export async function buildResultsWorkbook(
 
   const columns: Partial<ExcelJS.Column>[] = [
     { header: "Candidate", key: "candidate", width: 24 },
+    { header: "Gender", key: "gender", width: 10 },
     { header: "Roll Number", key: "rollNumber", width: 16 },
     { header: "College", key: "collegeName", width: 24 },
     { header: "Tag/Session", key: "tag", width: 22 },
@@ -564,6 +567,7 @@ export async function buildResultsWorkbook(
   for (const r of rows) {
     const record: Record<string, string | number | boolean> = {
       candidate: r.candidate,
+      gender: r.gender,
       rollNumber: r.rollNumber,
       collegeName: r.collegeName,
       tag: r.tag,

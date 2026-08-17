@@ -80,7 +80,13 @@ export async function getPublicAvailability(
 
 export async function startPublicAttempt(
   token: string,
-  identity: { rollNumber: string; collegeName: string; accessCode?: string },
+  identity: {
+    fullName: string;
+    gender: string;
+    rollNumber: string;
+    collegeName: string;
+    accessCode?: string;
+  },
 ): Promise<StartAttemptResponse> {
   const link = await resolveLink(token);
   if (!link) {
@@ -119,6 +125,8 @@ export async function startPublicAttempt(
     publicLink: link._id,
     rollNumber: identity.rollNumber,
     collegeName: identity.collegeName,
+    candidateName: identity.fullName,
+    gender: identity.gender,
   });
   const view = await buildSectionView(attempt, exam, sections, 0, new Date());
   return { ...view, attemptToken: attempt.attemptToken };

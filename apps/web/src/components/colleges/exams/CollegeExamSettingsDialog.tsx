@@ -36,6 +36,7 @@ export interface CollegeExamSettingsInitial {
   calculatorEnabled: boolean;
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
+  resultsVisible: boolean;
   accessCodeEnabled: boolean;
   accessCode: string;
   orgUnitIds: string[];
@@ -77,6 +78,9 @@ export function CollegeExamSettingsDialog({
   const [shuffleOptions, setShuffleOptions] = useState(
     initial?.shuffleOptions ?? false,
   );
+  const [resultsVisible, setResultsVisible] = useState(
+    initial?.resultsVisible ?? true,
+  );
   const [accessCodeEnabled, setAccessCodeEnabled] = useState(
     initial?.accessCodeEnabled ?? false,
   );
@@ -102,6 +106,7 @@ export function CollegeExamSettingsDialog({
           calculatorEnabled,
           shuffleQuestions,
           shuffleOptions,
+          resultsVisible,
           accessCodeEnabled,
           accessCode: accessCodeEnabled ? accessCode.trim() : "",
           orgUnitIds,
@@ -116,6 +121,7 @@ export function CollegeExamSettingsDialog({
           calculatorEnabled,
           shuffleQuestions,
           shuffleOptions,
+          resultsVisible,
           accessCodeEnabled,
           accessCode: accessCodeEnabled ? accessCode.trim() : "",
           orgUnitIds,
@@ -207,6 +213,20 @@ export function CollegeExamSettingsDialog({
               Shuffle options{" "}
               <span className="text-ink-muted">
                 — randomize each MCQ&apos;s option order (per student)
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2">
+            <Switch
+              checked={resultsVisible}
+              onCheckedChange={setResultsVisible}
+            />
+            <span className="text-sm text-ink">
+              Show results{" "}
+              <span className="text-ink-muted">
+                — display the score after submission; off shows &ldquo;coming
+                soon&rdquo;
               </span>
             </span>
           </label>

@@ -476,7 +476,12 @@ describe("public link (anonymous)", () => {
 
     const start = await request(app)
       .post(`/api/public/exams/${active.accessToken}/attempts`)
-      .send({ rollNumber: "R-100", collegeName: "Acme Institute" });
+      .send({
+        fullName: "Pub One",
+        gender: "male",
+        rollNumber: "R-100",
+        collegeName: "Acme Institute",
+      });
     expect(start.status).toBe(201);
     const attemptId = start.body.attemptId as string;
     const attemptToken = start.body.attemptToken as string;
@@ -530,7 +535,12 @@ describe("public link (anonymous)", () => {
     expect(avail.body.accessCodeEnabled).toBe(true);
     expect(JSON.stringify(avail.body)).not.toContain("Tiger24");
 
-    const identity = { rollNumber: "R-1", collegeName: "Acme" };
+    const identity = {
+      fullName: "Pub Coded",
+      gender: "female",
+      rollNumber: "R-1",
+      collegeName: "Acme",
+    };
 
     // Missing code → 403 ACCESS_CODE_REQUIRED.
     const missing = await request(app)
@@ -656,6 +666,96 @@ describe("question + option shuffle", () => {
     // Both MCQs graded correct (5 + 5) despite the shuffled option order —
     // proving display→original index mapping on save.
     expect(submit.body.score).toBe(10);
+  });
+});
+
+describe("result visibility + public identity capture", () => {
+  it("captures name/gender, hides results when off (still grades), reveals on flip", async () => {
+    const { userId } = await registerAndLogin();
+    const admin = await registerAndLogin("admin");
+    const { exam, qSingle } = await makeExam({ enroll: userId });
+    // Result visibility is now a PER-LINK setting for public takers.
+    const link = await PublicExamLinkModel.create({
+      exam: exam._id,
+      accessToken: "tok-results",
+      isActive: true,
+      resultsVisible: false,
+    });
+
+    const start = await request(app)
+      .post(`/api/public/exams/${link.accessToken}/attempts`)
+      .send({
+        fullName: "Zoe Z",
+        gender: "female",
+        rollNumber: "RZ-1",
+        collegeName: "Acme",
+      });
+    expect(start.status).toBe(201);
+    const attemptId = start.body.attemptId as string;
+    const at = start.body.attemptToken as string;
+
+    const view = (start.body.questions as { id: string; options: string[] }[])
+      .find((q) => q.id === qSingle._id.toString())!;
+    await request(app)
+      .post(`/api/attempts/${attemptId}/section/answers`)
+      .set("X-Attempt-Token", at)
+      .send({
+        answers: [
+          {
+            questionId: qSingle._id.toString(),
+            selectedOptions: [view.options.indexOf("O(log n)")],
+          },
+        ],
+      });
+    await request(app)
+      .post(`/api/attempts/${attemptId}/advance`)
+      .set("X-Attempt-Token", at);
+    const submit = await request(app)
+      .post(`/api/attempts/${attemptId}/submit`)
+      .set("X-Attempt-Token", at)
+      .send({});
+    // Student sees "coming soon" — score + breakdown redacted.
+    expect(submit.body.resultsHidden).toBe(true);
+    expect(submit.body.score).toBe(0);
+    expect(submit.body.sections).toBeNull();
+
+    // …but the attempt WAS graded server-side, with the captured identity.
+    const graded = await StudentExamAttemptModel.findById(attemptId);
+    expect(graded?.status).toBe("graded");
+    expect(graded?.score).toBe(5);
+    expect(graded?.candidateName).toBe("Zoe Z");
+    expect(graded?.gender).toBe("female");
+
+    // Admin export carries the captured name + gender + the real score.
+    const res = await request(app)
+      .get(`/api/admin/exams/${exam._id.toString()}/results.xlsx`)
+      .set(auth(admin.token))
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => chunks.push(c));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body as Buffer);
+    const ws = wb.getWorksheet("Results")!;
+    expect(ws.getRow(1).values as unknown[]).toContain("Gender");
+    const cells: unknown[] = [];
+    ws.eachRow((row) => cells.push(...(row.values as unknown[])));
+    expect(cells).toContain("Zoe Z");
+    expect(cells).toContain("female");
+
+    // Flip the LINK's results ON → the student now sees the real result.
+    await PublicExamLinkModel.updateOne(
+      { _id: link._id },
+      { $set: { resultsVisible: true } },
+    );
+    const result = await request(app)
+      .get(`/api/attempts/${attemptId}/result`)
+      .set("X-Attempt-Token", at);
+    expect(result.body.resultsHidden).toBe(false);
+    expect(result.body.score).toBe(5);
+    expect(result.body.sections).not.toBeNull();
   });
 });
 
@@ -909,7 +1009,12 @@ describe("Excel round-trip", () => {
 
     const start = await request(app)
       .post(`/api/public/exams/${link.accessToken}/attempts`)
-      .send({ rollNumber: "R-9", collegeName: "Acme" });
+      .send({
+        fullName: "Tag Taker",
+        gender: "male",
+        rollNumber: "R-9",
+        collegeName: "Acme",
+      });
     const attemptId = start.body.attemptId as string;
     const attemptToken = start.body.attemptToken as string;
     await request(app)
@@ -966,7 +1071,12 @@ describe("Excel round-trip", () => {
     const runAttempt = async (token: string, roll: string): Promise<void> => {
       const s = await request(app)
         .post(`/api/public/exams/${token}/attempts`)
-        .send({ rollNumber: roll, collegeName: "Acme" });
+        .send({
+          fullName: `Taker ${roll}`,
+          gender: "male",
+          rollNumber: roll,
+          collegeName: "Acme",
+        });
       const attemptId = s.body.attemptId as string;
       const at = s.body.attemptToken as string;
       await request(app)

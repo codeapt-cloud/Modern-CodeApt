@@ -440,6 +440,26 @@ function ResultsReview({
   result: ExamResult;
   onExit: () => void;
 }) {
+  // Organiser has turned result display off — acknowledge the submission and
+  // show "coming soon" instead of a score/breakdown.
+  if (result.resultsHidden) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-16 text-center">
+        <p className="font-mono text-3xl text-primary">{"{ }"}</p>
+        <h1 className="mt-3 text-2xl font-bold text-ink">Submitted</h1>
+        <p className="mt-3 text-ink-muted">
+          Your responses were recorded. Results aren&apos;t published yet —
+          they&apos;ll be available here once the organiser releases them.
+        </p>
+        <p className="mt-4 inline-block rounded-lg bg-surface-raised px-3 py-1.5 text-sm font-medium text-ink">
+          Results coming soon
+        </p>
+        <div className="mt-8">
+          <Button onClick={onExit}>Done</Button>
+        </div>
+      </div>
+    );
+  }
   const pct =
     result.totalMarks > 0
       ? Math.round((result.score / result.totalMarks) * 100)

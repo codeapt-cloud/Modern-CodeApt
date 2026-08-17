@@ -15,6 +15,13 @@ import { ReadyScreen } from "../../components/exam/ReadyScreen.js";
 import { Alert } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { api, parseApiError } from "../../lib/api-client.js";
 import { rateLimitRetrySeconds } from "../../lib/rate-limit.js";
@@ -28,6 +35,8 @@ export function PublicExamPage() {
   );
 
   const [started, setStarted] = useState<StartAttemptResponse | null>(null);
+  const [fullName, setFullName] = useState("");
+  const [gender, setGender] = useState<"" | "male" | "female">("");
   const [rollNumber, setRollNumber] = useState("");
   const [collegeName, setCollegeName] = useState("");
   const [accessCode, setAccessCode] = useState("");
@@ -45,7 +54,11 @@ export function PublicExamPage() {
   }, [cooldown]);
 
   const begin = async (): Promise<void> => {
-    if (!rollNumber.trim() || !collegeName.trim()) return;
+    if (!fullName.trim() || !rollNumber.trim() || !collegeName.trim()) return;
+    if (!gender) {
+      setError("Select your gender.");
+      return;
+    }
     if (needsCode && !accessCode.trim()) {
       setError("Enter the start code given by the organiser.");
       return;
@@ -59,6 +72,8 @@ export function PublicExamPage() {
     }
     try {
       const res = await api.exams.publicStart(token, {
+        fullName: fullName.trim(),
+        gender,
         rollNumber: rollNumber.trim(),
         collegeName: collegeName.trim(),
         accessCode: accessCode.trim() || undefined,
@@ -125,6 +140,25 @@ export function PublicExamPage() {
           }}
         >
           <Input
+            placeholder="Full name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            required
+            aria-label="Full name"
+          />
+          <Select
+            value={gender}
+            onValueChange={(v) => setGender(v as "male" | "female")}
+          >
+            <SelectTrigger aria-label="Gender">
+              <SelectValue placeholder="Gender" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="male">Male</SelectItem>
+              <SelectItem value="female">Female</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
             placeholder="Roll number"
             value={rollNumber}
             onChange={(e) => setRollNumber(e.target.value)}
@@ -155,6 +189,8 @@ export function PublicExamPage() {
             loading={starting}
             disabled={
               cooldown > 0 ||
+              !fullName.trim() ||
+              !gender ||
               !rollNumber.trim() ||
               !collegeName.trim() ||
               (needsCode && !accessCode.trim())

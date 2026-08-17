@@ -327,6 +327,7 @@ export function CollegeExamEditorPage() {
                 calculatorEnabled: data.calculatorEnabled,
                 shuffleQuestions: data.shuffleQuestions,
                 shuffleOptions: data.shuffleOptions,
+                resultsVisible: data.resultsVisible,
                 accessCodeEnabled: data.accessCodeEnabled,
                 accessCode: data.accessCode,
                 orgUnitIds: summary.orgUnitIds,

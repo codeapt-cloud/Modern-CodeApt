@@ -940,7 +940,13 @@ export const examResultSchema = z.object({
   isMalpractice: z.boolean(),
   /** True while CODE grading jobs are still running. */
   gradingPending: z.boolean(),
-  /** Null until fully graded. */
+  /**
+   * True when the organiser has turned OFF result display for this exam — the
+   * attempt is still graded server-side, but the student sees "coming soon"
+   * (score/sections are redacted) until results are published.
+   */
+  resultsHidden: z.boolean(),
+  /** Null until fully graded (or when results are hidden). */
   sections: z.array(sectionResultSchema).nullable(),
 });
 export type ExamResult = z.infer<typeof examResultSchema>;
@@ -993,6 +999,10 @@ export type PublicExamAvailability = z.infer<
   typeof publicExamAvailabilitySchema
 >;
 export const publicStartRequestSchema = z.object({
+  fullName: z.string().trim().min(1, "Name is required").max(120),
+  gender: z.enum(["male", "female"], {
+    errorMap: () => ({ message: "Select a gender" }),
+  }),
   rollNumber: z.string().min(1, "Roll number is required").max(64),
   collegeName: z.string().min(1, "College name is required").max(200),
   /** Start code, when the link is code-gated (validated server-side). */
@@ -1017,6 +1027,7 @@ export const adminExamUpsertSchema = z.object({
   calculatorEnabled: z.boolean().default(true),
   shuffleQuestions: z.boolean().default(false),
   shuffleOptions: z.boolean().default(false),
+  resultsVisible: z.boolean().default(true),
 });
 export type AdminExamUpsert = z.infer<typeof adminExamUpsertSchema>;
 
@@ -1062,6 +1073,10 @@ export const adminPublicLinkUpsertSchema = z
     accessCode: z.string().trim().max(64).default(""),
     /** Admin-only label to differentiate sessions (e.g. "Section 2 CSE"). */
     tag: z.string().trim().max(120).default(""),
+    /** Per-link overrides for this link's takers. */
+    shuffleQuestions: z.boolean().default(false),
+    shuffleOptions: z.boolean().default(false),
+    resultsVisible: z.boolean().default(true),
   })
   .refine((v) => !v.accessCodeEnabled || v.accessCode.length >= 4, {
     message: "Enter a start code of at least 4 characters to enable the code gate",
@@ -1079,6 +1094,10 @@ export const publicLinkSchema = z.object({
   accessCode: z.string(),
   /** Admin-only session label (never shown to takers). */
   tag: z.string(),
+  /** Per-link overrides (see the model): shuffle + result visibility. */
+  shuffleQuestions: z.boolean(),
+  shuffleOptions: z.boolean(),
+  resultsVisible: z.boolean(),
 });
 export type PublicLink = z.infer<typeof publicLinkSchema>;
 
@@ -1130,6 +1149,8 @@ export const adminExamDetailSchema = z.object({
   calculatorEnabled: z.boolean(),
   shuffleQuestions: z.boolean(),
   shuffleOptions: z.boolean(),
+  /** Whether students see their result after submitting (else "coming soon"). */
+  resultsVisible: z.boolean(),
   /** Author-only: per-exam start-code gate (echoed so faculty can read it out). */
   accessCodeEnabled: z.boolean(),
   accessCode: z.string(),
@@ -4874,6 +4895,7 @@ export const createCollegeExamSchema = z.object({
   calculatorEnabled: z.boolean().default(true),
   shuffleQuestions: z.boolean().default(false),
   shuffleOptions: z.boolean().default(false),
+  resultsVisible: z.boolean().default(true),
   /** Per-exam start-code gate (faculty read the code out right before the exam). */
   accessCodeEnabled: z.boolean().default(false),
   accessCode: z.string().trim().max(64).default(""),
@@ -4897,6 +4919,7 @@ export const updateCollegeExamSchema = z
     calculatorEnabled: z.boolean().optional(),
     shuffleQuestions: z.boolean().optional(),
     shuffleOptions: z.boolean().optional(),
+    resultsVisible: z.boolean().optional(),
     accessCodeEnabled: z.boolean().optional(),
     accessCode: z.string().trim().max(64).optional(),
     orgUnitIds: z.array(z.string().min(1)).optional(),
