@@ -111,6 +111,52 @@ export const aiProviderTestRateLimiter = rateLimit({
 });
 
 /**
+ * Per-user rate limit for signed-upload signature minting. Each signature lets
+ * the caller push a file to our shared Cloudinary account (billed on
+ * storage/bandwidth), so cap it (30/min) to stop a college user from minting
+ * signatures in a loop. Applied to the tenant `/c/:slug/uploads/signature`
+ * route; the platform-admin `/admin/uploads/signature` route has NO limiter
+ * today (trusted, small operator set) — see the step report. Skipped under
+ * NODE_ENV=test.
+ */
+export const uploadSignatureRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => env.NODE_ENV === "test",
+  keyGenerator: (req) => req.auth?.userId ?? req.ip ?? "anonymous",
+  message: {
+    error: {
+      message: "Too many upload requests, please slow down",
+      code: "RATE_LIMITED",
+    },
+  },
+});
+
+/**
+ * Per-user rate limit for the gaming ANSWER endpoint. Real play is one answer
+ * every ~10-15s (≈4-6/min); 90/min is generous headroom for fast clearers and
+ * retries while still bounding a runaway/abusive client to a sane rate (not the
+ * thousands/min an unthrottled loop could push on the hot path). Skipped under
+ * NODE_ENV=test.
+ */
+export const gameAnswerRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 90,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => env.NODE_ENV === "test",
+  keyGenerator: (req) => req.auth?.userId ?? req.ip ?? "anonymous",
+  message: {
+    error: {
+      message: "Too many answers, please slow down",
+      code: "RATE_LIMITED",
+    },
+  },
+});
+
+/**
  * Per-user rate limit for AUTHENTICATED exam-attempt starts (individual +
  * college). A start can be code-gated, so this throttles start-code guessing —
  * the anonymous public start is already per-IP limited below. The cap is modest

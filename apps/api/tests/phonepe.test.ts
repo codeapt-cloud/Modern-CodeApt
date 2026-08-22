@@ -3,7 +3,18 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { env } from "../src/config/env.js";
 import { createPhonePeGateway } from "../src/lib/payment-gateway/phonepe.js";
-import { PaymentGatewayError } from "../src/lib/payment-gateway/types.js";
+import {
+  PaymentGatewayError,
+  type CallbackVerification,
+  type VerifiedCallback,
+} from "../src/lib/payment-gateway/types.js";
+
+/** Narrow a verifyCallback result to the terminal (object) case, or fail. */
+function expectVerified(v: CallbackVerification): VerifiedCallback {
+  expect(v).not.toBeNull();
+  expect(v).not.toBe("ignore");
+  return v as VerifiedCallback;
+}
 
 // Mock pg-sdk-node
 const mockPay = vi.fn();
@@ -114,13 +125,14 @@ describe("PhonePe gateway adapter (pg-sdk-node)", () => {
       });
 
       const gw = createPhonePeGateway();
-      const verified = gw.verifyCallback({ authorization: "Basic xxxx" }, "raw_body_data");
+      const verified = expectVerified(
+        gw.verifyCallback({ authorization: "Basic xxxx" }, "raw_body_data"),
+      );
 
-      expect(verified).not.toBeNull();
-      expect(verified?.merchantOrderId).toBe("ORD-3");
-      expect(verified?.status).toBe("success");
-      expect(verified?.gatewayTxnId).toBe("TXN-123");
-      
+      expect(verified.merchantOrderId).toBe("ORD-3");
+      expect(verified.status).toBe("success");
+      expect(verified.gatewayTxnId).toBe("TXN-123");
+
       expect(mockValidateCallback).toHaveBeenCalledWith(
         "wh-user",
         "wh-password",
@@ -139,9 +151,67 @@ describe("PhonePe gateway adapter (pg-sdk-node)", () => {
       });
 
       const gw = createPhonePeGateway();
-      const verified = gw.verifyCallback({ authorization: "Basic xxxx" }, "raw_body_data");
+      const verified = expectVerified(
+        gw.verifyCallback({ authorization: "Basic xxxx" }, "raw_body_data"),
+      );
 
-      expect(verified?.status).toBe("failed");
+      expect(verified.status).toBe("failed");
+    });
+
+    it('IGNORES a non-terminal (PENDING) callback — returns "ignore", NOT null/failed', () => {
+      // "ignore" (verified but non-terminal) is DISTINCT from null (bad
+      // signature): it acknowledges the webhook (2xx) and writes nothing, so the
+      // order stays recoverable and the gateway doesn't retry/disable. Collapsing
+      // pending→failed here would terminalise the order and drop a later success.
+      mockValidateCallback.mockReturnValueOnce({
+        type: "PAYMENT",
+        payload: { merchantOrderId: "ORD-4b", state: "PENDING" },
+      });
+
+      const gw = createPhonePeGateway();
+      const verified = gw.verifyCallback({ authorization: "Basic xxxx" }, "raw");
+
+      expect(verified).toBe("ignore");
+    });
+
+    it('IGNORES an unrecognised callback state too ("ignore", not failed)', () => {
+      mockValidateCallback.mockReturnValueOnce({
+        type: "PAYMENT",
+        payload: { merchantOrderId: "ORD-4c", state: "SOME_FUTURE_STATE" },
+      });
+
+      const gw = createPhonePeGateway();
+      const verified = gw.verifyCallback({ authorization: "Basic xxxx" }, "raw");
+
+      expect(verified).toBe("ignore");
+    });
+
+    it("(b) an INVALID signature with a would-be-PENDING body is REJECTED (null), never ignored", () => {
+      // Signature verification runs to completion BEFORE the pending/ignore
+      // branch, so an unsigned attacker payload that CLAIMS a pending state is
+      // still a 4xx rejection — it can never buy a 2xx ack.
+      mockValidateCallback.mockImplementationOnce(() => {
+        throw new Error("bad signature");
+      });
+
+      const gw = createPhonePeGateway();
+      const verified = gw.verifyCallback(
+        { authorization: "Basic forged" },
+        JSON.stringify({ merchantOrderId: "X", state: "PENDING" }),
+      );
+
+      expect(verified).toBeNull();
+    });
+
+    it("(b) a MISSING signature header short-circuits to null before the state is read", () => {
+      const gw = createPhonePeGateway();
+      const verified = gw.verifyCallback(
+        { "content-type": "application/json" },
+        JSON.stringify({ merchantOrderId: "X", state: "PENDING" }),
+      );
+
+      expect(verified).toBeNull();
+      expect(mockValidateCallback).not.toHaveBeenCalled();
     });
 
     it("rejects when Authorization header is missing (returns null)", () => {
@@ -186,9 +256,29 @@ describe("PhonePe gateway adapter (pg-sdk-node)", () => {
 
       const gw = createPhonePeGateway();
       const res = await gw.fetchStatus("ORD-6");
-      
+
       expect(res.status).toBe(PaymentStatus.FAILED);
       expect(res.gatewayTxnId).toBeNull();
+    });
+
+    it("returns PENDING for an in-progress state (money-loss regression)", async () => {
+      // Before the fix this collapsed to FAILED, terminalising the order so the
+      // later success webhook was silently ignored — money taken, no enrollment.
+      mockGetOrderStatus.mockResolvedValueOnce({ state: "PENDING" });
+
+      const gw = createPhonePeGateway();
+      const res = await gw.fetchStatus("ORD-7");
+
+      expect(res.status).toBe(PaymentStatus.PENDING);
+    });
+
+    it("maps an UNRECOGNISED state to PENDING, never FAILED (fail-open)", async () => {
+      mockGetOrderStatus.mockResolvedValueOnce({ state: "SOME_FUTURE_STATE" });
+
+      const gw = createPhonePeGateway();
+      const res = await gw.fetchStatus("ORD-8");
+
+      expect(res.status).toBe(PaymentStatus.PENDING);
     });
   });
 });

@@ -65,7 +65,13 @@ export const callbackController = asyncHandler(
         .json({ error: { message: "Invalid callback signature" } });
       return;
     }
-    res.status(200).json({ ok: true, status: result.status });
+    // 2xx for both an applied terminal outcome and an acknowledged non-terminal
+    // ("ignored") webhook — the gateway just needs a success ack either way.
+    res.status(200).json({
+      ok: true,
+      ignored: result.ignored ?? false,
+      status: result.status,
+    });
   },
 );
 

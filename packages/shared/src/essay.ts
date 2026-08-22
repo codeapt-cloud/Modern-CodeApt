@@ -9,15 +9,16 @@
  * "meaning" dimensions (vocabulary, structure, relevance) are all excellent.
  *
  * The AI layer (worker-only) never replaces this engine — it can only *blend*
- * into two dimensions (vocabulary & structure). `scoreDeterministic` is the
- * guaranteed floor: if the AI is disabled, unreachable, or slow, grading still
- * completes with a fully deterministic result.
+ * into three dimensions (vocabulary, structure & relevance). `scoreDeterministic`
+ * is the guaranteed floor: if the AI is disabled, unreachable, or slow, grading
+ * still completes with a fully deterministic result.
  *
- *   Final weights: grammar 0.08, spelling 0.03, punctuation 0.04,
- *                  readability 0.05, vocabulary 0.30, structure 0.25,
+ *   Final weights: grammar 0.12, spelling 0.05, punctuation 0.05,
+ *                  readability 0.08, vocabulary 0.22, structure 0.23,
  *                  relevance 0.25   (Σ = 1.00)
  *   Bonus: +5 if vocabulary, structure AND relevance are all >= 80.
- *   AI blend: vocabulary & structure = 0.6*deterministic + 0.4*AI.
+ *   AI blend (blend = det*(1-b) + AI*b): vocabulary b=0.5, structure b=0.5,
+ *                  relevance b=0.6.
  */
 import {
   ESSAY_AI_BLEND,

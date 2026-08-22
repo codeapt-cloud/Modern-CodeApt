@@ -8,11 +8,13 @@
  */
 import { CouponDiscountType, PaymentStatus } from "@codeapt/shared";
 import type { Express } from "express";
+import { createHmac } from "node:crypto";
 import { Types } from "mongoose";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
+import { env } from "../src/config/env.js";
 import {
   MOCK_SIGNATURE_HEADER,
   buildSignedCallback,
@@ -81,6 +83,28 @@ function fireCallback(orderId: string, outcome: "success" | "failure") {
     .post("/api/payments/callback")
     .set("Content-Type", "application/json")
     .set(MOCK_SIGNATURE_HEADER, headers[MOCK_SIGNATURE_HEADER] ?? "")
+    .send(rawBody);
+}
+
+/**
+ * Fire a validly-SIGNED but NON-TERMINAL ("pending") webhook. The gateway
+ * ignores it (verifyCallback → null for a non-success/failed status), exactly
+ * as the real PhonePe adapter now ignores a PENDING callback — so it exercises
+ * the same handleCallback no-op path.
+ */
+function firePendingCallback(orderId: string) {
+  const rawBody = JSON.stringify({
+    merchantOrderId: orderId,
+    status: "pending",
+    gatewayTxnId: `MOCKTXN-${orderId}`,
+  });
+  const sig = createHmac("sha256", env.PAYMENT_MOCK_SALT)
+    .update(rawBody)
+    .digest("hex");
+  return request(app)
+    .post("/api/payments/callback")
+    .set("Content-Type", "application/json")
+    .set(MOCK_SIGNATURE_HEADER, sig)
     .send(rawBody);
 }
 
@@ -376,6 +400,80 @@ describe("order status + list + ownership", () => {
       .set(auth(token));
     expect(list.body.items).toHaveLength(1);
     expect(list.body.items[0].orderId).toBe(orderId);
+  });
+
+  it("PENDING reconcile-on-read stays recoverable — a later webhook still enrolls (money-loss regression)", async () => {
+    const { id } = await makeSubject(100000);
+    const { token, userId } = await registerAndLogin();
+    const created = await request(app)
+      .post("/api/payments/orders")
+      .set(auth(token))
+      .send({ subjectId: id });
+    const { orderId } = created.body;
+
+    // The buyer bounces back and polls while payment is still PENDING. Each read
+    // reconciles against the gateway (fetchStatus → PENDING, exactly like a
+    // still-pending real PhonePe order after the adapter fix). The order MUST
+    // stay non-terminal so the delayed webhook can still land.
+    for (let i = 0; i < 3; i += 1) {
+      const poll = await request(app)
+        .get(`/api/payments/orders/${orderId}`)
+        .set(auth(token));
+      expect(poll.body.status).toBe(PaymentStatus.CREATED);
+      expect(poll.body.enrolled).toBe(false);
+    }
+    const stored = await OrderModel.findOne({ orderId });
+    expect(stored?.status).toBe(PaymentStatus.CREATED); // never wrongly FAILED
+
+    // The delayed success webhook now lands and enrolls the buyer.
+    await fireCallback(orderId, "success");
+    const after = await request(app)
+      .get(`/api/payments/orders/${orderId}`)
+      .set(auth(token));
+    expect(after.body.status).toBe(PaymentStatus.SUCCESS);
+    expect(after.body.enrolled).toBe(true);
+    expect(
+      await EnrollmentModel.countDocuments({
+        user: userId,
+        subject: new Types.ObjectId(id),
+      }),
+    ).toBe(1);
+  });
+
+  it("a PENDING webhook is ignored (no state write) and a later success still enrolls", async () => {
+    const { id } = await makeSubject(100000);
+    const { token, userId } = await registerAndLogin();
+    const created = await request(app)
+      .post("/api/payments/orders")
+      .set(auth(token))
+      .send({ subjectId: id });
+    const { orderId } = created.body;
+
+    // A validly-signed but non-terminal (PENDING) webhook arrives first. It must
+    // be ACKNOWLEDGED (2xx, ignored) — not rejected as a forgery (4xx) — and be
+    // a no-op: the order stays CREATED (non-terminal), never wrongly FAILED.
+    const pendingAck = await firePendingCallback(orderId);
+    expect(pendingAck.status).toBe(200);
+    expect(pendingAck.body.ignored).toBe(true);
+    const afterPending = await OrderModel.findOne({ orderId });
+    expect(afterPending?.status).toBe(PaymentStatus.CREATED);
+    expect(
+      await EnrollmentModel.countDocuments({
+        user: userId,
+        subject: new Types.ObjectId(id),
+      }),
+    ).toBe(0);
+
+    // The eventual terminal success webhook then lands and enrolls the buyer.
+    await fireCallback(orderId, "success");
+    const done = await OrderModel.findOne({ orderId });
+    expect(done?.status).toBe(PaymentStatus.SUCCESS);
+    expect(
+      await EnrollmentModel.countDocuments({
+        user: userId,
+        subject: new Types.ObjectId(id),
+      }),
+    ).toBe(1);
   });
 
   it("forbids reading another user's order", async () => {

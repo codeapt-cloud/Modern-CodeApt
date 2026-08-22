@@ -386,12 +386,25 @@ async function applyVerifiedOutcome(
 export async function handleCallback(
   headers: Record<string, string | undefined>,
   rawBody: string,
-): Promise<{ ok: boolean; orderId?: string; status?: PaymentStatus }> {
+): Promise<{
+  ok: boolean;
+  ignored?: boolean;
+  orderId?: string;
+  status?: PaymentStatus;
+}> {
   const gateway = getPaymentGateway();
   const verified = gateway.verifyCallback(headers, rawBody);
-  if (!verified) {
+  if (verified === null) {
+    // Signature did not verify — reject (4xx). Distinct from "ignore" below.
     logger.warn("payment callback failed verification — rejected");
     return { ok: false };
+  }
+  if (verified === "ignore") {
+    // Verified but non-terminal (e.g. PENDING): acknowledge with a 2xx and
+    // write NOTHING, so the order stays recoverable and the gateway doesn't
+    // treat delivery as failed. Logged at info — NOT the warn used for forgery.
+    logger.info("payment callback verified but non-terminal — acknowledged, no state change");
+    return { ok: true, ignored: true };
   }
   const status = await applyVerifiedOutcome(
     verified.merchantOrderId,

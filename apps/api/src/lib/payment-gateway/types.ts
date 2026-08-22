@@ -25,15 +25,27 @@ export interface CreateOrderResult {
 }
 
 /**
- * A callback/webhook that VERIFIED (signature checked). `status` is normalized
- * to a terminal payment status (success | failed). A null return from
- * `verifyCallback` means the signature did not verify — never trust it.
+ * A callback/webhook that VERIFIED (signature checked) AND carries a TERMINAL
+ * outcome. `status` is normalized to success | failed.
  */
 export interface VerifiedCallback {
   merchantOrderId: string;
   status: Extract<PaymentStatus, "success" | "failed">;
   gatewayTxnId: string | null;
 }
+
+/**
+ * `verifyCallback` outcome — three distinct cases the caller MUST tell apart:
+ *   - a `VerifiedCallback` → verified + terminal; apply it.
+ *   - `"ignore"`           → verified but NON-terminal (e.g. PhonePe PENDING).
+ *                            Acknowledge it (2xx), write NOTHING, and wait for a
+ *                            later terminal webhook. Collapsing this to a failure
+ *                            would terminalise the order and lose the payment;
+ *                            rejecting it (4xx) would look like a delivery failure
+ *                            and make the gateway retry/disable the webhook.
+ *   - `null`               → signature did NOT verify. Reject (4xx). Never trust.
+ */
+export type CallbackVerification = VerifiedCallback | "ignore" | null;
 
 export interface FetchStatusResult {
   status: PaymentStatus;
@@ -44,13 +56,13 @@ export interface PaymentGateway {
   readonly name: "mock" | "phonepe";
   createOrder(input: CreateOrderInput): Promise<CreateOrderResult>;
   /**
-   * Verify a raw callback body against its signature header(s). Returns the
-   * normalized result on success, or null when the signature does not verify.
+   * Verify a raw callback body against its signature header(s). See
+   * `CallbackVerification` for the three outcomes (terminal / ignore / reject).
    */
   verifyCallback(
     headers: Record<string, string | undefined>,
     rawBody: string,
-  ): VerifiedCallback | null;
+  ): CallbackVerification;
   /** Server-authoritative status lookup (used to reconcile a pending order). */
   fetchStatus(merchantOrderId: string): Promise<FetchStatusResult>;
 }

@@ -1,0 +1,86 @@
+/**
+ * Gaming routes. Student play START requires a login; the attempt LIFECYCLE
+ * (answer/advance/finish) uses optionalAuth + authorizes inside the service by
+ * attempt ownership OR an X-Attempt-Token (mirroring the exam engine). The
+ * platform-admin authoring surface lives here under requireAdmin. College
+ * authoring + college play START are in college-game.routes.ts.
+ */
+import { Router } from "express";
+
+import {
+  advanceGameController,
+  adminCreateGameSetController,
+  adminGetGameSetController,
+  adminListGameSetsController,
+  adminPublishGameSetController,
+  adminUpdateGameSetController,
+  answerGameItemController,
+  explainGameItemController,
+  finishGameSetController,
+  startGameSetController,
+} from "../controllers/game.controller.js";
+import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
+import { optionalAuth } from "../middleware/optional-auth.js";
+import {
+  gameAnswerRateLimiter,
+  startAttemptRateLimiter,
+} from "../middleware/rate-limit.js";
+import { requireAdmin } from "../middleware/require-role.js";
+import { requireAuth } from "../middleware/require-auth.js";
+
+export const gameRouter: Router = Router();
+
+const authed = [requireAuth, enforcePasswordChange];
+const engine = [optionalAuth];
+const adminGuard = [requireAuth, enforcePasswordChange, requireAdmin];
+
+// --- Student play start (requires login) ---
+gameRouter.post(
+  "/game-sets/:gameSetId/attempts",
+  ...authed,
+  startAttemptRateLimiter,
+  startGameSetController,
+);
+
+// --- Attempt engine (owner session OR attempt token) ---
+gameRouter.post(
+  "/game-attempts/:attemptId/answer",
+  ...engine,
+  gameAnswerRateLimiter,
+  answerGameItemController,
+);
+gameRouter.post(
+  "/game-attempts/:attemptId/advance",
+  ...engine,
+  advanceGameController,
+);
+gameRouter.post(
+  "/game-attempts/:attemptId/finish",
+  ...engine,
+  finishGameSetController,
+);
+// Practice-mode reveal (gated in the service: instantFeedback + answered).
+gameRouter.post(
+  "/game-attempts/:attemptId/explain",
+  ...engine,
+  explainGameItemController,
+);
+
+// --- Platform-admin authoring (requireAdmin) ---
+gameRouter.get("/admin/game-sets", ...adminGuard, adminListGameSetsController);
+gameRouter.post("/admin/game-sets", ...adminGuard, adminCreateGameSetController);
+gameRouter.get(
+  "/admin/game-sets/:gameSetId",
+  ...adminGuard,
+  adminGetGameSetController,
+);
+gameRouter.patch(
+  "/admin/game-sets/:gameSetId",
+  ...adminGuard,
+  adminUpdateGameSetController,
+);
+gameRouter.post(
+  "/admin/game-sets/:gameSetId/publish",
+  ...adminGuard,
+  adminPublishGameSetController,
+);

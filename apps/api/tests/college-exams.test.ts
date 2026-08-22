@@ -481,3 +481,105 @@ describe("college exams — authoring, taking, results (reused engine)", () => {
     expect(okStart.status).toBe(201);
   });
 });
+
+// The IDOR was on the GLOBAL start route (`POST /api/exams/:examId/attempts`),
+// which any authenticated user (incl. a college student) can reach and which,
+// before the fix, created an attempt with NO tenant/cohort/publish check —
+// letting a student read another college's (or unpublished) exam's questions,
+// then its correctOptions via the result. `assertCanTakeExam` now gates it.
+describe("global exam route IDOR guard (assertCanTakeExam)", () => {
+  it("a College A student cannot start College B's exam via the global route (404)", async () => {
+    const a = await setupCollege("idor-a");
+    const b = await setupCollege("idor-b");
+    const deptA = await createUnit("idor-a", a.adminToken, {
+      type: "department",
+      name: "CSE",
+    });
+    const studentA = await addStudent(
+      "idor-a",
+      a.adminToken,
+      "sa@a.edu",
+      "RA",
+      deptA,
+    );
+    const examB = await authorPublishedExam("idor-b", b.adminToken); // published, college-wide
+
+    const res = await request(app)
+      .post(`/api/exams/${examB}/attempts`)
+      .set(auth(studentA.token));
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("EXAM_NOT_FOUND");
+  });
+
+  it("rejects starting an UNPUBLISHED college exam via the global route (404)", async () => {
+    const { adminToken } = await setupCollege("idor-unpub");
+    const dept = await createUnit("idor-unpub", adminToken, {
+      type: "department",
+      name: "CSE",
+    });
+    const student = await addStudent(
+      "idor-unpub",
+      adminToken,
+      "s@u.edu",
+      "R1",
+      dept,
+    );
+    // Author WITHOUT publishing.
+    const created = await request(app)
+      .post(`/api/c/idor-unpub/exams`)
+      .set(auth(adminToken))
+      .send({ title: "Draft", orgUnitIds: [] });
+    expect(created.status).toBe(201);
+
+    const res = await request(app)
+      .post(`/api/exams/${created.body.id as string}/attempts`)
+      .set(auth(student.token));
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("EXAM_NOT_FOUND");
+  });
+
+  it("rejects a student whose org-unit is outside the exam's target cohort (403)", async () => {
+    const { adminToken } = await setupCollege("idor-cohort");
+    const cse = await createUnit("idor-cohort", adminToken, {
+      type: "department",
+      name: "CSE",
+    });
+    const ece = await createUnit("idor-cohort", adminToken, {
+      type: "department",
+      name: "ECE",
+    });
+    const examId = await authorPublishedExam("idor-cohort", adminToken, {
+      orgUnitIds: [cse],
+    });
+    const student = await addStudent(
+      "idor-cohort",
+      adminToken,
+      "e@c.edu",
+      "R2",
+      ece,
+    );
+
+    const res = await request(app)
+      .post(`/api/exams/${examId}/attempts`)
+      .set(auth(student.token));
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("ORG_UNIT_OUT_OF_SCOPE");
+  });
+
+  it("lets a TARGETED college student start via the global route (control)", async () => {
+    const { adminToken } = await setupCollege("idor-ok");
+    const cse = await createUnit("idor-ok", adminToken, {
+      type: "department",
+      name: "CSE",
+    });
+    const examId = await authorPublishedExam("idor-ok", adminToken, {
+      orgUnitIds: [cse],
+    });
+    const student = await addStudent("idor-ok", adminToken, "ok@c.edu", "R3", cse);
+
+    const res = await request(app)
+      .post(`/api/exams/${examId}/attempts`)
+      .set(auth(student.token));
+    expect(res.status).toBe(201);
+  });
+});

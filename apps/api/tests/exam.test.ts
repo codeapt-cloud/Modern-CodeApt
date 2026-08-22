@@ -434,6 +434,27 @@ describe("attempt limits + reset audit", () => {
   });
 });
 
+describe("start authorization (IDOR guard)", () => {
+  it("rejects a B2C learner with no enrollment reaching the exam (404)", async () => {
+    const { token } = await registerAndLogin();
+    const { exam } = await makeExam(); // deliberately NOT enrolled
+    const res = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe("EXAM_NOT_FOUND");
+  });
+
+  it("still lets an ENROLLED B2C learner start (control)", async () => {
+    const { token, userId } = await registerAndLogin();
+    const { exam } = await makeExam({ enroll: userId });
+    const res = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    expect(res.status).toBe(201);
+  });
+});
+
 describe("public link (anonymous)", () => {
   it("honors the availability window and runs an anonymous attempt", async () => {
     const { userId } = await registerAndLogin();

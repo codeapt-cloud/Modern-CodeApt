@@ -98,6 +98,8 @@ export const SUB_CAPABILITY_CATALOG: Record<
   [CollegeFeature.ATTENDANCE]: [],
   // Coding-profile tracking. Leaderboard arrives in Prompt 2; none in Prompt 1.
   [CollegeFeature.CODING_PROFILES]: [],
+  // Adaptive game rounds. Practice-mode sub-capabilities may arrive later.
+  [CollegeFeature.GAMING]: [],
 };
 
 /** Canonical flat key for a sub-capability toggle. */

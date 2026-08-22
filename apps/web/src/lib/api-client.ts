@@ -2668,6 +2668,19 @@ export const api = {
       );
       return data;
     },
+    /**
+     * Tenant-scoped upload signature for college authoring surfaces (exam
+     * question images, posting logos, …) — same signature, faculty/college_admin
+     * guard instead of platform-admin.
+     */
+    collegeSignature: async (
+      slug: string,
+    ): Promise<UploadSignatureResponse> => {
+      const { data } = await http.post<UploadSignatureResponse>(
+        `${API_PREFIX}/c/${slug}/uploads/signature`,
+      );
+      return data;
+    },
   },
 
   adminExams: {

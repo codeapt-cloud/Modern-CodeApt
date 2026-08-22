@@ -13,6 +13,7 @@ import {
   type OrgUnitTreeNode,
   type PostingType as PostingTypeT,
   type Role,
+  type UploadSignatureResponse,
 } from "@codeapt/shared";
 import { Controller, useForm } from "react-hook-form";
 import { useState } from "react";
@@ -128,6 +129,10 @@ export interface PostingEditorDialogProps {
   /** When set, renders org-unit targeting and includes orgUnitIds in the payload
    * (college mode). Omitted for the platform admin (no targeting). */
   targeting?: PostingTargeting;
+  /** How the company-logo upload obtains its Cloudinary signature. Omitted on
+   * the platform-admin surface (ImageUpload defaults to the admin endpoint); the
+   * college surface injects a tenant-scoped fetcher so faculty aren't 403'd. */
+  signatureFetcher?: () => Promise<UploadSignatureResponse>;
 }
 
 export function PostingEditorDialog({
@@ -137,6 +142,7 @@ export function PostingEditorDialog({
   onSaved,
   authApi = api.adminCareers,
   targeting,
+  signatureFetcher,
 }: PostingEditorDialogProps) {
   const { toast } = useToast();
   const [formError, setFormError] = useState("");
@@ -250,7 +256,11 @@ export function PostingEditorDialog({
               control={control}
               name="companyLogo"
               render={({ field }) => (
-                <ImageUpload value={field.value} onChange={field.onChange} />
+                <ImageUpload
+                  value={field.value}
+                  onChange={field.onChange}
+                  signatureFetcher={signatureFetcher}
+                />
               )}
             />
           </FormField>

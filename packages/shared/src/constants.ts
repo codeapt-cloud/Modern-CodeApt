@@ -489,6 +489,60 @@ export const ExamErrorCode = {
 } as const;
 export type ExamErrorCode = (typeof ExamErrorCode)[keyof typeof ExamErrorCode];
 
+// ---------------------------------------------------------------------------
+// Gaming (adaptive game engine)
+// ---------------------------------------------------------------------------
+
+/** Default per-game clock (Cognizant/Capgemini gaming round = 6 minutes). */
+export const GAME_DEFAULT_CLOCK_SECONDS = 360;
+
+/** Absolute ceiling on items served in one game, regardless of maxQuestions
+ * (0 = unlimited). Well above the ~20-40 a real student clears in 6 minutes,
+ * low enough to bound the GameAttempt document. Hitting it completes the game
+ * exactly like maxQuestions. */
+export const GAME_MAX_SERVED_ITEMS = 300;
+
+/** Marks awarded for a CORRECT answer, by the difficulty of the item answered.
+ * No negative marking anywhere; a wrong/skip/expired answer awards 0. */
+export const GAME_DIFFICULTY_MARKS = {
+  easy: 1,
+  moderate: 2,
+  hard: 3,
+} as const;
+
+/** Machine-readable codes for the gaming surface (UI switches on these). */
+export const GameErrorCode = {
+  GAME_SET_NOT_FOUND: "GAME_SET_NOT_FOUND",
+  ATTEMPT_NOT_FOUND: "ATTEMPT_NOT_FOUND",
+  /** Per-user attempt limit for this game set has been reached. */
+  ATTEMPT_LIMIT_REACHED: "ATTEMPT_LIMIT_REACHED",
+  /** A skip was attempted on a game whose mechanics forbid skipping. */
+  SKIP_NOT_ALLOWED: "SKIP_NOT_ALLOWED",
+  /** Practice-mode reveal requested but instantFeedback is off for this set. */
+  PRACTICE_MODE_OFF: "PRACTICE_MODE_OFF",
+  /** Practice-mode reveal requested for an item that hasn't been answered yet. */
+  ITEM_NOT_ANSWERED: "ITEM_NOT_ANSWERED",
+  /** Caller is neither the attempt's owner nor holds its attempt token. */
+  NOT_AUTHORIZED: "NOT_AUTHORIZED",
+  /** The item's game clock has run out — the answer is recorded as `expired`. */
+  GAME_EXPIRED: "GAME_EXPIRED",
+  /** Answering an item that does not belong to the game currently in play. */
+  NOT_CURRENT_GAME: "NOT_CURRENT_GAME",
+  /** The referenced served-item index does not exist on this game attempt. */
+  ITEM_NOT_FOUND: "ITEM_NOT_FOUND",
+  /** Cannot advance: the current game is still in progress (clock not expired). */
+  GAME_IN_PROGRESS: "GAME_IN_PROGRESS",
+  /** No further game to advance into — the set is finished. */
+  NO_NEXT_GAME: "NO_NEXT_GAME",
+  /** Attempt already graded — no more play. */
+  ALREADY_GRADED: "ALREADY_GRADED",
+  /** Publishing refused (e.g. no games, or a bad random_n_of_pool pickCount). */
+  GAME_SET_NOT_PUBLISHABLE: "GAME_SET_NOT_PUBLISHABLE",
+  /** A referenced target org-unit is unknown in this college / out of scope. */
+  ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
+} as const;
+export type GameErrorCode = (typeof GameErrorCode)[keyof typeof GameErrorCode];
+
 /**
  * Anonymous public-exam starts allowed per IP inside the window. Set high
  * because a whole lab/campus of takers usually shares ONE public IP (NAT) — a

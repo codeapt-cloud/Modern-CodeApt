@@ -24,6 +24,7 @@ export * from "./essay-ai-feedback.js";
 export * from "./llm.js";
 export * from "./llm-gateway/index.js";
 export * from "./coding-platforms/index.js";
+export * from "./games/index.js";
 export * from "./ai-questions.js";
 export * from "./coupon.js";
 export * from "./careers.js";

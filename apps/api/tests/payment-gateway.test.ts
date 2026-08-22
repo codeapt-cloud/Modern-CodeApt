@@ -3,8 +3,10 @@
  * reject) / fetchStatus. No network, no DB.
  */
 import { PaymentStatus } from "@codeapt/shared";
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
+import { env } from "../src/config/env.js";
 import {
   MOCK_SIGNATURE_HEADER,
   buildSignedCallback,
@@ -60,6 +62,43 @@ describe("mock gateway", () => {
     expect(
       gw.verifyCallback({ [MOCK_SIGNATURE_HEADER]: "deadbeef" }, rawBody),
     ).toBeNull();
+  });
+
+  it("(b) a WRONG signature with a non-terminal body is REJECTED (null), never ignored", () => {
+    // The signature check runs before the status is inspected, so a bogus
+    // signature over a pending-looking body is a 4xx rejection, not a 2xx ack.
+    const rawBody = JSON.stringify({
+      merchantOrderId: "ORD-x",
+      status: "pending",
+      gatewayTxnId: "t",
+    });
+    expect(
+      gw.verifyCallback({ [MOCK_SIGNATURE_HEADER]: "deadbeef" }, rawBody),
+    ).toBeNull();
+  });
+
+  it("(b) a MISSING signature header with a non-terminal body is null (not ignore)", () => {
+    const rawBody = JSON.stringify({
+      merchantOrderId: "ORD-x",
+      status: "pending",
+    });
+    expect(gw.verifyCallback({}, rawBody)).toBeNull();
+  });
+
+  it('verifyCallback ACKNOWLEDGES a validly-signed non-terminal body as "ignore" (not null)', () => {
+    // A pending (non-terminal) but genuine webhook must be distinguishable from
+    // a forgery: "ignore" (→ 2xx ack, no state write) vs null (→ 4xx reject).
+    const rawBody = JSON.stringify({
+      merchantOrderId: "ORD-pending",
+      status: "pending",
+      gatewayTxnId: "MOCKTXN-ORD-pending",
+    });
+    const sig = createHmac("sha256", env.PAYMENT_MOCK_SALT)
+      .update(rawBody)
+      .digest("hex");
+    expect(gw.verifyCallback({ [MOCK_SIGNATURE_HEADER]: sig }, rawBody)).toBe(
+      "ignore",
+    );
   });
 
   it("fetchStatus is pending (mock has no server state)", async () => {

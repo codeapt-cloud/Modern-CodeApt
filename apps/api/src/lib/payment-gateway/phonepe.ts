@@ -18,11 +18,11 @@ import { env } from "../../config/env.js";
 import { logger } from "../logger.js";
 import {
   PaymentGatewayError,
+  type CallbackVerification,
   type CreateOrderInput,
   type CreateOrderResult,
   type FetchStatusResult,
   type PaymentGateway,
-  type VerifiedCallback,
 } from "./types.js";
 
 interface PhonePeConfig {
@@ -81,13 +81,42 @@ function getClient(cfg: PhonePeConfig): StandardCheckoutClient {
   return pgClient;
 }
 
-/** Map PhonePe's state to our normalized terminal status. */
-function normalizeState(state: string | undefined): "success" | "failed" {
-  if (!state) return "failed";
-  const upper = state.toUpperCase();
-  return upper === "COMPLETED" || upper === "SUCCESS" || upper === "PAYMENT_SUCCESS"
-    ? "success"
-    : "failed";
+/**
+ * Map a PhonePe order/callback state to our PaymentStatus. Standard Checkout
+ * reports these; we map only genuinely TERMINAL states to success/failed and
+ * treat everything else — including in-progress states and anything we don't
+ * recognise — as PENDING:
+ *
+ *   COMPLETED / SUCCESS / PAYMENT_SUCCESS               → success  (terminal win)
+ *   FAILED / PAYMENT_ERROR / PAYMENT_DECLINED /
+ *     PAYMENT_CANCELLED / EXPIRED / TIMED_OUT / REVERSED → failed  (terminal loss)
+ *   PENDING / PAYMENT_PENDING / <in-progress>           → pending  (keep waiting)
+ *   unknown / missing state                             → pending  (FAIL-OPEN)
+ *
+ * The fail-open default is deliberate: reconcile-on-read (payment.service) fires
+ * on every poll while the buyer is bouncing back from checkout, and UPI collect
+ * routinely sits PENDING for a while. Collapsing a not-yet-final state to FAILED
+ * would terminalise the order and make the later success webhook a silent no-op
+ * (money taken, no enrollment). An unknown state must NEVER destroy a payment —
+ * leaving it PENDING keeps the signed webhook as the source of truth.
+ */
+function mapPhonePeState(state: string | undefined): PaymentStatus {
+  switch ((state ?? "").toUpperCase()) {
+    case "COMPLETED":
+    case "SUCCESS":
+    case "PAYMENT_SUCCESS":
+      return PaymentStatus.SUCCESS;
+    case "FAILED":
+    case "PAYMENT_ERROR":
+    case "PAYMENT_DECLINED":
+    case "PAYMENT_CANCELLED":
+    case "EXPIRED":
+    case "TIMED_OUT":
+    case "REVERSED":
+      return PaymentStatus.FAILED;
+    default:
+      return PaymentStatus.PENDING;
+  }
 }
 
 export function createPhonePeGateway(): PaymentGateway {
@@ -123,7 +152,7 @@ export function createPhonePeGateway(): PaymentGateway {
       }
     },
 
-    verifyCallback(headers, rawBody): VerifiedCallback | null {
+    verifyCallback(headers, rawBody): CallbackVerification {
       const authorization = headers["authorization"] || headers["Authorization"];
       if (!authorization) {
         logger.warn("PhonePe callback missing Authorization header");
@@ -150,9 +179,39 @@ export function createPhonePeGateway(): PaymentGateway {
           gatewayTxnId = payload.paymentDetails[0]?.transactionId;
         }
 
+        // A NON-terminal (pending / unrecognised) but VALID webhook is
+        // acknowledged and IGNORED — return "ignore", NOT null. `null` means a
+        // bad signature (→ 4xx reject); "ignore" means a genuine webhook we
+        // simply can't act on yet (→ 2xx ack, no state write), so the order
+        // stays non-terminal for a later terminal webhook and PhonePe does not
+        // treat delivery as failed and retry/disable the endpoint. Collapsing
+        // pending→failed here would terminalise the order and drop a subsequent
+        // success (the money-loss bug, on the webhook path).
+        const mapped = mapPhonePeState(payload.state);
+        if (mapped === PaymentStatus.PENDING) {
+          // Reached ONLY after validateCallback succeeded — the signature is
+          // verified, so this is a genuine webhook, never a forgery. Distinguish
+          // a recognised pending state (normal) from an UNRECOGNISED one (log
+          // loudly so a broken integration doesn't hide as healthy pending
+          // traffic). Both are acknowledged + ignored (no state write).
+          const state = (payload.state ?? "").toUpperCase();
+          const knownPending = state === "PENDING" || state === "PAYMENT_PENDING";
+          if (knownPending) {
+            logger.info(
+              { merchantOrderId: payload.merchantOrderId, state: payload.state },
+              "PhonePe callback verified but pending — acknowledging, no state change",
+            );
+          } else {
+            logger.warn(
+              { merchantOrderId: payload.merchantOrderId, state: payload.state },
+              "PhonePe callback verified with an UNRECOGNISED state — acknowledging as pending (no state change); verify the state mapping",
+            );
+          }
+          return "ignore";
+        }
         return {
           merchantOrderId: payload.merchantOrderId,
-          status: normalizeState(payload.state),
+          status: mapped === PaymentStatus.SUCCESS ? "success" : "failed",
           gatewayTxnId: gatewayTxnId || null,
         };
       } catch (err) {
@@ -165,10 +224,9 @@ export function createPhonePeGateway(): PaymentGateway {
       try {
         const response = await client.getOrderStatus(merchantOrderId);
 
-        const status =
-          normalizeState(response.state) === "success"
-            ? PaymentStatus.SUCCESS
-            : PaymentStatus.FAILED;
+        // Full 3-way mapping — a still-pending order stays PENDING so
+        // reconcile-on-read leaves it non-terminal for the webhook to finish.
+        const status = mapPhonePeState(response.state);
 
         let gatewayTxnId = null;
         if (response.paymentDetails && response.paymentDetails.length > 0) {

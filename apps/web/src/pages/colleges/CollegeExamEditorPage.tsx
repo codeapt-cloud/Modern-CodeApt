@@ -379,6 +379,7 @@ export function CollegeExamEditorPage() {
               sectionName={addQuestionFor.name}
               order={addQuestionFor.questions.length}
               authApi={authApi}
+              signatureFetcher={() => api.uploads.collegeSignature(slug)}
               onSaved={refetchAll}
             />
           ) : null}
@@ -395,6 +396,7 @@ export function CollegeExamEditorPage() {
               order={editQuestionFor.question.order}
               initial={editQuestionFor.question}
               authApi={authApi}
+              signatureFetcher={() => api.uploads.collegeSignature(slug)}
               onSaved={refetchAll}
             />
           ) : null}

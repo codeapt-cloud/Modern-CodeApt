@@ -11,6 +11,7 @@ import {
   ExamQuestionType,
   type CodeLanguage as CodeLanguageT,
   type ExamQuestionType as ExamQuestionTypeT,
+  type UploadSignatureResponse,
 } from "@codeapt/shared";
 import { Plus } from "lucide-react";
 import { useState } from "react";
@@ -98,6 +99,10 @@ export interface QuestionEditorDialogProps {
   /** Authoring backend — defaults to the platform admin api; the college editor
    * injects a slug-bound tenant adapter. */
   authApi?: ExamAuthoringApi;
+  /** How the question-image upload obtains its Cloudinary signature. Omitted on
+   * the platform-admin surface (ImageUpload defaults to the admin endpoint); the
+   * college editor injects a tenant-scoped fetcher so faculty aren't 403'd. */
+  signatureFetcher?: () => Promise<UploadSignatureResponse>;
 }
 
 export function QuestionEditorDialog({
@@ -109,6 +114,7 @@ export function QuestionEditorDialog({
   initial = null,
   onSaved,
   authApi = api.adminExams,
+  signatureFetcher,
 }: QuestionEditorDialogProps) {
   const { toast } = useToast();
   const isEdit = initial !== null;
@@ -239,6 +245,7 @@ export function QuestionEditorDialog({
             <ImageUpload
               value={draft.image}
               onChange={(url) => patch({ image: url })}
+              signatureFetcher={signatureFetcher}
             />
           </FormField>
 

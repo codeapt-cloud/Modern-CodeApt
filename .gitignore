@@ -31,3 +31,7 @@ coverage/
 # Vite
 apps/web/dist/
 .vite/
+
+# Local archives / scratch
+Modern CodeApt.zip
+*.zip

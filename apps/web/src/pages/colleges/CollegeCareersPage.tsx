@@ -249,6 +249,7 @@ export function CollegeCareersPage() {
           }}
           initial={editing.mode === "edit" ? editing.posting : null}
           authApi={authApi}
+          signatureFetcher={() => api.uploads.collegeSignature(slug)}
           targeting={{
             tree,
             role,

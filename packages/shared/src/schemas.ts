@@ -49,6 +49,16 @@ import {
   BANK_KIND_VALUES,
   BANK_SCOPE_VALUES,
   QUESTION_DIFFICULTY_VALUES,
+  GAME_KEY_VALUES,
+  GAME_DIFFICULTY_VALUES,
+  GAME_OUTCOME_VALUES,
+  GAME_SELECTION_MODE_VALUES,
+  GAME_SET_ATTEMPT_STATUS_VALUES,
+  type GameKey,
+  type GameDifficulty,
+  type GameOutcome,
+  type GameSelectionMode,
+  type GameSetAttemptStatus,
   ESSAY_GRADING_STATUS_VALUES,
   ESSAY_SCORE_SOURCE_VALUES,
   ESSAY_STATUS_VALUES,
@@ -87,6 +97,7 @@ import {
   CAREERS_MAX_PAGE_SIZE,
   COUPON_REJECT_REASON_VALUES,
   EnrollResult,
+  GAME_DEFAULT_CLOCK_SECONDS,
   ESSAY_MAX_CONTENT_CHARS,
   ESSAY_SCORE_WEIGHTS,
   EXECUTION_PURPOSE_VALUES,
@@ -5292,4 +5303,241 @@ export const collegeStudentPostingListResponseSchema = z.object({
 });
 export type CollegeStudentPostingListResponse = z.infer<
   typeof collegeStudentPostingListResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Gaming (adaptive game engine) — authoring + play contracts
+// ---------------------------------------------------------------------------
+
+export const gameKeySchema = z.enum(
+  GAME_KEY_VALUES as [GameKey, ...GameKey[]],
+);
+export const gameDifficultySchema = z.enum(
+  GAME_DIFFICULTY_VALUES as [GameDifficulty, ...GameDifficulty[]],
+);
+export const gameOutcomeSchema = z.enum(
+  GAME_OUTCOME_VALUES as [GameOutcome, ...GameOutcome[]],
+);
+export const gameSelectionModeSchema = z.enum(
+  GAME_SELECTION_MODE_VALUES as [GameSelectionMode, ...GameSelectionMode[]],
+);
+export const gameSetAttemptStatusSchema = z.enum(
+  GAME_SET_ATTEMPT_STATUS_VALUES as [
+    GameSetAttemptStatus,
+    ...GameSetAttemptStatus[],
+  ],
+);
+
+// --- Authoring ---
+
+/** One authored game inside a GameSet (embedded, ordered). */
+export const gameSpecSchema = z.object({
+  gameKey: gameKeySchema,
+  durationSeconds: z.number().int().min(10).max(3600).default(GAME_DEFAULT_CLOCK_SECONDS),
+  allowSkip: z.boolean().default(true),
+  startingDifficulty: gameDifficultySchema.default("easy"),
+  /** 0 = unlimited questions within the clock. */
+  maxQuestions: z.number().int().min(0).max(1000).default(0),
+});
+export type GameSpecInput = z.infer<typeof gameSpecSchema>;
+
+/**
+ * Create/replace a GameSet. `orgUnitIds` is only meaningful for a college set
+ * (platform-admin sets ignore it). `pickCount` is required + validated for
+ * random_n_of_pool.
+ */
+export const gameSetUpsertSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    description: z.string().trim().max(2000).default(""),
+    games: z.array(gameSpecSchema).min(1, "A game set needs at least one game"),
+    selectionMode: gameSelectionModeSchema.default("fixed"),
+    pickCount: z.number().int().min(1).max(100).optional(),
+    orgUnitIds: z.array(z.string().min(1)).default([]),
+    /** Practice-mode: optional per-question timer (0/undefined = none). */
+    perQuestionTimerSeconds: z.number().int().min(0).max(600).default(0),
+    /** Practice-mode: reveal correctness after each answer. */
+    instantFeedback: z.boolean().default(false),
+    /** Per-user attempt cap. 1 = single attempt (default); 0 = unlimited. */
+    maxAttempts: z.number().int().min(0).max(100).default(1),
+  })
+  .superRefine((v, ctx) => {
+    if (v.selectionMode === "random_n_of_pool") {
+      if (v.pickCount === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["pickCount"],
+          message: "pickCount is required for random_n_of_pool",
+        });
+      } else if (v.pickCount > v.games.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["pickCount"],
+          message: "pickCount cannot exceed the number of games in the pool",
+        });
+      }
+    }
+  });
+export type GameSetUpsert = z.infer<typeof gameSetUpsertSchema>;
+
+/** Partial update — every field optional; server merges. */
+export const gameSetUpdateSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(2000).optional(),
+  games: z.array(gameSpecSchema).min(1).optional(),
+  selectionMode: gameSelectionModeSchema.optional(),
+  pickCount: z.number().int().min(1).max(100).optional(),
+  orgUnitIds: z.array(z.string().min(1)).optional(),
+  perQuestionTimerSeconds: z.number().int().min(0).max(600).optional(),
+  instantFeedback: z.boolean().optional(),
+  maxAttempts: z.number().int().min(0).max(100).optional(),
+});
+export type GameSetUpdate = z.infer<typeof gameSetUpdateSchema>;
+
+export const setGameSetPublishSchema = z.object({
+  isPublished: z.boolean(),
+});
+
+/** Full authored GameSet (operator view — no player secrets exist here). */
+export const gameSetDetailSchema = z.object({
+  id: z.string(),
+  college: z.string().nullable(),
+  title: z.string(),
+  description: z.string(),
+  isPublished: z.boolean(),
+  orgUnits: z.array(z.string()),
+  games: z.array(
+    gameSpecSchema.extend({ order: z.number().int().min(0) }),
+  ),
+  selectionMode: gameSelectionModeSchema,
+  pickCount: z.number().int().nullable(),
+  perQuestionTimerSeconds: z.number().int(),
+  instantFeedback: z.boolean(),
+  maxAttempts: z.number().int(),
+  createdAt: z.string(),
+});
+export type GameSetDetail = z.infer<typeof gameSetDetailSchema>;
+
+export const gameSetListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  isPublished: z.boolean(),
+  gameCount: z.number().int(),
+  selectionMode: gameSelectionModeSchema,
+  createdAt: z.string(),
+});
+export type GameSetListItem = z.infer<typeof gameSetListItemSchema>;
+
+export const gameSetListResponseSchema = z.object({
+  items: z.array(gameSetListItemSchema),
+});
+export type GameSetListResponse = z.infer<typeof gameSetListResponseSchema>;
+
+// --- Play ---
+
+export const startGameSetRequestSchema = z.object({}).default({});
+
+/**
+ * A served game item, as the CLIENT sees it. `view` is the game-specific client
+ * view — deliberately `unknown` here because it varies per game AND because it
+ * must never be widened to include the solution (the server projects it via the
+ * module's `toClientView`, which strips the solution at the type level).
+ */
+export const gameItemViewSchema = z.object({
+  attemptId: z.string(),
+  gameKey: gameKeySchema,
+  gameIndex: z.number().int(),
+  itemIndex: z.number().int(),
+  difficulty: gameDifficultySchema,
+  view: z.unknown(),
+  allowSkip: z.boolean(),
+  remainingSeconds: z.number().int(),
+  perQuestionTimerSeconds: z.number().int(),
+  instantFeedback: z.boolean(),
+});
+export type GameItemView = z.infer<typeof gameItemViewSchema>;
+
+export const startGameSetResponseSchema = z.object({
+  attemptId: z.string(),
+  attemptToken: z.string(),
+  gameSetId: z.string(),
+  sequence: z.array(gameKeySchema),
+  totalGames: z.number().int(),
+  /** Attempts still available after this start; null = unlimited. */
+  attemptsRemaining: z.number().int().nullable(),
+  item: gameItemViewSchema,
+});
+export type StartGameSetResponse = z.infer<typeof startGameSetResponseSchema>;
+
+/**
+ * Answer or skip the current item. `submission` is the game-specific move
+ * payload the server REPLAYS — `unknown` because it varies per game. The server
+ * NEVER reads a client-supplied score; any such field is ignored.
+ */
+export const answerGameItemRequestSchema = z.object({
+  itemIndex: z.number().int().min(0),
+  action: z.enum(["answer", "skip"]).default("answer"),
+  submission: z.unknown().optional(),
+});
+export type AnswerGameItemRequest = z.infer<typeof answerGameItemRequestSchema>;
+
+export const answerGameItemResponseSchema = z.object({
+  itemIndex: z.number().int(),
+  outcome: gameOutcomeSchema,
+  marksAwarded: z.number().int(),
+  answeredDifficulty: gameDifficultySchema,
+  gameScore: z.number().int(),
+  questionsCorrect: z.number().int(),
+  questionsAttempted: z.number().int(),
+  /** Instant-feedback (practice) only: whether the answer was correct. */
+  correct: z.boolean(),
+  /** The next item to play, or null if the game is complete (clock expired or
+   * maxQuestions reached). */
+  next: gameItemViewSchema.nullable(),
+  gameComplete: z.boolean(),
+});
+export type AnswerGameItemResponse = z.infer<
+  typeof answerGameItemResponseSchema
+>;
+
+export const advanceGameResponseSchema = z.object({
+  /** The first item of the next game, or null if the whole set is finished. */
+  item: gameItemViewSchema.nullable(),
+  setComplete: z.boolean(),
+});
+export type AdvanceGameResponse = z.infer<typeof advanceGameResponseSchema>;
+
+export const gameResultSchema = z.object({
+  status: gameSetAttemptStatusSchema,
+  compositeScore: z.number().int(),
+  games: z.array(
+    z.object({
+      gameKey: gameKeySchema,
+      gameIndex: z.number().int(),
+      score: z.number().int(),
+      questionsServed: z.number().int(),
+      questionsAttempted: z.number().int(),
+      questionsCorrect: z.number().int(),
+    }),
+  ),
+});
+export type GameResult = z.infer<typeof gameResultSchema>;
+
+/** Practice-mode reveal request (post-answer, instantFeedback only). */
+export const explainGameItemRequestSchema = z.object({
+  itemIndex: z.number().int().min(0),
+});
+export type ExplainGameItemRequest = z.infer<
+  typeof explainGameItemRequestSchema
+>;
+
+/** Practice-mode reveal — MAY carry the solution (distinct, gated code path). */
+export const gameExplanationResponseSchema = z.object({
+  itemIndex: z.number().int(),
+  outcome: gameOutcomeSchema,
+  solution: z.unknown(),
+  note: z.string().optional(),
+});
+export type GameExplanationResponse = z.infer<
+  typeof gameExplanationResponseSchema
 >;

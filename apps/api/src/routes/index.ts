@@ -15,6 +15,8 @@ import { collegeAnalyticsRouter } from "./college-analytics.routes.js";
 import { collegeChallengeRouter } from "./college-challenge.routes.js";
 import { collegeEssayRouter } from "./college-essay.routes.js";
 import { collegeExamRouter } from "./college-exam.routes.js";
+import { gameRouter } from "./game.routes.js";
+import { collegeGameRouter } from "./college-game.routes.js";
 import { attendanceRouter } from "./attendance.routes.js";
 import { codingProfileRouter } from "./coding-profile.routes.js";
 import { studentAiCreditRouter } from "./student-ai-credit.routes.js";
@@ -39,6 +41,7 @@ import { meRouter } from "./me.routes.js";
 import { orderAdminRouter } from "./order-admin.routes.js";
 import { publicRouter } from "./public.routes.js";
 import { uploadAdminRouter } from "./upload-admin.routes.js";
+import { uploadCollegeRouter } from "./upload-college.routes.js";
 import { userAdminRouter } from "./user-admin.routes.js";
 
 export const apiRouter: Router = Router();
@@ -75,6 +78,13 @@ apiRouter.use(studentRouter);
 apiRouter.use(collegeCourseRouter);
 // College exams (Phase 4b, tenant-scoped over the reused exam engine).
 apiRouter.use(collegeExamRouter);
+// Tenant-scoped signed uploads (net-new): one generic signer for every college
+// authoring surface (exam images, posting logos, future modules).
+apiRouter.use(uploadCollegeRouter);
+// Gaming (Step 2): adaptive game-round engine. Global play + platform-admin
+// authoring; college play + authoring is tenant-scoped + GAMING-feature gated.
+apiRouter.use(gameRouter);
+apiRouter.use(collegeGameRouter);
 
 apiRouter.use(attendanceRouter);
 // Coding profiles (net-new): student handles + stored per-platform stats,

@@ -87,6 +87,10 @@ export const CollegeFeature = {
    * LeetCode / CodeChef); a scheduled job fetches + stores normalized stats per
    * platform so the (Prompt-2) leaderboard reads fast, stored data. */
   CODING_PROFILES: "coding_profiles",
+  /** Gaming: adaptive, unbounded-question game rounds (Cognizant/Capgemini
+   * style). A GameSet bundles 1..N timed games; difficulty steps up/down per
+   * answer. Distinct from EXAMS (fixed pre-authored question list). */
+  GAMING: "gaming",
 } as const;
 export type CollegeFeature =
   (typeof CollegeFeature)[keyof typeof CollegeFeature];
@@ -372,6 +376,82 @@ export const ExamAttemptStatus = {
 export type ExamAttemptStatus =
   (typeof ExamAttemptStatus)[keyof typeof ExamAttemptStatus];
 export const EXAM_ATTEMPT_STATUS_VALUES = Object.values(ExamAttemptStatus);
+
+// ---------------------------------------------------------------------------
+// Gaming (net-new adaptive game engine — see packages/shared/src/games/)
+// ---------------------------------------------------------------------------
+
+/** Registered game modules. `_probe` is a DEV-ONLY throwaway generator used to
+ * prove the seam end-to-end; it is never shown in an admin picker. Real games
+ * are added in later steps. */
+export const GameKey = {
+  PROBE: "_probe",
+  /** Latin-square deduction: fill the one `?` cell with the forced symbol. */
+  GEO_SUDO: "geo_sudo",
+  /** Permutation "switch" tracing (top-down, bottom-up, and 3-layer). */
+  SWITCH_CHALLENGE: "switch_challenge",
+  /** Rush-Hour: slide blocks to clear a path for the ball to the hole (BFS). */
+  MOTION_CHALLENGE: "motion_challenge",
+  /** Inductive reasoning: pick the two option grids that follow the hidden rule. */
+  INDUCTIVE_REASONING: "inductive_reasoning",
+} as const;
+export type GameKey = (typeof GameKey)[keyof typeof GameKey];
+export const GAME_KEY_VALUES = Object.values(GameKey);
+
+/** Adaptive difficulty tiers. easy=1, moderate=2, hard=3 marks (see
+ * GAME_DIFFICULTY_MARKS in constants.ts). */
+export const GameDifficulty = {
+  EASY: "easy",
+  MODERATE: "moderate",
+  HARD: "hard",
+} as const;
+export type GameDifficulty =
+  (typeof GameDifficulty)[keyof typeof GameDifficulty];
+export const GAME_DIFFICULTY_VALUES = Object.values(GameDifficulty);
+
+/** How a served item resolved. Kept DISTINCT (never collapse skipped into
+ * wrong) — analytics separate them. `expired` = the game clock ran out. */
+export const GameOutcome = {
+  CORRECT: "correct",
+  WRONG: "wrong",
+  SKIPPED: "skipped",
+  EXPIRED: "expired",
+} as const;
+export type GameOutcome = (typeof GameOutcome)[keyof typeof GameOutcome];
+export const GAME_OUTCOME_VALUES = Object.values(GameOutcome);
+
+/** How a GameSet resolves its game sequence at attempt start. */
+export const GameSelectionMode = {
+  /** Play every authored game, in order. */
+  FIXED: "fixed",
+  /** Pick `pickCount` games at random from the authored pool (Capgemini's
+   * "24 games, system picks 4"). The selection is frozen once per attempt. */
+  RANDOM_N_OF_POOL: "random_n_of_pool",
+} as const;
+export type GameSelectionMode =
+  (typeof GameSelectionMode)[keyof typeof GameSelectionMode];
+export const GAME_SELECTION_MODE_VALUES = Object.values(GameSelectionMode);
+
+/** Parent GameSetAttempt lifecycle: in_progress → graded (terminal). */
+export const GameSetAttemptStatus = {
+  IN_PROGRESS: "in_progress",
+  GRADED: "graded",
+} as const;
+export type GameSetAttemptStatus =
+  (typeof GameSetAttemptStatus)[keyof typeof GameSetAttemptStatus];
+export const GAME_SET_ATTEMPT_STATUS_VALUES = Object.values(
+  GameSetAttemptStatus,
+);
+
+/** Child GameAttempt lifecycle: in_progress → complete (frozen when the game's
+ * clock expires or the student advances). */
+export const GameAttemptStatus = {
+  IN_PROGRESS: "in_progress",
+  COMPLETE: "complete",
+} as const;
+export type GameAttemptStatus =
+  (typeof GameAttemptStatus)[keyof typeof GameAttemptStatus];
+export const GAME_ATTEMPT_STATUS_VALUES = Object.values(GameAttemptStatus);
 
 // ---------------------------------------------------------------------------
 // Essays

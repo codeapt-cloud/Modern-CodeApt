@@ -18,6 +18,9 @@ import {
   EXAM_MAX_WARNINGS,
   JobStatus,
   QueueName,
+  StudentErrorCode,
+  TopicType,
+  collectDescendantUnitIds,
   gradeMcq,
   isPassing,
   isSectionExpired,
@@ -54,7 +57,14 @@ import {
   type ExamSection,
   type StudentExamAttempt,
 } from "../models/assessment.model.js";
+import {
+  EnrollmentModel,
+  ModuleModel,
+  TopicModel,
+} from "../models/curriculum.model.js";
 import { ExecutionJobModel } from "../models/execution.model.js";
+import { OrgUnitModel } from "../models/org-unit.model.js";
+import { UserModel } from "../models/user.model.js";
 
 type AttemptDoc = HydratedDocument<StudentExamAttempt>;
 type ExamDoc = HydratedDocument<Exam>;
@@ -410,12 +420,101 @@ function currentSectionIndex(
 
 // --- Attempt lifecycle ------------------------------------------------------
 
+/**
+ * Authorization FLOOR for starting an exam attempt as a logged-in user. Every
+ * logged-in start path funnels through `startAttempt`, so gating here means no
+ * caller can be more permissive than this — closing the IDOR where any
+ * authenticated user could start ANY exam by id (read its questions, then its
+ * correctOptions via the result). The anonymous public-link taker does NOT come
+ * through here (that path calls `createAttempt` directly, authorized by the
+ * link), so link/B2C-attemptToken takers are unaffected.
+ *
+ * Rules (deliberately NOT invented here — mirrored from the existing gates):
+ *   - college exam  (`exam.college != null`): must be a student of THAT college,
+ *     the exam published, and — if the exam targets org-units — in a targeted
+ *     unit (or a descendant). Mirrors `startStudentCollegeExam`; cross-tenant and
+ *     unpublished both collapse to a 404 (isolation by non-existence), cohort
+ *     mismatch is a 403 `ORG_UNIT_OUT_OF_SCOPE`.
+ *   - individual/B2C exam (`exam.college == null`): must hold an enrollment that
+ *     reaches this exam via the exact Enrollment→subject→Module→Topic(EXAM)→Exam
+ *     chain `listExamsForUser` uses. A not-enrolled learner is rejected with a
+ *     404 (don't leak the exam's existence).
+ *
+ * DELIBERATE DECISION — enrollment EXPIRY is NOT checked here. `listExamsForUser`
+ * (the visibility source) queries `EnrollmentModel.find({ user })` with no
+ * `expiresAt` filter, even though the schema has `expiresAt` (null = lifetime).
+ * We match it exactly: authorization must not be STRICTER than visibility, or a
+ * learner would see an exam in their list yet be refused at start ("I can see it
+ * but can't start it"). So today an EXPIRED enrollment still authorizes an exam
+ * start. If/when expiry should gate starts, gate `listExamsForUser` in the same
+ * change so the two stay consistent.
+ */
+export async function assertCanTakeExam(
+  userId: string,
+  exam: ExamDoc,
+): Promise<void> {
+  if (exam.college) {
+    const user = await UserModel.findById(userId).select("college orgUnit");
+    // Not a member of this tenant → hide existence, exactly like the college
+    // surface's tenant-scoped queries do.
+    if (
+      !user?.college ||
+      user.college.toString() !== exam.college.toString() ||
+      !exam.isPublished
+    ) {
+      throw new AppError("Exam not found", 404, ExamErrorCode.EXAM_NOT_FOUND);
+    }
+    const targets = (exam.orgUnits ?? []).map((u) => u.toString());
+    if (targets.length > 0) {
+      const units = await OrgUnitModel.find({ college: exam.college }).select(
+        "_id parent",
+      );
+      const refs = units.map((u) => ({
+        id: u._id.toString(),
+        parentId: u.parent ? u.parent.toString() : null,
+      }));
+      const studentUnit = user.orgUnit ? user.orgUnit.toString() : null;
+      const allowed = new Set(collectDescendantUnitIds(refs, targets));
+      if (!studentUnit || !allowed.has(studentUnit)) {
+        throw new AppError(
+          "This exam is not assigned to your cohort",
+          403,
+          StudentErrorCode.ORG_UNIT_OUT_OF_SCOPE,
+        );
+      }
+    }
+    return;
+  }
+
+  // Individual / B2C exam: reuse listExamsForUser's predicate, inverted for a
+  // single exam. An exam with no curriculum topic is unreachable by enrollment.
+  if (!exam.topic) {
+    throw new AppError("Exam not found", 404, ExamErrorCode.EXAM_NOT_FOUND);
+  }
+  const topic = await TopicModel.findById(exam.topic).select(
+    "module topicType",
+  );
+  const mod =
+    topic && topic.topicType === TopicType.EXAM
+      ? await ModuleModel.findById(topic.module).select("subject")
+      : null;
+  const enrolled = mod
+    ? await EnrollmentModel.exists({ user: userId, subject: mod.subject })
+    : null;
+  if (!enrolled) {
+    throw new AppError("Exam not found", 404, ExamErrorCode.EXAM_NOT_FOUND);
+  }
+}
+
 export async function startAttempt(
   userId: string,
   examId: string,
   accessCode?: string,
 ): Promise<StartAttemptResponse> {
   const exam = await requireExam(examId);
+  // Authorization first: never load sections / touch the attempt counter for an
+  // exam this user isn't allowed to take.
+  await assertCanTakeExam(userId, exam);
   const sections = await loadSections(exam._id);
   if (sections.length === 0) {
     throw new AppError(

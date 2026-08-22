@@ -1,0 +1,589 @@
+/**
+ * Gaming engine — server-authoritative, adaptive game-round lifecycle. Mirrors
+ * the exam engine's shape (Caller identity, loadAndAuthorize, server-set clocks,
+ * an atomic terminal claim) but serves an UNBOUNDED, ADAPTIVE stream instead of
+ * a fixed question list: unlimited questions inside each game's clock, difficulty
+ * that steps up on a correct answer and down on a wrong one, marks that vary by
+ * tier, and NO negative marking.
+ *
+ * All scoring/ladder/generation logic is PURE and lives in @codeapt/shared
+ * (GAME_REGISTRY, applyLadderOutcome, the seeded PRNG). This layer is I/O only:
+ * it persists instances, replays submissions through the module, and never lets
+ * the client compute or supply a score.
+ */
+import { randomUUID } from "node:crypto";
+
+import {
+  GAME_MAX_SERVED_ITEMS,
+  GAME_REGISTRY,
+  GameAttemptStatus,
+  GameErrorCode,
+  GameOutcome,
+  GameSelectionMode,
+  GameSetAttemptStatus,
+  applyLadderOutcome,
+  collectDescendantUnitIds,
+  createRng,
+  isPlatformAdmin,
+  rngShuffle,
+  type AdvanceGameResponse,
+  type AnswerGameItemRequest,
+  type AnswerGameItemResponse,
+  type GameDifficulty as GameDifficultyT,
+  type GameItemView,
+  type GameExplanationResponse,
+  type GameKey,
+  type GameResult,
+  type LadderOutcome,
+  type StartGameSetResponse,
+} from "@codeapt/shared";
+import { Types, type HydratedDocument } from "mongoose";
+
+import { AppError } from "../errors/app-error.js";
+import {
+  GameAttemptModel,
+  GameSetAttemptCounterModel,
+  GameSetAttemptModel,
+  GameSetModel,
+  type GameAttempt,
+  type GameSet,
+  type GameSetAttempt,
+} from "../models/game.model.js";
+import { OrgUnitModel } from "../models/org-unit.model.js";
+import { UserModel } from "../models/user.model.js";
+
+type GameSetDoc = HydratedDocument<GameSet>;
+type ParentDoc = HydratedDocument<GameSetAttempt>;
+type GameAttemptDoc = HydratedDocument<GameAttempt>;
+type SpecDoc = GameSet["games"][number];
+
+/** Caller identity for the engine: session user and/or attempt token. */
+export interface Caller {
+  userId?: string;
+  token?: string;
+}
+
+const NOT_FOUND = (): AppError =>
+  new AppError("Game set not found", 404, GameErrorCode.GAME_SET_NOT_FOUND);
+const ATTEMPT_NOT_FOUND = (): AppError =>
+  new AppError("Attempt not found", 404, GameErrorCode.ATTEMPT_NOT_FOUND);
+const OUT_OF_SCOPE = (msg: string): AppError =>
+  new AppError(msg, 403, GameErrorCode.ORG_UNIT_OUT_OF_SCOPE);
+
+/** Server-authoritative remaining seconds from a stored, server-set clock end. */
+function remainingSeconds(expiresAt: Date): number {
+  return Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+}
+
+function isExpired(ga: GameAttemptDoc): boolean {
+  return Date.now() > ga.expiresAt.getTime();
+}
+
+function answeredCount(ga: GameAttemptDoc): number {
+  return ga.served.filter((s) => s.outcome != null).length;
+}
+
+function reachedMax(ga: GameAttemptDoc): boolean {
+  return ga.maxQuestions > 0 && answeredCount(ga) >= ga.maxQuestions;
+}
+
+/** Absolute safety ceiling on served items, independent of maxQuestions. */
+function reachedCap(ga: GameAttemptDoc): boolean {
+  return ga.served.length >= GAME_MAX_SERVED_ITEMS;
+}
+
+// ---------------------------------------------------------------------------
+// Authorization
+// ---------------------------------------------------------------------------
+
+/**
+ * Authorization FLOOR for playing a game set — mirrors `assertCanTakeExam`
+ * (exam.service) exactly so the same class of IDOR cannot reappear.
+ *
+ *   - college set (`college != null`): must be a student of THAT college, the
+ *     set published, and (if targeted) in a targeted org-unit — cross-tenant /
+ *     unpublished collapse to a 404, cohort mismatch is a 403.
+ *   - college null: PLATFORM ADMIN ONLY. There is no enrollment chain for game
+ *     sets and no B2C purchase surface yet, so a null-college set is an internal
+ *     /platform artifact; restrict it to platform admins until a real B2C
+ *     entry point exists (at which point this branch grows the B2C rule).
+ */
+export async function assertCanPlayGameSet(
+  userId: string,
+  gameSet: GameSetDoc,
+): Promise<void> {
+  if (gameSet.college) {
+    const user = await UserModel.findById(userId).select("college orgUnit");
+    if (
+      !user?.college ||
+      user.college.toString() !== gameSet.college.toString() ||
+      !gameSet.isPublished
+    ) {
+      throw NOT_FOUND();
+    }
+    const targets = (gameSet.orgUnits ?? []).map((u) => u.toString());
+    if (targets.length > 0) {
+      const units = await OrgUnitModel.find({
+        college: gameSet.college,
+      }).select("_id parent");
+      const refs = units.map((u) => ({
+        id: u._id.toString(),
+        parentId: u.parent ? u.parent.toString() : null,
+      }));
+      const studentUnit = user.orgUnit ? user.orgUnit.toString() : null;
+      const allowed = new Set(collectDescendantUnitIds(refs, targets));
+      if (!studentUnit || !allowed.has(studentUnit)) {
+        throw OUT_OF_SCOPE("This game set is not assigned to your cohort");
+      }
+    }
+    return;
+  }
+  const user = await UserModel.findById(userId).select("role");
+  if (!user || !isPlatformAdmin(user.role)) throw NOT_FOUND();
+}
+
+// ---------------------------------------------------------------------------
+// Loading
+// ---------------------------------------------------------------------------
+
+async function requireGameSet(gameSetId: string): Promise<GameSetDoc> {
+  if (!Types.ObjectId.isValid(gameSetId)) throw NOT_FOUND();
+  const gameSet = await GameSetModel.findById(gameSetId);
+  if (!gameSet) throw NOT_FOUND();
+  return gameSet;
+}
+
+async function loadAndAuthorize(
+  attemptId: string,
+  caller: Caller,
+): Promise<ParentDoc> {
+  if (!Types.ObjectId.isValid(attemptId)) throw ATTEMPT_NOT_FOUND();
+  const attempt = await GameSetAttemptModel.findById(attemptId);
+  if (!attempt) throw ATTEMPT_NOT_FOUND();
+  const tokenOk = !!caller.token && caller.token === attempt.attemptToken;
+  const ownerOk =
+    !!caller.userId &&
+    attempt.user != null &&
+    attempt.user.toString() === caller.userId;
+  if (!tokenOk && !ownerOk) {
+    throw new AppError(
+      "You are not authorized for this attempt",
+      403,
+      GameErrorCode.NOT_AUTHORIZED,
+    );
+  }
+  return attempt;
+}
+
+async function currentGameAttempt(parent: ParentDoc): Promise<GameAttemptDoc> {
+  const ga = await GameAttemptModel.findOne({
+    parent: parent._id,
+    gameIndex: parent.currentIndex,
+  });
+  if (!ga) throw ATTEMPT_NOT_FOUND();
+  return ga;
+}
+
+// ---------------------------------------------------------------------------
+// Serving + views
+// ---------------------------------------------------------------------------
+
+/** Append a freshly-generated item at the current ladder difficulty (mutates,
+ * does not save). The full instance (with solution) is denormalized on the
+ * served entry; scoring later replays against THIS stored instance. */
+function serveNextItem(ga: GameAttemptDoc): void {
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
+  const index = ga.served.length;
+  const difficulty = (ga.ladder as { difficulty: GameDifficultyT }).difficulty;
+  const instance = module.generate(`${ga.seed}:${index}`, difficulty);
+  ga.served.push({
+    index,
+    difficulty,
+    marks: 0,
+    instance,
+    submission: null,
+    servedAt: new Date(),
+    answeredAt: null,
+    latencyMs: null,
+  } as GameAttempt["served"][number]);
+  ga.questionsServed = ga.served.length;
+}
+
+function buildItemView(
+  parent: ParentDoc,
+  ga: GameAttemptDoc,
+  item: GameAttempt["served"][number],
+): GameItemView {
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
+  return {
+    attemptId: parent._id.toString(),
+    gameKey: ga.gameKey as GameKey,
+    gameIndex: ga.gameIndex,
+    itemIndex: item.index,
+    difficulty: item.difficulty as GameDifficultyT,
+    // The module strips the solution — the client never receives it.
+    view: module.toClientView(item.instance),
+    allowSkip: ga.allowSkip,
+    remainingSeconds: remainingSeconds(ga.expiresAt),
+    perQuestionTimerSeconds: parent.perQuestionTimerSeconds,
+    instantFeedback: parent.instantFeedback,
+  };
+}
+
+/** Create the child GameAttempt for one game in the sequence + serve its first
+ * item. The clock end is server-set HERE (never trusted from the client). */
+async function createGameAttempt(
+  parent: ParentDoc,
+  gameIndex: number,
+  spec: SpecDoc,
+): Promise<GameAttemptDoc> {
+  // Skip is clamped by the module: a game whose mechanics forbid skipping
+  // (allowSkipDefault:false, e.g. switch_challenge) can NEVER be skipped, even
+  // if an authored GameSpec set allowSkip:true. The toggle can only RESTRICT.
+  const gameModule = GAME_REGISTRY[spec.gameKey as GameKey];
+  const ga = new GameAttemptModel({
+    parent: parent._id,
+    gameIndex,
+    gameKey: spec.gameKey,
+    seed: randomUUID(),
+    allowSkip: spec.allowSkip && gameModule.allowSkipDefault,
+    maxQuestions: spec.maxQuestions,
+    ladder: { difficulty: spec.startingDifficulty },
+    served: [],
+    expiresAt: new Date(Date.now() + spec.durationSeconds * 1000),
+    status: GameAttemptStatus.IN_PROGRESS,
+  });
+  serveNextItem(ga);
+  await ga.save();
+  return ga;
+}
+
+// ---------------------------------------------------------------------------
+// Play lifecycle
+// ---------------------------------------------------------------------------
+
+export async function startGameSetAttempt(
+  userId: string,
+  gameSetId: string,
+): Promise<StartGameSetResponse> {
+  const gameSet = await requireGameSet(gameSetId);
+  await assertCanPlayGameSet(userId, gameSet);
+
+  const games = gameSet.games;
+  if (games.length === 0) {
+    throw new AppError(
+      "This game set has no games",
+      400,
+      GameErrorCode.GAME_SET_NOT_PUBLISHABLE,
+    );
+  }
+
+  // Attempt-limit enforcement (0 = unlimited). Mirrors exam.service's ordering:
+  // the limit is checked BEFORE the counter is incremented, so a REJECTED start
+  // never consumes an attempt. Runs AFTER assertCanPlayGameSet, so an
+  // auth-rejected start doesn't touch the counter either.
+  let attemptsRemaining: number | null = null;
+  if (gameSet.maxAttempts !== 0) {
+    const counter = await GameSetAttemptCounterModel.findOneAndUpdate(
+      { user: new Types.ObjectId(userId), gameSet: gameSet._id },
+      { $setOnInsert: { attemptCount: 0 } },
+      { upsert: true, new: true },
+    );
+    if (counter.attemptCount >= gameSet.maxAttempts) {
+      throw new AppError(
+        "You have reached the attempt limit for this game set",
+        409,
+        GameErrorCode.ATTEMPT_LIMIT_REACHED,
+      );
+    }
+    counter.attemptCount += 1;
+    await counter.save();
+    attemptsRemaining = gameSet.maxAttempts - counter.attemptCount;
+  }
+
+  // Resolve + FREEZE the sequence. random_n_of_pool picks ONCE here.
+  let pickedIndices: number[];
+  if (gameSet.selectionMode === GameSelectionMode.RANDOM_N_OF_POOL) {
+    const n = gameSet.pickCount ?? games.length;
+    const all = games.map((_g, i) => i);
+    pickedIndices = rngShuffle(createRng(randomUUID()), all).slice(0, n);
+  } else {
+    pickedIndices = games.map((_g, i) => i);
+  }
+  const sequence = pickedIndices.map((i) => games[i]!.gameKey);
+
+  const parent = await GameSetAttemptModel.create({
+    college: gameSet.college ?? null,
+    user: new Types.ObjectId(userId),
+    gameSet: gameSet._id,
+    status: GameSetAttemptStatus.IN_PROGRESS,
+    sequence,
+    pickedIndices,
+    currentIndex: 0,
+    compositeScore: 0,
+    attemptToken: randomUUID(),
+    startedAt: new Date(),
+    perQuestionTimerSeconds: gameSet.perQuestionTimerSeconds,
+    instantFeedback: gameSet.instantFeedback,
+  });
+
+  const firstSpec = games[pickedIndices[0]!]!;
+  const ga = await createGameAttempt(parent, 0, firstSpec);
+
+  return {
+    attemptId: parent._id.toString(),
+    attemptToken: parent.attemptToken,
+    gameSetId: gameSet._id.toString(),
+    sequence: sequence as GameKey[],
+    totalGames: sequence.length,
+    attemptsRemaining,
+    item: buildItemView(parent, ga, ga.served[0]!),
+  };
+}
+
+export async function answerGameItem(
+  attemptId: string,
+  caller: Caller,
+  input: AnswerGameItemRequest,
+): Promise<AnswerGameItemResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  if (parent.status === GameSetAttemptStatus.GRADED) {
+    throw new AppError(
+      "This attempt is already finished",
+      409,
+      GameErrorCode.ALREADY_GRADED,
+    );
+  }
+  const ga = await currentGameAttempt(parent);
+
+  // The item is addressed on the CURRENT game only — an item from another game
+  // (or another user's attempt) is unreachable here (currentIndex + ownership).
+  if (input.itemIndex < 0 || input.itemIndex >= ga.served.length) {
+    throw new AppError(
+      "No such item on the current game",
+      404,
+      GameErrorCode.ITEM_NOT_FOUND,
+    );
+  }
+  const item = ga.served[input.itemIndex]!;
+
+  // Idempotent: answering the same item twice returns the stored outcome and
+  // never double-counts marks.
+  if (item.outcome != null) {
+    return buildAnswerResponse(parent, ga, item, false);
+  }
+
+  const now = new Date();
+  let outcome: GameOutcome;
+  if (isExpired(ga)) {
+    // Clock ran out (server-authoritative) — recorded as expired, no marks.
+    outcome = GameOutcome.EXPIRED;
+  } else if (input.action === "skip") {
+    if (!ga.allowSkip) {
+      throw new AppError(
+        "Skip is not allowed for this game",
+        400,
+        GameErrorCode.SKIP_NOT_ALLOWED,
+      );
+    }
+    outcome = GameOutcome.SKIPPED;
+  } else {
+    const module = GAME_REGISTRY[ga.gameKey as GameKey];
+    // Validate the submission against the game's schema BEFORE replay. A
+    // malformed/oversized payload is a FAILED answer (scored wrong), never a
+    // 500 and never a 400 — a 400 would let a client probe for the schema shape
+    // and stall the clock by retrying. The server computes correctness by
+    // REPLAYING the validated submission; any client-supplied "score" is ignored.
+    const parsed = module.submissionSchema.safeParse(input.submission);
+    outcome = parsed.success
+      ? module.score(item.instance, parsed.data).correct
+        ? GameOutcome.CORRECT
+        : GameOutcome.WRONG
+      : GameOutcome.WRONG;
+  }
+
+  const step = applyLadderOutcome(
+    { difficulty: item.difficulty as GameDifficultyT },
+    outcome as LadderOutcome,
+  );
+
+  item.submission = input.action === "skip" ? null : (input.submission ?? null);
+  item.outcome = outcome;
+  item.marks = step.marksAwarded;
+  item.answeredAt = now;
+  item.latencyMs = now.getTime() - item.servedAt.getTime();
+
+  if (outcome !== GameOutcome.EXPIRED) ga.questionsAttempted += 1;
+  if (outcome === GameOutcome.CORRECT) ga.questionsCorrect += 1;
+  ga.score += step.marksAwarded;
+  ga.ladder = { difficulty: step.next.difficulty };
+
+  const gameComplete =
+    outcome === GameOutcome.EXPIRED || reachedMax(ga) || reachedCap(ga);
+  if (gameComplete) {
+    ga.status = GameAttemptStatus.COMPLETE;
+  } else {
+    serveNextItem(ga);
+  }
+  // Mixed paths (ladder + the served instances/submissions) need explicit marks.
+  ga.markModified("ladder");
+  ga.markModified("served");
+  await ga.save();
+
+  return buildAnswerResponse(parent, ga, item, gameComplete);
+}
+
+function buildAnswerResponse(
+  parent: ParentDoc,
+  ga: GameAttemptDoc,
+  item: GameAttempt["served"][number],
+  gameComplete: boolean,
+): AnswerGameItemResponse {
+  // The "next" item is the last served entry that hasn't been answered yet.
+  const pending = ga.served.find((s) => s.outcome == null);
+  const done = gameComplete || pending == null || ga.status === GameAttemptStatus.COMPLETE;
+  return {
+    itemIndex: item.index,
+    outcome: item.outcome as GameOutcome,
+    marksAwarded: item.marks,
+    answeredDifficulty: item.difficulty as GameDifficultyT,
+    gameScore: ga.score,
+    questionsCorrect: ga.questionsCorrect,
+    questionsAttempted: ga.questionsAttempted,
+    correct: item.outcome === GameOutcome.CORRECT,
+    next: done || pending == null ? null : buildItemView(parent, ga, pending),
+    gameComplete: done,
+  };
+}
+
+/**
+ * PRACTICE-mode reveal. Gated SERVER-SIDE on a distinct code path: only when the
+ * attempt's `instantFeedback` is on AND the item is already answered. Delegates
+ * to the module's `explain`, which MAY reveal the solution (never on the answer
+ * response, only here).
+ */
+export async function explainGameItem(
+  attemptId: string,
+  caller: Caller,
+  itemIndex: number,
+): Promise<GameExplanationResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  if (!parent.instantFeedback) {
+    throw new AppError(
+      "Explanations are only available in practice mode",
+      403,
+      GameErrorCode.PRACTICE_MODE_OFF,
+    );
+  }
+  const ga = await currentGameAttempt(parent);
+  if (itemIndex < 0 || itemIndex >= ga.served.length) {
+    throw new AppError(
+      "No such item on the current game",
+      404,
+      GameErrorCode.ITEM_NOT_FOUND,
+    );
+  }
+  const item = ga.served[itemIndex]!;
+  if (item.outcome == null) {
+    // The reveal is post-answer only — never before the answer is locked.
+    throw new AppError(
+      "Answer the item before revealing the explanation",
+      409,
+      GameErrorCode.ITEM_NOT_ANSWERED,
+    );
+  }
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
+  const explanation = module.explain(item.instance, item.submission ?? null);
+  return {
+    itemIndex,
+    outcome: item.outcome as GameOutcome,
+    solution: explanation.solution,
+    note: explanation.note,
+  };
+}
+
+export async function advanceGame(
+  attemptId: string,
+  caller: Caller,
+): Promise<AdvanceGameResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  if (parent.status === GameSetAttemptStatus.GRADED) {
+    throw new AppError(
+      "This attempt is already finished",
+      409,
+      GameErrorCode.ALREADY_GRADED,
+    );
+  }
+  const ga = await currentGameAttempt(parent);
+
+  // Advance only when the current game is genuinely done — complete, its clock
+  // expired, or it hit maxQuestions. No going back.
+  const doneNow =
+    ga.status === GameAttemptStatus.COMPLETE ||
+    isExpired(ga) ||
+    reachedMax(ga) ||
+    reachedCap(ga);
+  if (!doneNow) {
+    throw new AppError(
+      "Finish the current game before advancing",
+      409,
+      GameErrorCode.GAME_IN_PROGRESS,
+    );
+  }
+  if (ga.status !== GameAttemptStatus.COMPLETE) {
+    ga.status = GameAttemptStatus.COMPLETE;
+    await ga.save();
+  }
+
+  const nextIndex = parent.currentIndex + 1;
+  if (nextIndex >= parent.sequence.length) {
+    // No further game — the client should call finish.
+    return { item: null, setComplete: true };
+  }
+
+  parent.currentIndex = nextIndex;
+  await parent.save();
+
+  const gameSet = await requireGameSet(parent.gameSet.toString());
+  const spec = gameSet.games[parent.pickedIndices[nextIndex]!]!;
+  const nextGa = await createGameAttempt(parent, nextIndex, spec);
+  return { item: buildItemView(parent, nextGa, nextGa.served[0]!), setComplete: false };
+}
+
+export async function finishGameSet(
+  attemptId: string,
+  caller: Caller,
+): Promise<GameResult> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  const games = await GameAttemptModel.find({ parent: parent._id }).sort({
+    gameIndex: 1,
+  });
+  const composite = games.reduce((sum, g) => sum + g.score, 0);
+
+  // Atomic IN_PROGRESS → GRADED — only the first finisher writes the composite.
+  const claimed = await GameSetAttemptModel.findOneAndUpdate(
+    { _id: parent._id, status: GameSetAttemptStatus.IN_PROGRESS },
+    {
+      $set: {
+        status: GameSetAttemptStatus.GRADED,
+        compositeScore: composite,
+        completedAt: new Date(),
+      },
+    },
+    { new: true },
+  );
+  const fresh = claimed ?? (await GameSetAttemptModel.findById(parent._id))!;
+
+  return {
+    status: fresh.status as GameResult["status"],
+    compositeScore: fresh.compositeScore,
+    games: games.map((g) => ({
+      gameKey: g.gameKey as GameKey,
+      gameIndex: g.gameIndex,
+      score: g.score,
+      questionsServed: g.questionsServed,
+      questionsAttempted: g.questionsAttempted,
+      questionsCorrect: g.questionsCorrect,
+    })),
+  };
+}

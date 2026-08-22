@@ -16,11 +16,11 @@ import { PaymentStatus } from "@codeapt/shared";
 import { env } from "../../config/env.js";
 import { logger } from "../logger.js";
 import type {
+  CallbackVerification,
   CreateOrderInput,
   CreateOrderResult,
   FetchStatusResult,
   PaymentGateway,
-  VerifiedCallback,
 } from "./types.js";
 
 export const MOCK_SIGNATURE_HEADER = "x-mock-signature";
@@ -81,7 +81,7 @@ export function createMockGateway(): PaymentGateway {
       };
     },
 
-    verifyCallback(headers, rawBody): VerifiedCallback | null {
+    verifyCallback(headers, rawBody): CallbackVerification {
       const provided = headers[MOCK_SIGNATURE_HEADER];
       if (!provided) {
         logger.warn("mock callback missing signature header");
@@ -99,11 +99,30 @@ export function createMockGateway(): PaymentGateway {
         logger.warn({ err }, "mock callback body not JSON");
         return null;
       }
-      if (
-        !parsed.merchantOrderId ||
-        (parsed.status !== "success" && parsed.status !== "failed")
-      ) {
+      if (!parsed.merchantOrderId) {
         return null;
+      }
+      // Read the raw status as an untyped wire value (the parse cast narrows it
+      // to success|failed, but the body is untrusted and may carry anything).
+      const rawStatus = String((parsed as { status?: unknown }).status ?? "");
+      if (parsed.status !== "success" && parsed.status !== "failed") {
+        // Reached ONLY after the signature verified — a genuine but NON-terminal
+        // webhook, never a forgery. Acknowledge + ignore (no state write),
+        // mirroring the real adapter's PENDING handling. Log a recognised
+        // "pending" quietly, but flag any OTHER value loudly so a broken
+        // integration doesn't masquerade as healthy pending traffic.
+        if (rawStatus === "pending") {
+          logger.info(
+            { merchantOrderId: parsed.merchantOrderId },
+            "mock callback verified but pending — acknowledging, no state change",
+          );
+        } else {
+          logger.warn(
+            { merchantOrderId: parsed.merchantOrderId, status: rawStatus },
+            "mock callback verified with an UNRECOGNISED status — acknowledging as pending (no state change)",
+          );
+        }
+        return "ignore";
       }
       return {
         merchantOrderId: parsed.merchantOrderId,
