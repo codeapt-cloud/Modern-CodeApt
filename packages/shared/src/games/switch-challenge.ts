@@ -92,6 +92,8 @@ export const switchChallengeModule: GameModule<
   allowSkipDefault: false,
   defaultClockSeconds: 360,
   devOnly: false,
+  interactive: false,
+  defaultItemSeconds: null,
   submissionSchema: switchSubmissionSchema,
 
   generate(seed: string, difficulty: GameDifficulty): SwitchInstance {

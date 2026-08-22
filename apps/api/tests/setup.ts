@@ -26,6 +26,13 @@ process.env.CLOUDINARY_API_SECRET ??= "test-secret-must-never-leak-xyz";
 // LLM gateway secret-encryption key (test-only); asserted never to leak.
 process.env.ENCRYPTION_KEY ??= "test-encryption-key-0123456789abcdef";
 
+// NOTE: MongoMemoryServer spins up a SEPARATE mongod per test FILE, each writing
+// its data to the OS temp dir (os.tmpdir()). Running the full suite (68 files)
+// needs real disk there. If that drive is full, the failure surfaces as
+// "MongoServerError: 28: No space left on device" scattered across UNRELATED
+// files — misleading, since the tests themselves are fine. This repo lives on
+// F: but temp defaults to C:; if C: is full, point the suite's temp at the repo
+// drive: `TEMP=F:/tmp TMP=F:/tmp pnpm --filter @codeapt/api test`.
 const mongod = await MongoMemoryServer.create();
 process.env.MONGODB_URI = mongod.getUri();
 await mongoose.connect(process.env.MONGODB_URI);

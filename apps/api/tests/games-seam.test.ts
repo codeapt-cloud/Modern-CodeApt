@@ -10,12 +10,15 @@
 import {
   DEFAULT_LADDER_CONFIG,
   GAME_DIFFICULTY_MARKS,
+  GAME_MAX_PROBES_PER_ITEM,
   GAME_REGISTRY,
   GEO_SUDO_SYMBOLS,
   GameDifficulty,
   GameKey,
   applyLadderOutcome,
+  bubbleMathModule,
   createRng,
+  doorKeyModule,
   geoSudoModule,
   inductiveReasoningModule,
   motionChallengeModule,
@@ -25,6 +28,10 @@ import {
   switchChallengeModule,
   conformsToInductiveRule,
   INDUCTIVE_RULE_IDS,
+  type BubbleMathClientView,
+  type DoorKeyInstance,
+  type DoorKeyClientView,
+  type DoorKeyProbeState,
   type GeoSymbol,
   type ProbeClientView,
 } from "@codeapt/shared";
@@ -774,5 +781,263 @@ describe("view-only solvers (a real player's knowledge)", () => {
       // onto one rule. (Uniform over 4–5 families is 20–25%; observed max ~30%.)
       expect(top).toBeLessThan(N * 0.5);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5 — Bubble / Quickfire Math
+// ---------------------------------------------------------------------------
+
+/** Independent evaluator: parse a bubble expression and compute its value the
+ * way a player would, so the test never trusts the module's stored value. */
+function evalExpr(expr: string): number {
+  const m = expr.match(/^(-?\d+)([+\-×÷])(-?\d+)$/u);
+  if (!m) return Number(expr); // plain number
+  const a = Number(m[1]);
+  const b = Number(m[3]);
+  switch (m[2]) {
+    case "+":
+      return a + b;
+    case "-":
+      return a - b;
+    case "×":
+      return a * b;
+    case "÷":
+      return a / b;
+    default:
+      return NaN;
+  }
+}
+
+describe("bubble_math", () => {
+  it("is deterministic and its client view carries expressions only (no values, no solution)", () => {
+    const a = bubbleMathModule.generate("bm", "moderate");
+    expect(bubbleMathModule.generate("bm", "moderate")).toEqual(a);
+    const view = bubbleMathModule.toClientView(a) as BubbleMathClientView;
+    expect("solution" in view).toBe(false);
+    for (const b of view.bubbles) {
+      expect(Object.keys(b)).toEqual(["expr"]); // NO value field leaks
+    }
+  });
+
+  it("PROPERTY: three distinct values, each expression evaluates to its value, division exact", () => {
+    for (const difficulty of ["easy", "moderate", "hard"] as const) {
+      for (let s = 0; s < 200; s += 1) {
+        const inst = bubbleMathModule.generate(`bm-${difficulty}-${s}`, difficulty);
+        expect(inst.bubbles).toHaveLength(3);
+        const values = inst.bubbles.map((b) => b.value);
+        // Distinct — a tie would make "ascending" ambiguous.
+        expect(new Set(values).size).toBe(3);
+        for (const b of inst.bubbles) {
+          // Expression evaluates to the stored value (independently computed).
+          expect(evalExpr(b.expr)).toBe(b.value);
+          // Every value is an integer — division is always exact.
+          expect(Number.isInteger(b.value)).toBe(true);
+          if (b.expr.includes("÷")) {
+            const [num, den] = b.expr.split("÷").map(Number);
+            expect(num! % den!).toBe(0);
+          }
+        }
+        // The stored solution IS the ascending-by-value index order.
+        const expected = values
+          .map((v, i) => ({ v, i }))
+          .sort((x, y) => x.v - y.v)
+          .map((p) => p.i);
+        expect(inst.solution).toEqual(expected);
+        // Scoring the ascending order is correct; a wrong order is not.
+        expect(bubbleMathModule.score(inst, { order: expected }).correct).toBe(true);
+        expect(
+          bubbleMathModule.score(inst, { order: [...expected].reverse() }).correct,
+        ).toBe(expected.length <= 1); // reverse of 3 distinct is never correct
+      }
+    }
+  });
+
+  it("generation reliability: latency + fallback rate per tier over 300 seeds (pinned)", () => {
+    for (const difficulty of ["easy", "moderate", "hard"] as const) {
+      const times: number[] = [];
+      let fallback = 0;
+      const N = 300;
+      for (let s = 0; s < N; s += 1) {
+        const t0 = performance.now();
+        const inst = bubbleMathModule.generate(`bm-rel-${difficulty}-${s}`, difficulty);
+        times.push(performance.now() - t0);
+        // The fallback emits three consecutive plain integers n, n+1, n+2 — a
+        // signature a real tie-free pass (which uses expressions on mod/hard)
+        // effectively never produces. Detect it as a proxy for the fallback path.
+        const vals = inst.bubbles.map((b) => b.value).sort((a, b) => a - b);
+        const consecutivePlain =
+          inst.bubbles.every((b) => /^\d+$/u.test(b.expr)) &&
+          vals[1]! - vals[0]! === 1 &&
+          vals[2]! - vals[1]! === 1;
+        if (difficulty !== "easy" && consecutivePlain) fallback += 1;
+      }
+      times.sort((a, b) => a - b);
+      const p = (q: number): number => times[Math.floor((times.length - 1) * q)]!;
+      console.log(
+        `BUBBLE GEN [${difficulty}] ms: p50=${p(0.5).toFixed(3)} p95=${p(0.95).toFixed(3)} max=${times[times.length - 1]!.toFixed(3)} | fallback≈${fallback}/${N}`,
+      );
+      // The tie-reseed fallback must effectively never fire on mod/hard.
+      expect(fallback).toBe(0);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5 — Door & Key (interactive / hidden walls)
+// ---------------------------------------------------------------------------
+
+/** Independent (test-side) BFS optimal over (pos, keys-collected mask) — reads
+ * the instance's HIDDEN walls (a seam test may; the view-only proof is separate
+ * and lives in games.test.ts). Confirms the module's stored optimal. */
+function doorOptimal(inst: DoorKeyInstance): number | null {
+  const { rows, cols, start, door, keys, walls } = inst;
+  const wallSet = new Set(walls);
+  const keyBit = new Map<number, number>();
+  keys.forEach((cell, i) => keyBit.set(cell, 1 << i));
+  const full = (1 << keys.length) - 1;
+  const step = (cell: number, dir: number): number | null => {
+    const r = Math.floor(cell / cols);
+    const c = cell % cols;
+    const nr = dir === 0 ? r - 1 : dir === 1 ? r + 1 : r;
+    const nc = dir === 2 ? c - 1 : dir === 3 ? c + 1 : c;
+    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) return null;
+    return nr * cols + nc;
+  };
+  const enc = (pos: number, mask: number): number => pos * (full + 1) + mask;
+  const startMask = keyBit.get(start) ?? 0;
+  if (start === door && startMask === full) return 0;
+  const seen = new Set<number>([enc(start, startMask)]);
+  let frontier = [{ pos: start, mask: startMask }];
+  let depth = 0;
+  while (frontier.length) {
+    depth += 1;
+    const next: Array<{ pos: number; mask: number }> = [];
+    for (const st of frontier) {
+      for (let dir = 0; dir < 4; dir += 1) {
+        const t = step(st.pos, dir);
+        if (t == null || wallSet.has(t)) continue;
+        const mask = st.mask | (keyBit.get(t) ?? 0);
+        if (seen.has(enc(t, mask))) continue;
+        seen.add(enc(t, mask));
+        if (t === door && mask === full) return depth;
+        next.push({ pos: t, mask });
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
+describe("door_key (interactive)", () => {
+  it("is interactive, deterministic, and its client view never carries walls or the solution", () => {
+    const a = doorKeyModule.generate("dk", "moderate");
+    expect(doorKeyModule.generate("dk", "moderate")).toEqual(a);
+    expect(doorKeyModule.interactive).toBe(true);
+    expect(doorKeyModule.probe).toBeDefined();
+    const view = doorKeyModule.toClientView(a) as DoorKeyClientView & {
+      walls?: unknown;
+      solution?: unknown;
+    };
+    expect("solution" in view).toBe(false);
+    expect("walls" in view).toBe(false); // the whole point — walls are hidden
+    expect(view.pos).toBe(a.start);
+    expect(view.bumped).toEqual([]);
+  });
+
+  it("PROPERTY: every maze is solvable and the stored optimal matches an independent BFS", () => {
+    for (const difficulty of ["easy", "moderate", "hard"] as const) {
+      for (let s = 0; s < 120; s += 1) {
+        const inst = doorKeyModule.generate(`dk-prop-${difficulty}-${s}`, difficulty);
+        const opt = doorOptimal(inst);
+        expect(opt).not.toBeNull(); // always solvable
+        expect(inst.optimalMoves).toBe(opt);
+      }
+    }
+  });
+
+  it("wall-hit modes: block STAYS in place, reset RETURNS to start; both DISCOVER the wall", () => {
+    // A controlled 4×4 instance: start=0, an OPEN cell at 1, a WALL at 2.
+    const inst: DoorKeyInstance = {
+      kind: GameKey.DOOR_KEY,
+      rows: 4,
+      cols: 4,
+      start: 0,
+      door: 15,
+      keys: [],
+      walls: [2],
+      optimalMoves: 6,
+      solution: { optimalMoves: 6 },
+    };
+    const probe = doorKeyModule.probe!;
+    for (const mode of ["block", "reset"] as const) {
+      let st = probe.init(inst, { onWallHit: mode }) as DoorKeyProbeState;
+      st = probe.apply(inst, st, { dir: 3 }) as DoorKeyProbeState; // 0 → 1 (open)
+      expect(st.pos).toBe(1);
+      st = probe.apply(inst, st, { dir: 3 }) as DoorKeyProbeState; // 1 → 2 (WALL)
+      expect(st.bumped).toContain(2); // discovered by bumping
+      expect(st.pos).toBe(mode === "reset" ? 0 : 1); // reset→start, block→stay
+    }
+  });
+
+  it("a probe view never reveals an UNBUMPED wall (redaction holds through a full sensing walk)", () => {
+    // Drive a deterministic pseudo-random walk purely through the probe contract
+    // and assert, after every move, that the discovered `bumped` set is always a
+    // subset of the true walls — never a leak of an unbumped one.
+    for (const difficulty of ["easy", "moderate", "hard"] as const) {
+      const inst = doorKeyModule.generate(`dk-redact-${difficulty}`, difficulty);
+      const wallSet = new Set(inst.walls);
+      const probe = doorKeyModule.probe!;
+      let st = probe.init(inst, { onWallHit: "block" }) as DoorKeyProbeState;
+      const rng = createRng(`walk-${difficulty}`);
+      for (let i = 0; i < 300; i += 1) {
+        st = probe.apply(inst, st, { dir: Math.floor(rng() * 4) }) as DoorKeyProbeState;
+        const view = probe.view(inst, st) as DoorKeyClientView;
+        for (const cell of view.bumped) expect(wallSet.has(cell)).toBe(true);
+      }
+    }
+  });
+
+  it("generation reliability: latency + floor-miss + trivialBoard rates per tier over 300 seeds (pinned)", () => {
+    const floors = { easy: 4, moderate: 6, hard: 8 } as const;
+    for (const difficulty of ["easy", "moderate", "hard"] as const) {
+      const times: number[] = [];
+      let floorMiss = 0;
+      let trivial = 0;
+      const N = 300;
+      for (let s = 0; s < N; s += 1) {
+        const t0 = performance.now();
+        const inst = doorKeyModule.generate(`dk-rel-${difficulty}-${s}`, difficulty);
+        times.push(performance.now() - t0);
+        if (inst.optimalMoves < floors[difficulty]) floorMiss += 1;
+        if (inst.walls.length === 0) trivial += 1; // trivialBoard has no walls
+      }
+      times.sort((a, b) => a - b);
+      const p = (q: number): number => times[Math.floor((times.length - 1) * q)]!;
+      console.log(
+        `DOOR GEN [${difficulty}] ms: p50=${p(0.5).toFixed(2)} p95=${p(0.95).toFixed(2)} max=${times[times.length - 1]!.toFixed(2)} | floorMiss=${floorMiss}/${N} trivial=${trivial}/${N}`,
+      );
+      expect(trivial).toBe(0);
+      expect(floorMiss).toBe(0);
+    }
+  });
+
+  it("score replays the recorded dirs and the move cap is a real bound", () => {
+    const inst = doorKeyModule.generate("dk-score", "easy");
+    const solved = (function bfsPath(): number[] {
+      // Reuse the module's own optimal path via explain (reads the instance).
+      const ex = doorKeyModule.explain(inst, null).solution as {
+        optimalPath: number[];
+      };
+      return ex.optimalPath;
+    })();
+    expect(doorKeyModule.score(inst, { dirs: solved }).correct).toBe(true);
+    // A wrong/empty dir sequence does not reach the door.
+    expect(doorKeyModule.score(inst, { dirs: [] }).correct).toBe(false);
+    // The submission schema bounds the dir history to the per-item move cap.
+    const overCap = new Array(GAME_MAX_PROBES_PER_ITEM + 1).fill(0);
+    expect(doorKeyModule.submissionSchema.safeParse({ dirs: overCap }).success).toBe(
+      false,
+    );
   });
 });

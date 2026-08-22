@@ -5338,6 +5338,11 @@ export const gameSpecSchema = z.object({
   startingDifficulty: gameDifficultySchema.default("easy"),
   /** 0 = unlimited questions within the clock. */
   maxQuestions: z.number().int().min(0).max(1000).default(0),
+  /** Interactive games (door_key) only: what a wall-bump does. `reset` sends the
+   * player back to start (real exam); `block` keeps them in place (practice
+   * portal). Default `block` — `reset` is punishing, so it must be opted into.
+   * Ignored by non-interactive games. */
+  onWallHit: z.enum(["block", "reset"]).default("block"),
 });
 export type GameSpecInput = z.infer<typeof gameSpecSchema>;
 
@@ -5453,6 +5458,12 @@ export const gameItemViewSchema = z.object({
   allowSkip: z.boolean(),
   remainingSeconds: z.number().int(),
   perQuestionTimerSeconds: z.number().int(),
+  /** Server-enforced remaining time for THIS item (intrinsic per-item timer),
+   * or null when the game has none. A UI counts down from this honestly. */
+  itemRemainingSeconds: z.number().int().nullable(),
+  /** True for interactive games (door_key): the client plays via the `probe`
+   * endpoint, not `answer`. */
+  interactive: z.boolean(),
   instantFeedback: z.boolean(),
 });
 export type GameItemView = z.infer<typeof gameItemViewSchema>;
@@ -5499,6 +5510,35 @@ export const answerGameItemResponseSchema = z.object({
 export type AnswerGameItemResponse = z.infer<
   typeof answerGameItemResponseSchema
 >;
+
+/**
+ * Play ONE move of an INTERACTIVE item (door_key). `action` is the game-specific
+ * move payload the server validates + applies against the hidden instance —
+ * `unknown` because it varies per game (door_key: `{ dir: 0..3 }`). The server
+ * accumulates discovered state on its side; the client never reports position.
+ */
+export const probeGameItemRequestSchema = z.object({
+  itemIndex: z.number().int().min(0),
+  action: z.unknown(),
+});
+export type ProbeGameItemRequest = z.infer<typeof probeGameItemRequestSchema>;
+
+export const probeGameItemResponseSchema = z.object({
+  itemIndex: z.number().int(),
+  /** REDACTED per-move view (discovered state only — never the hidden set). */
+  view: z.unknown(),
+  movesUsed: z.number().int(),
+  /** True once the item resolved (goal reached, move cap, or expiry). */
+  resolved: z.boolean(),
+  /** Set only when resolved. */
+  outcome: gameOutcomeSchema.nullable(),
+  marksAwarded: z.number().int().nullable(),
+  gameScore: z.number().int(),
+  /** The next item once this one resolved and the game continues; else null. */
+  next: gameItemViewSchema.nullable(),
+  gameComplete: z.boolean(),
+});
+export type ProbeGameItemResponse = z.infer<typeof probeGameItemResponseSchema>;
 
 export const advanceGameResponseSchema = z.object({
   /** The first item of the next game, or null if the whole set is finished. */

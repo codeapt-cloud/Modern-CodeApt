@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  GAME_MAX_PROBES_PER_ITEM,
   GAME_MAX_SERVED_ITEMS,
   GAME_REGISTRY,
   GameAttemptStatus,
@@ -29,12 +30,15 @@ import {
   type AdvanceGameResponse,
   type AnswerGameItemRequest,
   type AnswerGameItemResponse,
+  type AnyGameModule,
   type GameDifficulty as GameDifficultyT,
   type GameItemView,
   type GameExplanationResponse,
   type GameKey,
   type GameResult,
   type LadderOutcome,
+  type ProbeGameItemRequest,
+  type ProbeGameItemResponse,
   type StartGameSetResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
@@ -90,6 +94,22 @@ function reachedMax(ga: GameAttemptDoc): boolean {
 /** Absolute safety ceiling on served items, independent of maxQuestions. */
 function reachedCap(ga: GameAttemptDoc): boolean {
   return ga.served.length >= GAME_MAX_SERVED_ITEMS;
+}
+
+/** Effective per-item seconds: the GameSet practice override wins when set (>0);
+ * otherwise the module's intrinsic default. A 0 override cannot REMOVE an
+ * intrinsic limit — it just falls back to the module default. null = no limit. */
+function effectiveItemSeconds(
+  module: AnyGameModule,
+  practiceOverride: number,
+): number | null {
+  if (practiceOverride && practiceOverride > 0) return practiceOverride;
+  return module.defaultItemSeconds;
+}
+
+/** Whether this served item's own (intrinsic) deadline has passed. */
+function itemExpired(item: GameAttempt["served"][number], now: Date): boolean {
+  return item.itemExpiresAt != null && now.getTime() > item.itemExpiresAt.getTime();
 }
 
 // ---------------------------------------------------------------------------
@@ -196,13 +216,26 @@ function serveNextItem(ga: GameAttemptDoc): void {
   const index = ga.served.length;
   const difficulty = (ga.ladder as { difficulty: GameDifficultyT }).difficulty;
   const instance = module.generate(`${ga.seed}:${index}`, difficulty);
+  const now = Date.now();
+  const itemSeconds = (ga.itemSeconds as number | null | undefined) ?? null;
+  // Interactive games start with per-item discovered state, seeded from the
+  // frozen per-game config (e.g. door_key's onWallHit).
+  const probeState =
+    module.interactive && module.probe
+      ? module.probe.init(
+          instance,
+          (ga.config as Record<string, unknown> | undefined) ?? {},
+        )
+      : null;
   ga.served.push({
     index,
     difficulty,
     marks: 0,
     instance,
     submission: null,
-    servedAt: new Date(),
+    probeState,
+    itemExpiresAt: itemSeconds != null ? new Date(now + itemSeconds * 1000) : null,
+    servedAt: new Date(now),
     answeredAt: null,
     latencyMs: null,
   } as GameAttempt["served"][number]);
@@ -221,11 +254,16 @@ function buildItemView(
     gameIndex: ga.gameIndex,
     itemIndex: item.index,
     difficulty: item.difficulty as GameDifficultyT,
-    // The module strips the solution — the client never receives it.
+    // The module strips the solution — the client never receives it. For an
+    // interactive game this is the INITIAL redacted view (fresh items only).
     view: module.toClientView(item.instance),
     allowSkip: ga.allowSkip,
     remainingSeconds: remainingSeconds(ga.expiresAt),
     perQuestionTimerSeconds: parent.perQuestionTimerSeconds,
+    itemRemainingSeconds: item.itemExpiresAt
+      ? remainingSeconds(item.itemExpiresAt)
+      : null,
+    interactive: module.interactive,
     instantFeedback: parent.instantFeedback,
   };
 }
@@ -248,6 +286,10 @@ async function createGameAttempt(
     seed: randomUUID(),
     allowSkip: spec.allowSkip && gameModule.allowSkipDefault,
     maxQuestions: spec.maxQuestions,
+    // Freeze the effective per-item timer and the per-game interactive config so
+    // the hot answer/probe paths never re-read the authored set.
+    itemSeconds: effectiveItemSeconds(gameModule, parent.perQuestionTimerSeconds),
+    config: { onWallHit: (spec as { onWallHit?: string }).onWallHit ?? "block" },
     ladder: { difficulty: spec.startingDifficulty },
     served: [],
     expiresAt: new Date(Date.now() + spec.durationSeconds * 1000),
@@ -374,9 +416,11 @@ export async function answerGameItem(
   }
 
   const now = new Date();
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
   let outcome: GameOutcome;
-  if (isExpired(ga)) {
-    // Clock ran out (server-authoritative) — recorded as expired, no marks.
+  if (isExpired(ga) || itemExpired(item, now)) {
+    // The game clock OR this item's intrinsic per-item timer ran out (both
+    // server-authoritative) — recorded as expired, no marks.
     outcome = GameOutcome.EXPIRED;
   } else if (input.action === "skip") {
     if (!ga.allowSkip) {
@@ -388,7 +432,16 @@ export async function answerGameItem(
     }
     outcome = GameOutcome.SKIPPED;
   } else {
-    const module = GAME_REGISTRY[ga.gameKey as GameKey];
+    // Interactive games are NOT solved in one shot — they are played move-by-
+    // move via the probe endpoint. Reject a one-shot answer for them. (One-shot
+    // games never reach this branch, so their path is completely unchanged.)
+    if (module.interactive) {
+      throw new AppError(
+        "This game is played move-by-move; use the probe endpoint",
+        400,
+        GameErrorCode.NOT_ONE_SHOT,
+      );
+    }
     // Validate the submission against the game's schema BEFORE replay. A
     // malformed/oversized payload is a FAILED answer (scored wrong), never a
     // 500 and never a 400 — a 400 would let a client probe for the schema shape
@@ -402,12 +455,32 @@ export async function answerGameItem(
       : GameOutcome.WRONG;
   }
 
+  item.submission = input.action === "skip" ? null : (input.submission ?? null);
+  const gameComplete = finalizeItem(ga, item, outcome, now);
+  // Mixed paths (ladder + the served instances/submissions) need explicit marks.
+  ga.markModified("ladder");
+  ga.markModified("served");
+  await ga.save();
+
+  return buildAnswerResponse(parent, ga, item, gameComplete);
+}
+
+/**
+ * Record an item's outcome, drive the ladder, and either serve the next item or
+ * complete the game. Shared by the one-shot answer path and the interactive
+ * probe path so both apply the SAME scoring/laddering/completion rules. The
+ * caller sets `item.submission` and persists (markModified + save).
+ */
+function finalizeItem(
+  ga: GameAttemptDoc,
+  item: GameAttempt["served"][number],
+  outcome: GameOutcome,
+  now: Date,
+): boolean {
   const step = applyLadderOutcome(
     { difficulty: item.difficulty as GameDifficultyT },
     outcome as LadderOutcome,
   );
-
-  item.submission = input.action === "skip" ? null : (input.submission ?? null);
   item.outcome = outcome;
   item.marks = step.marksAwarded;
   item.answeredAt = now;
@@ -425,12 +498,7 @@ export async function answerGameItem(
   } else {
     serveNextItem(ga);
   }
-  // Mixed paths (ladder + the served instances/submissions) need explicit marks.
-  ga.markModified("ladder");
-  ga.markModified("served");
-  await ga.save();
-
-  return buildAnswerResponse(parent, ga, item, gameComplete);
+  return gameComplete;
 }
 
 function buildAnswerResponse(
@@ -453,6 +521,132 @@ function buildAnswerResponse(
     correct: item.outcome === GameOutcome.CORRECT,
     next: done || pending == null ? null : buildItemView(parent, ga, pending),
     gameComplete: done,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Interactive play (probe) — hidden-information games (door_key)
+// ---------------------------------------------------------------------------
+
+/** The stored "submission" for an interactive item: its move history. */
+function interactiveSubmission(item: GameAttempt["served"][number]): unknown {
+  const state = (item.probeState ?? {}) as { dirs?: number[] };
+  return { dirs: state.dirs ?? [] };
+}
+
+/**
+ * Play ONE move of the current interactive item. The server applies the move
+ * against the HIDDEN instance, accumulates discovered state on the served entry
+ * (the client never reports its own position), and returns only a REDACTED
+ * view. The item resolves `correct` on reaching the goal, or `wrong` on the
+ * move cap; the clock / per-item timer resolve it `expired`.
+ */
+export async function probeGameItem(
+  attemptId: string,
+  caller: Caller,
+  input: ProbeGameItemRequest,
+): Promise<ProbeGameItemResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  if (parent.status === GameSetAttemptStatus.GRADED) {
+    throw new AppError(
+      "This attempt is already finished",
+      409,
+      GameErrorCode.ALREADY_GRADED,
+    );
+  }
+  const ga = await currentGameAttempt(parent);
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
+
+  // A probe against a ONE-SHOT game is an error, not a no-op.
+  if (!module.interactive || !module.probe) {
+    throw new AppError(
+      "This game is not interactive; submit an answer instead",
+      400,
+      GameErrorCode.NOT_INTERACTIVE,
+    );
+  }
+  if (input.itemIndex < 0 || input.itemIndex >= ga.served.length) {
+    throw new AppError(
+      "No such item on the current game",
+      404,
+      GameErrorCode.ITEM_NOT_FOUND,
+    );
+  }
+  const item = ga.served[input.itemIndex]!;
+
+  // Already resolved — return the final redacted view idempotently.
+  if (item.outcome != null) {
+    return buildProbeResponse(parent, ga, item, true, false);
+  }
+
+  const now = new Date();
+  // Clock / per-item timer wins before any move is applied.
+  if (isExpired(ga) || itemExpired(item, now)) {
+    item.submission = interactiveSubmission(item);
+    const complete = finalizeItem(ga, item, GameOutcome.EXPIRED, now);
+    ga.markModified("ladder");
+    ga.markModified("served");
+    await ga.save();
+    return buildProbeResponse(parent, ga, item, true, complete);
+  }
+
+  // Validate ONE move. A malformed probe is a 400 (it locks in no outcome and
+  // cannot stall a clock the way a rejected answer could), never a crash.
+  const parsed = module.probe.actionSchema.safeParse(input.action);
+  if (!parsed.success) {
+    throw new AppError("Invalid move", 400, GameErrorCode.INVALID_PROBE);
+  }
+
+  const nextState = module.probe.apply(item.instance, item.probeState, parsed.data);
+  item.probeState = nextState;
+  const moves = module.probe.movesUsed(nextState);
+
+  let resolvedOutcome: GameOutcome | null = null;
+  if (module.probe.resolved(item.instance, nextState)) {
+    resolvedOutcome = GameOutcome.CORRECT;
+  } else if (moves >= GAME_MAX_PROBES_PER_ITEM) {
+    resolvedOutcome = GameOutcome.WRONG; // ran out of moves
+  }
+
+  if (resolvedOutcome != null) {
+    item.submission = interactiveSubmission(item);
+    const complete = finalizeItem(ga, item, resolvedOutcome, now);
+    ga.markModified("ladder");
+    ga.markModified("served");
+    await ga.save();
+    return buildProbeResponse(parent, ga, item, true, complete);
+  }
+
+  // Unresolved — persist the discovered state and return the redacted view.
+  ga.markModified("served");
+  await ga.save();
+  return buildProbeResponse(parent, ga, item, false, false);
+}
+
+function buildProbeResponse(
+  parent: ParentDoc,
+  ga: GameAttemptDoc,
+  item: GameAttempt["served"][number],
+  resolved: boolean,
+  gameComplete: boolean,
+): ProbeGameItemResponse {
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
+  const view = module.probe!.view(item.instance, item.probeState);
+  const done = gameComplete || ga.status === GameAttemptStatus.COMPLETE;
+  const pending = ga.served.find((s) => s.outcome == null);
+  return {
+    itemIndex: item.index,
+    view,
+    movesUsed: module.probe!.movesUsed(item.probeState),
+    resolved,
+    outcome: resolved ? (item.outcome as GameOutcome) : null,
+    marksAwarded: resolved ? item.marks : null,
+    gameScore: ga.score,
+    next:
+      resolved && !done && pending != null
+        ? buildItemView(parent, ga, pending)
+        : null,
+    gameComplete: resolved ? done : false,
   };
 }
 

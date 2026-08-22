@@ -12,6 +12,8 @@
 import type { z } from "zod";
 
 import { GameKey } from "../enums.js";
+import { bubbleMathModule } from "./bubble-math.js";
+import { doorKeyModule } from "./door-key.js";
 import { geoSudoModule } from "./geo-sudo.js";
 import { inductiveReasoningModule } from "./inductive-reasoning.js";
 import { motionChallengeModule } from "./motion-challenge.js";
@@ -19,15 +21,32 @@ import { probeModule } from "./probe.js";
 import { switchChallengeModule } from "./switch-challenge.js";
 import type { AnyGameModule, GameModule } from "./types.js";
 
-function eraseGame<I, V, S extends z.ZodType>(
-  m: GameModule<I, V, S>,
+function eraseGame<I, V, S extends z.ZodType, PS, PA>(
+  m: GameModule<I, V, S, PS, PA>,
 ): AnyGameModule {
   return {
     key: m.key,
     displayName: m.displayName,
     allowSkipDefault: m.allowSkipDefault,
     defaultClockSeconds: m.defaultClockSeconds,
+    defaultItemSeconds: m.defaultItemSeconds,
     devOnly: m.devOnly,
+    interactive: m.interactive,
+    // The probe contract erases the same way: instances round-trip from this
+    // module's generate, states from this module's init/apply, actions are
+    // validated by actionSchema before they reach here.
+    probe: m.probe
+      ? {
+          actionSchema: m.probe.actionSchema,
+          init: (instance, config) => m.probe!.init(instance as I, config),
+          apply: (instance, state, action) =>
+            m.probe!.apply(instance as I, state as PS, action as PA),
+          resolved: (instance, state) =>
+            m.probe!.resolved(instance as I, state as PS),
+          view: (instance, state) => m.probe!.view(instance as I, state as PS),
+          movesUsed: (state) => m.probe!.movesUsed(state as PS),
+        }
+      : undefined,
     submissionSchema: m.submissionSchema,
     generate: (seed, difficulty) => m.generate(seed, difficulty),
     toClientView: (instance) => m.toClientView(instance as I),
@@ -46,6 +65,8 @@ export const GAME_REGISTRY: Record<GameKey, AnyGameModule> = {
   [GameKey.SWITCH_CHALLENGE]: eraseGame(switchChallengeModule),
   [GameKey.MOTION_CHALLENGE]: eraseGame(motionChallengeModule),
   [GameKey.INDUCTIVE_REASONING]: eraseGame(inductiveReasoningModule),
+  [GameKey.BUBBLE_MATH]: eraseGame(bubbleMathModule),
+  [GameKey.DOOR_KEY]: eraseGame(doorKeyModule),
 };
 
 /** Look up a module by key, or undefined if the key isn't registered. */

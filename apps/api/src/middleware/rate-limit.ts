@@ -157,6 +157,30 @@ export const gameAnswerRateLimiter = rateLimit({
 });
 
 /**
+ * Per-user rate limit for the interactive PROBE endpoint (door_key). A probe is
+ * a single keypress/move, so honest play is bursty — 2-3 moves/second, plus
+ * key-repeat while sensing a maze — far denser than one answer per question.
+ * 600/min (10/s) is generous headroom for the fastest keyboard play while still
+ * bounding a runaway/looping client to a sane rate (not the thousands/min an
+ * unthrottled loop could push). Higher than gameAnswerRateLimiter by design.
+ * Skipped under NODE_ENV=test.
+ */
+export const gameProbeRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => env.NODE_ENV === "test",
+  keyGenerator: (req) => req.auth?.userId ?? req.ip ?? "anonymous",
+  message: {
+    error: {
+      message: "Too many moves, please slow down",
+      code: "RATE_LIMITED",
+    },
+  },
+});
+
+/**
  * Per-user rate limit for AUTHENTICATED exam-attempt starts (individual +
  * college). A start can be code-gated, so this throttles start-code guessing —
  * the anonymous public start is already per-IP limited below. The cap is modest

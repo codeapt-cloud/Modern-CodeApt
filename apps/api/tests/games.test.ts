@@ -5,7 +5,13 @@
  * matrix (cross-tenant / unpublished / cohort-excluded denied, targeted
  * allowed). The last test prints a 4-game transcript. Mirrors college-exams.test.ts.
  */
-import { GAME_MAX_SERVED_ITEMS, Role, UserType, solveSwitch } from "@codeapt/shared";
+import {
+  GAME_MAX_PROBES_PER_ITEM,
+  GAME_MAX_SERVED_ITEMS,
+  Role,
+  UserType,
+  solveSwitch,
+} from "@codeapt/shared";
 import type { GeoSudoClientView, SwitchClientView } from "@codeapt/shared";
 import type { Express } from "express";
 import { Types } from "mongoose";
@@ -833,6 +839,8 @@ async function correctSubmission(
       return { order: inst.solution };
     case "inductive_reasoning":
       return { selected: inst.solution };
+    case "bubble_math":
+      return { order: inst.solution };
     case "motion_challenge":
       return { moves: solveMotionInstance(inst as unknown as MotionInst) };
     default:
@@ -1005,4 +1013,374 @@ describe("gaming — the Cognizant four: 4-game e2e transcript", () => {
     );
     console.log("\n===== COGNIZANT FOUR TRANSCRIPT =====\n" + lines.join("\n") + "\n");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Step 5 — Bubble (per-item timer) + Door & Key (interactive probe)
+// ---------------------------------------------------------------------------
+
+interface DoorView {
+  rows: number;
+  cols: number;
+  pos: number;
+  door: number;
+  keys: { cell: number; collected: boolean }[];
+  bumped: number[];
+  movesUsed: number;
+}
+
+/**
+ * A VIEW-ONLY door_key solver: it plays purely through the probe API and knows
+ * ONLY what the redacted view tells it — current position, key/door positions,
+ * and the walls it has bumped so far. It never reads the stored instance. This
+ * is the real proof the hidden-information design works: a sensing agent that
+ * discovers walls by bumping can still always reach the door.
+ *
+ * Strategy: model unbumped cells as open, BFS to the nearest needed target
+ * (uncollected key, else door), walk the path one probe at a time, and REPLAN
+ * whenever a bump (or reset) means the move didn't land where planned. Because
+ * the set of KNOWN walls is always a subset of the real walls, the real
+ * solution path is never blocked in the model, so a route always exists.
+ */
+async function senseSolveDoorKey(
+  appRef: Express,
+  attemptId: string,
+  token: string,
+  itemIndex: number,
+  initialView: DoorView,
+): Promise<{ resolved: boolean; outcome: string; next: unknown; gameComplete: boolean; movesUsed: number }> {
+  const { rows, cols } = initialView;
+  const known = new Set<number>(initialView.bumped);
+  let view = initialView;
+  const step = (cell: number, dir: number): number | null => {
+    const r = Math.floor(cell / cols);
+    const c = cell % cols;
+    const nr = dir === 0 ? r - 1 : dir === 1 ? r + 1 : r;
+    const nc = dir === 2 ? c - 1 : dir === 3 ? c + 1 : c;
+    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) return null;
+    return nr * cols + nc;
+  };
+  const planTo = (from: number, target: number): number[] => {
+    const seen = new Set<number>([from]);
+    const parent = new Map<number, { prev: number; dir: number }>();
+    let frontier = [from];
+    while (frontier.length) {
+      const next: number[] = [];
+      for (const cell of frontier) {
+        for (let dir = 0; dir < 4; dir += 1) {
+          const t = step(cell, dir);
+          if (t == null || known.has(t) || seen.has(t)) continue;
+          seen.add(t);
+          parent.set(t, { prev: cell, dir });
+          if (t === target) {
+            const path: number[] = [];
+            let cur = t;
+            while (parent.has(cur)) {
+              const e = parent.get(cur)!;
+              path.push(e.dir);
+              cur = e.prev;
+            }
+            return path.reverse();
+          }
+          next.push(t);
+        }
+      }
+      frontier = next;
+    }
+    return [];
+  };
+
+  let last = {
+    resolved: false,
+    outcome: "",
+    next: null as unknown,
+    gameComplete: false,
+    movesUsed: view.movesUsed,
+  };
+  for (let guard = 0; guard < 1000; guard += 1) {
+    const uncollected = view.keys.find((k) => !k.collected);
+    const target = uncollected ? uncollected.cell : view.door;
+    const path = planTo(view.pos, target);
+    if (path.length === 0) break; // already on target or boxed by known walls
+    for (const dir of path) {
+      const intended = step(view.pos, dir);
+      const res = await request(appRef)
+        .post(`/api/game-attempts/${attemptId}/probe`)
+        .set(auth(token))
+        .send({ itemIndex, action: { dir } });
+      expect(res.status).toBe(200);
+      const body = res.body as {
+        view: DoorView;
+        resolved: boolean;
+        outcome: string | null;
+        next: unknown;
+        gameComplete: boolean;
+        movesUsed: number;
+      };
+      view = body.view;
+      for (const cell of view.bumped) known.add(cell);
+      last = {
+        resolved: body.resolved,
+        outcome: body.outcome ?? "",
+        next: body.next,
+        gameComplete: body.gameComplete,
+        movesUsed: body.movesUsed,
+      };
+      if (body.resolved) return last;
+      // Bump/reset: the move didn't land where planned — replan from scratch.
+      if (view.pos !== intended) break;
+    }
+  }
+  return last;
+}
+
+describe("gaming — Step 5: Bubble per-item timer (server-enforced)", () => {
+  it("surfaces itemRemainingSeconds and records `expired` after the item deadline", async () => {
+    const { adminToken } = await setupCollege("gm-bubble");
+    const dept = await createUnit("gm-bubble", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-bubble", adminToken, {
+      games: [gameSpec("bubble_math")],
+    });
+    const student = await addStudent("gm-bubble", adminToken, "bm@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-bubble/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    expect(start.status).toBe(201);
+    // Bubble's intrinsic ~15s per-item timer is surfaced for an honest countdown.
+    expect(start.body.item.itemRemainingSeconds).toBeGreaterThan(0);
+    expect(start.body.item.itemRemainingSeconds).toBeLessThanOrEqual(15);
+    expect(start.body.item.interactive).toBe(false);
+
+    const attemptId = start.body.attemptId as string;
+    // Force THIS item's deadline into the past (server-authoritative — the client
+    // can't do this). A correct answer arriving after it is still `expired`.
+    await GameAttemptModel.updateOne(
+      { parent: new Types.ObjectId(attemptId), gameIndex: 0 },
+      { $set: { "served.0.itemExpiresAt": new Date(Date.now() - 1000) } },
+    );
+    const sub = await correctSubmission(attemptId, start.body.item);
+    const ans = await request(app)
+      .post(`/api/game-attempts/${attemptId}/answer`)
+      .set(auth(student.token))
+      .send({ itemIndex: start.body.item.itemIndex, action: "answer", submission: sub });
+    expect(ans.status).toBe(200);
+    expect(ans.body.outcome).toBe("expired"); // per-item timer, not the game clock
+    expect(ans.body.marksAwarded).toBe(0);
+  });
+
+  it("a game with NO per-item timer reports itemRemainingSeconds = null", async () => {
+    const { adminToken } = await setupCollege("gm-noitemtimer");
+    const dept = await createUnit("gm-noitemtimer", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-noitemtimer", adminToken, {
+      games: [gameSpec("geo_sudo")],
+    });
+    const student = await addStudent("gm-noitemtimer", adminToken, "ni@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-noitemtimer/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    expect(start.body.item.itemRemainingSeconds).toBeNull();
+  });
+});
+
+describe("gaming — Step 5: Door & Key (interactive / hidden walls)", () => {
+  it("VIEW-ONLY solver reaches the door playing purely through the probe API", async () => {
+    const { adminToken } = await setupCollege("gm-door");
+    const dept = await createUnit("gm-door", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-door", adminToken, {
+      games: [gameSpec("door_key", { maxQuestions: 1 })],
+    });
+    const student = await addStudent("gm-door", adminToken, "dk@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-door/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    expect(start.status).toBe(201);
+    const item = start.body.item;
+    // The served view is interactive and carries NO walls.
+    expect(item.interactive).toBe(true);
+    expect("walls" in item.view).toBe(false);
+    expect("solution" in item.view).toBe(false);
+
+    const result = await senseSolveDoorKey(
+      app,
+      start.body.attemptId as string,
+      student.token,
+      item.itemIndex as number,
+      item.view as DoorView,
+    );
+    expect(result.resolved).toBe(true);
+    expect(result.outcome).toBe("correct"); // reached the door with all keys
+
+    // The probe NEVER revealed an unbumped wall: read the instance now (the test
+    // may; the SOLVER above never did) and confirm every discovered wall is real.
+    const ga = await GameAttemptModel.findOne({
+      parent: new Types.ObjectId(start.body.attemptId),
+      gameIndex: 0,
+    });
+    const inst = ga!.served[0]!.instance as { walls: number[] };
+    const discovered = (ga!.served[0]!.probeState as { bumped: number[] }).bumped;
+    for (const cell of discovered) expect(inst.walls).toContain(cell);
+  });
+
+  it("a probe against a ONE-SHOT game errors (NOT_INTERACTIVE)", async () => {
+    const { adminToken } = await setupCollege("gm-probe-oneshot");
+    const dept = await createUnit("gm-probe-oneshot", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-probe-oneshot", adminToken, {
+      games: [gameSpec("geo_sudo")],
+    });
+    const student = await addStudent("gm-probe-oneshot", adminToken, "po@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-probe-oneshot/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const res = await request(app)
+      .post(`/api/game-attempts/${start.body.attemptId}/probe`)
+      .set(auth(student.token))
+      .send({ itemIndex: 0, action: { dir: 0 } });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("NOT_INTERACTIVE");
+  });
+
+  it("an ANSWER against an interactive game errors (NOT_ONE_SHOT)", async () => {
+    const { adminToken } = await setupCollege("gm-answer-interactive");
+    const dept = await createUnit("gm-answer-interactive", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-answer-interactive", adminToken, {
+      games: [gameSpec("door_key")],
+    });
+    const student = await addStudent("gm-answer-interactive", adminToken, "ai@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-answer-interactive/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const res = await request(app)
+      .post(`/api/game-attempts/${start.body.attemptId}/answer`)
+      .set(auth(student.token))
+      .send({ itemIndex: 0, action: "answer", submission: { dirs: [1, 1, 3] } });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("NOT_ONE_SHOT");
+  });
+
+  it("the move cap terminates the item (resolves `wrong`)", async () => {
+    const { adminToken } = await setupCollege("gm-door-cap");
+    const dept = await createUnit("gm-door-cap", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-door-cap", adminToken, {
+      games: [gameSpec("door_key", { maxQuestions: 1 })],
+    });
+    const student = await addStudent("gm-door-cap", adminToken, "dc@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-door-cap/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+    // Push the item's move count to one below the cap (avoids 500 HTTP calls);
+    // the next probe crosses it and resolves the item `wrong`.
+    await GameAttemptModel.updateOne(
+      { parent: new Types.ObjectId(attemptId), gameIndex: 0 },
+      { $set: { "served.0.probeState.moves": GAME_MAX_PROBES_PER_ITEM - 1 } },
+    );
+    const res = await request(app)
+      .post(`/api/game-attempts/${attemptId}/probe`)
+      .set(auth(student.token))
+      .send({ itemIndex: 0, action: { dir: 0 } });
+    expect(res.status).toBe(200);
+    expect(res.body.resolved).toBe(true);
+    expect(res.body.outcome).toBe("wrong");
+    expect(res.body.movesUsed).toBe(GAME_MAX_PROBES_PER_ITEM);
+  });
+
+  it("a malformed probe action is rejected (INVALID_PROBE), not a crash", async () => {
+    const { adminToken } = await setupCollege("gm-door-bad");
+    const dept = await createUnit("gm-door-bad", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-door-bad", adminToken, {
+      games: [gameSpec("door_key", { maxQuestions: 1 })],
+    });
+    const student = await addStudent("gm-door-bad", adminToken, "db@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-door-bad/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const res = await request(app)
+      .post(`/api/game-attempts/${start.body.attemptId}/probe`)
+      .set(auth(student.token))
+      .send({ itemIndex: 0, action: { dir: 99 } }); // out of range
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("INVALID_PROBE");
+  });
+});
+
+describe("gaming — the Accenture two through the seam: 6-game e2e transcript", () => {
+  it("plays all six games (four one-shot + bubble + interactive door_key) through one seam", async () => {
+    const slug = "gm-six";
+    const { adminToken } = await setupCollege(slug);
+    const dept = await createUnit(slug, adminToken, "CSE");
+    const setId = await authorPublishedSet(slug, adminToken, {
+      games: [
+        gameSpec("geo_sudo", { maxQuestions: 3 }),
+        gameSpec("switch_challenge", { maxQuestions: 3 }),
+        gameSpec("motion_challenge", { maxQuestions: 3 }),
+        gameSpec("inductive_reasoning", { maxQuestions: 3 }),
+        gameSpec("bubble_math", { maxQuestions: 3 }),
+        gameSpec("door_key", { maxQuestions: 2 }),
+      ],
+    });
+    const student = await addStudent(slug, adminToken, "six@c.edu", "R1", dept);
+
+    const start = await request(app)
+      .post(`/api/c/${slug}/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    expect(start.status).toBe(201);
+    const attemptId = start.body.attemptId as string;
+    const lines: string[] = [`sequence=[${start.body.sequence.join(", ")}]`];
+
+    let item = start.body.item;
+    for (let g = 0; g < 6; g += 1) {
+      lines.push(`--- game ${g + 1}: ${item.gameKey} ---`);
+      let complete = false;
+      while (!complete) {
+        if (item.gameKey === "door_key") {
+          // INTERACTIVE: play move-by-move via the probe API (view-only solver).
+          const result = await senseSolveDoorKey(
+            app,
+            attemptId,
+            student.token,
+            item.itemIndex as number,
+            item.view as DoorView,
+          );
+          lines.push(
+            `  item ${item.itemIndex} @${item.difficulty} → ${result.outcome} (probed ${result.movesUsed} moves)`,
+          );
+          complete = result.gameComplete;
+          if (!complete && result.next) item = result.next as typeof item;
+        } else {
+          const submission = await correctSubmission(attemptId, item);
+          const ans = await request(app)
+            .post(`/api/game-attempts/${attemptId}/answer`)
+            .set(auth(student.token))
+            .send({ itemIndex: item.itemIndex, action: "answer", submission });
+          expect(ans.status).toBe(200);
+          lines.push(
+            `  item ${ans.body.itemIndex} @${ans.body.answeredDifficulty} → ${ans.body.outcome} (+${ans.body.marksAwarded})`,
+          );
+          complete = ans.body.gameComplete;
+          if (!complete) item = ans.body.next;
+        }
+      }
+      const advance = await request(app)
+        .post(`/api/game-attempts/${attemptId}/advance`)
+        .set(auth(student.token));
+      expect(advance.status).toBe(200);
+      if (!advance.body.setComplete) item = advance.body.item;
+    }
+
+    const finish = await request(app)
+      .post(`/api/game-attempts/${attemptId}/finish`)
+      .set(auth(student.token));
+    expect(finish.status).toBe(200);
+    expect(finish.body.status).toBe("graded");
+    lines.push(`composite=${finish.body.compositeScore}`);
+    lines.push(
+      `perGame=[${finish.body.games.map((x: { gameKey: string; score: number }) => `${x.gameKey}:${x.score}`).join(", ")}]`,
+    );
+    console.log("\n===== ACCENTURE SIX-GAME TRANSCRIPT =====\n" + lines.join("\n") + "\n");
+
+    // Five one-shot games cleared through the ladder = 1+2+3 = 6 each (30). The
+    // interactive door_key resolves `correct` per maze (2 mazes: easy1+mod2 = 3),
+    // reached move-by-move via the probe API. Total 33.
+    expect(finish.body.compositeScore).toBe(33);
+  }, 60_000);
 });

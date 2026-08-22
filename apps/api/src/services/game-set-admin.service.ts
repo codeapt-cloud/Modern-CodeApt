@@ -32,6 +32,7 @@ export function buildGames(specs: GameSpecInput[]): GameSet["games"] {
     allowSkip: s.allowSkip,
     startingDifficulty: s.startingDifficulty,
     maxQuestions: s.maxQuestions,
+    onWallHit: s.onWallHit,
   })) as GameSet["games"];
 }
 
@@ -51,6 +52,7 @@ export function toGameSetDetail(gs: GameSetDoc): GameSetDetail {
       startingDifficulty:
         g.startingDifficulty as GameSpecInput["startingDifficulty"],
       maxQuestions: g.maxQuestions,
+      onWallHit: (g.onWallHit ?? "block") as GameSpecInput["onWallHit"],
     })),
     selectionMode: gs.selectionMode as GameSetDetail["selectionMode"],
     pickCount: gs.pickCount ?? null,

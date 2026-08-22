@@ -44,6 +44,8 @@ const gameSpecSchema = new Schema(
     },
     // 0 = unlimited questions within the clock.
     maxQuestions: { type: Number, default: 0, min: 0 },
+    // Interactive games (door_key): wall-bump behaviour. Default block.
+    onWallHit: { type: String, enum: ["block", "reset"], default: "block" },
   },
   { _id: false },
 );
@@ -129,6 +131,12 @@ const servedItemSchema = new Schema(
     // Full instance WITH solution — denormalized, server-only, never projected.
     instance: { type: Schema.Types.Mixed, required: true },
     submission: { type: Schema.Types.Mixed, default: null },
+    // INTERACTIVE games only: server-side discovered state, accumulated across
+    // probes (position, keys held, walls bumped, moves). Never client-reported.
+    probeState: { type: Schema.Types.Mixed, default: null },
+    // Server-set per-item deadline (intrinsic timer), or null when the game has
+    // no per-item limit. An answer/probe after it records `expired`.
+    itemExpiresAt: { type: Date, default: null },
     // Absent until answered; then one of GAME_OUTCOME_VALUES.
     outcome: { type: String, enum: GAME_OUTCOME_VALUES },
     servedAt: { type: Date, default: Date.now },
@@ -153,6 +161,12 @@ const gameAttemptSchema = new Schema(
     // Frozen from the authored GameSpec at creation (hot-path answer needs them).
     allowSkip: { type: Boolean, default: true },
     maxQuestions: { type: Number, default: 0 },
+    // Effective per-item seconds (module default, possibly overridden by the
+    // GameSet practice flag), frozen at creation. null = no per-item limit.
+    itemSeconds: { type: Number, default: null },
+    // Frozen per-game authoring config passed to an interactive module's probe
+    // (e.g. door_key's { onWallHit }). Opaque to the engine.
+    config: { type: Schema.Types.Mixed, default: () => ({}) },
     // { difficulty } — the adaptive ladder state (shared reducer drives it).
     ladder: {
       type: Schema.Types.Mixed,

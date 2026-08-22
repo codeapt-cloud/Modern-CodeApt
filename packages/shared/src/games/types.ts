@@ -49,15 +49,48 @@ export interface GameExplanation {
 }
 
 /**
- * A fully-typed game module, generic over its submission `Schema`. `Instance`
- * holds the solution; `ClientView` must not (enforced by `& NoSolution`);
- * `z.infer<Schema>` is the player's replayed move payload. Real games implement
- * this with concrete types; the registry erases them to `AnyGameModule`.
+ * INTERACTIVE (hidden-information) sub-contract. One-shot games serve a
+ * fully-visible item and score a single submitted move; a game like `door_key`
+ * has HIDDEN state (invisible walls) the player discovers move-by-move, so it
+ * cannot be solved locally and submitted in one shot. Such a module sets
+ * `interactive: true` and provides this contract; the service drives it via a
+ * distinct `probe` endpoint.
+ *
+ * `State` is the per-item DISCOVERED/accumulated state, persisted server-side on
+ * the served entry — the client is NEVER trusted to report its own position.
+ * `view(instance, state)` returns a REDACTED projection: only what the player
+ * has legitimately discovered (never the full hidden set), the same structural
+ * discipline as `NoSolution`. `apply` is a PURE single-move transition.
+ */
+export interface ProbeContract<Instance, State, Action> {
+  /** Validates ONE probe action (a single move). Trivially bounded. */
+  readonly actionSchema: z.ZodType<Action>;
+  /** Initial per-item state. `config` carries frozen per-GameSpec authoring
+   * options (e.g. door_key's `onWallHit`); games that don't need it ignore it. */
+  init(instance: Instance, config: Record<string, unknown>): State;
+  /** Apply one move; returns the next state. Never mutates its arguments. */
+  apply(instance: Instance, state: State, action: Action): State;
+  /** Has the goal been reached in this state? (item resolves `correct`). */
+  resolved(instance: Instance, state: State): boolean;
+  /** REDACTED view — discovered state only, never the hidden solution set. */
+  view(instance: Instance, state: State): unknown;
+  /** Moves used so far — the service caps this to bound the item. */
+  movesUsed(state: State): number;
+}
+
+/**
+ * A fully-typed game module, generic over its submission `Schema` (and, for
+ * interactive games, its probe `ProbeState`/`ProbeAction`). `Instance` holds the
+ * solution; `ClientView` must not (enforced by `& NoSolution`); `z.infer<Schema>`
+ * is the player's replayed move payload. Real games implement this with concrete
+ * types; the registry erases them to `AnyGameModule`.
  */
 export interface GameModule<
   Instance,
   ClientView,
   Schema extends z.ZodType,
+  ProbeState = never,
+  ProbeAction = never,
 > {
   readonly key: GameKey;
   readonly displayName: string;
@@ -65,8 +98,24 @@ export interface GameModule<
   readonly allowSkipDefault: boolean;
   /** Default game-clock seconds when a GameSpec doesn't set one. */
   readonly defaultClockSeconds: number;
+  /**
+   * INTRINSIC per-item time limit in seconds, or null for none. Unlike the
+   * GameSet's practice-mode `perQuestionTimerSeconds` flag, this is a property of
+   * the GAME (Bubble is ~15s/question by design). The service enforces it
+   * server-side — an answer after the item deadline records `expired`, 0 marks,
+   * exactly like the game clock. A GameSet practice override may CHANGE it but
+   * setting the override to 0 falls back to this default (it cannot REMOVE an
+   * intrinsic limit). For an interactive item the limit bounds the WHOLE
+   * exploration (all probes), not each probe.
+   */
+  readonly defaultItemSeconds: number | null;
   /** Dev-only games are never offered in an admin picker. */
   readonly devOnly: boolean;
+  /** Interactive (hidden-information) games set this true and provide `probe`.
+   * One-shot games leave it false; the answer path is unchanged for them. */
+  readonly interactive: boolean;
+  /** Present iff `interactive` — the move-by-move probe contract. */
+  readonly probe?: ProbeContract<Instance, ProbeState, ProbeAction>;
   /**
    * Validates the raw submission BEFORE replay. The service parses against this
    * first; a parse failure scores the answer `wrong` (never a 500). EVERY array
@@ -87,6 +136,16 @@ export interface GameModule<
   ): GameExplanation;
 }
 
+/** Type-erased probe contract (registry boundary). */
+export interface AnyProbeContract {
+  readonly actionSchema: z.ZodType<unknown>;
+  init(instance: unknown, config: Record<string, unknown>): unknown;
+  apply(instance: unknown, state: unknown, action: unknown): unknown;
+  resolved(instance: unknown, state: unknown): boolean;
+  view(instance: unknown, state: unknown): unknown;
+  movesUsed(state: unknown): number;
+}
+
 /**
  * The registry-facing, type-erased module. Each concrete `GameModule<I,V,S>` is
  * wrapped by `eraseGame` (registry.ts) so the service can hold a uniform
@@ -98,7 +157,10 @@ export interface AnyGameModule {
   readonly displayName: string;
   readonly allowSkipDefault: boolean;
   readonly defaultClockSeconds: number;
+  readonly defaultItemSeconds: number | null;
   readonly devOnly: boolean;
+  readonly interactive: boolean;
+  readonly probe?: AnyProbeContract;
   readonly submissionSchema: z.ZodType<unknown>;
   generate(seed: string, difficulty: GameDifficulty): unknown;
   toClientView(instance: unknown): unknown;

@@ -17,12 +17,14 @@ import {
   answerGameItemController,
   explainGameItemController,
   finishGameSetController,
+  probeGameItemController,
   startGameSetController,
 } from "../controllers/game.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
 import { optionalAuth } from "../middleware/optional-auth.js";
 import {
   gameAnswerRateLimiter,
+  gameProbeRateLimiter,
   startAttemptRateLimiter,
 } from "../middleware/rate-limit.js";
 import { requireAdmin } from "../middleware/require-role.js";
@@ -48,6 +50,14 @@ gameRouter.post(
   ...engine,
   gameAnswerRateLimiter,
   answerGameItemController,
+);
+// Interactive move-by-move play (door_key). Higher rate limit than answer — a
+// probe is a single keypress. A probe against a one-shot game 400s in the service.
+gameRouter.post(
+  "/game-attempts/:attemptId/probe",
+  ...engine,
+  gameProbeRateLimiter,
+  probeGameItemController,
 );
 gameRouter.post(
   "/game-attempts/:attemptId/advance",

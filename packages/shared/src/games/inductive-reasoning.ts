@@ -325,6 +325,8 @@ export const inductiveReasoningModule: GameModule<
   allowSkipDefault: true,
   defaultClockSeconds: 360,
   devOnly: false,
+  interactive: false,
+  defaultItemSeconds: null,
   submissionSchema: inductiveSubmissionSchema,
 
   generate(seed: string, difficulty: GameDifficulty): InductiveInstance {

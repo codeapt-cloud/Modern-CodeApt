@@ -208,6 +208,8 @@ export const geoSudoModule: GameModule<
   allowSkipDefault: true,
   defaultClockSeconds: 360,
   devOnly: false,
+  interactive: false,
+  defaultItemSeconds: null,
   submissionSchema: geoSudoSubmissionSchema,
 
   generate(seed: string, difficulty: GameDifficulty): GeoSudoInstance {

@@ -231,6 +231,8 @@ export const motionChallengeModule: GameModule<
   allowSkipDefault: true,
   defaultClockSeconds: 360,
   devOnly: false,
+  interactive: false,
+  defaultItemSeconds: null,
   submissionSchema: motionSubmissionSchema,
 
   generate(seed: string, difficulty: GameDifficulty): MotionInstance {

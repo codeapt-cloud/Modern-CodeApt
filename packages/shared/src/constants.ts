@@ -502,6 +502,14 @@ export const GAME_DEFAULT_CLOCK_SECONDS = 360;
  * exactly like maxQuestions. */
 export const GAME_MAX_SERVED_ITEMS = 300;
 
+/** Absolute ceiling on PROBE moves for a single interactive item (door_key).
+ * A player exploring a 6×6 maze by bumping invisible walls needs many moves —
+ * far more than the ~6-12 optimal — but never hundreds; 500 bounds the served
+ * document (its `dirs`/`bumped` history) and stops a runaway/looping client,
+ * while leaving honest sensing play unconstrained. Hitting it resolves the item
+ * `wrong`, exactly like running out of clock. */
+export const GAME_MAX_PROBES_PER_ITEM = 500;
+
 /** Marks awarded for a CORRECT answer, by the difficulty of the item answered.
  * No negative marking anywhere; a wrong/skip/expired answer awards 0. */
 export const GAME_DIFFICULTY_MARKS = {
@@ -540,6 +548,12 @@ export const GameErrorCode = {
   GAME_SET_NOT_PUBLISHABLE: "GAME_SET_NOT_PUBLISHABLE",
   /** A referenced target org-unit is unknown in this college / out of scope. */
   ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
+  /** A `probe` was sent to a game that is not interactive (one-shot only). */
+  NOT_INTERACTIVE: "NOT_INTERACTIVE",
+  /** An `answer` was sent to an INTERACTIVE game — it must be played via probe. */
+  NOT_ONE_SHOT: "NOT_ONE_SHOT",
+  /** A probe action failed validation (malformed move payload). */
+  INVALID_PROBE: "INVALID_PROBE",
 } as const;
 export type GameErrorCode = (typeof GameErrorCode)[keyof typeof GameErrorCode];
 

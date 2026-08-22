@@ -61,6 +61,8 @@ export const probeModule: GameModule<
   allowSkipDefault: true,
   defaultClockSeconds: 360,
   devOnly: true,
+  interactive: false,
+  defaultItemSeconds: null,
   submissionSchema: probeSubmissionSchema,
 
   generate(seed: string, difficulty: GameDifficulty): ProbeInstance {

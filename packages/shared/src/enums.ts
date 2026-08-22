@@ -394,6 +394,10 @@ export const GameKey = {
   MOTION_CHALLENGE: "motion_challenge",
   /** Inductive reasoning: pick the two option grids that follow the hidden rule. */
   INDUCTIVE_REASONING: "inductive_reasoning",
+  /** Quickfire math: click three bubbles in ascending order of value. */
+  BUBBLE_MATH: "bubble_math",
+  /** Maze with INVISIBLE walls: collect keys, reach the door (interactive/probe). */
+  DOOR_KEY: "door_key",
 } as const;
 export type GameKey = (typeof GameKey)[keyof typeof GameKey];
 export const GAME_KEY_VALUES = Object.values(GameKey);

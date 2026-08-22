@@ -9,6 +9,7 @@ import {
   explainGameItemRequestSchema,
   gameSetUpdateSchema,
   gameSetUpsertSchema,
+  probeGameItemRequestSchema,
   setGameSetPublishSchema,
 } from "@codeapt/shared";
 import type { Request, Response } from "express";
@@ -51,6 +52,18 @@ export const answerGameItemController = asyncHandler(
   async (req: Request, res: Response) => {
     const input = answerGameItemRequestSchema.parse(req.body ?? {});
     const data = await engine.answerGameItem(
+      req.params.attemptId ?? "",
+      caller(req),
+      input,
+    );
+    res.status(200).json(data);
+  },
+);
+
+export const probeGameItemController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = probeGameItemRequestSchema.parse(req.body ?? {});
+    const data = await engine.probeGameItem(
       req.params.attemptId ?? "",
       caller(req),
       input,
