@@ -34,6 +34,7 @@ import {
   resultController,
   saveAnswersController,
   startAttemptController,
+  stimulusPlayController,
   submitController,
   warningController,
 } from "../controllers/exam.controller.js";
@@ -80,6 +81,12 @@ examRouter.post(
 examRouter.post("/attempts/:attemptId/finalize", ...engine, finalizeController);
 examRouter.get("/attempts/:attemptId/result", ...engine, resultController);
 examRouter.post("/attempts/:attemptId/warning", ...engine, warningController);
+// Comprehension: record a play of the current section's audio stimulus.
+examRouter.post(
+  "/attempts/:attemptId/sections/:sectionId/stimulus-play",
+  ...engine,
+  stimulusPlayController,
+);
 
 // --- Public (anonymous) ---
 examRouter.get("/public/exams/:token", publicAvailabilityController);

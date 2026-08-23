@@ -189,6 +189,7 @@ function baseFields(input: AdminEssayTopicUpsert): Record<string, unknown> {
     description: input.description,
     instructions: input.instructions,
     difficultyLevel: input.difficultyLevel,
+    promptKind: input.promptKind,
     minWords: input.minWords,
     maxWords: input.maxWords,
     timeLimitMinutes: input.timeLimitMinutes,

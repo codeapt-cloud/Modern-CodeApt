@@ -148,6 +148,17 @@ export const warningController = asyncHandler(
   },
 );
 
+export const stimulusPlayController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const data = await engine.recordStimulusPlay(
+      req.params.attemptId ?? "",
+      caller(req),
+      req.params.sectionId ?? "",
+    );
+    res.status(200).json(data);
+  },
+);
+
 // --- Public (anonymous) -----------------------------------------------------
 
 export const publicAvailabilityController = asyncHandler(

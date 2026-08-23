@@ -18,6 +18,7 @@
  */
 import {
   EssayTopicErrorCode,
+  EssayPromptKind,
   callLlmChatJson,
   hasLlmRouter,
   extractKeywordsDeterministic,
@@ -103,6 +104,7 @@ function toAdminEssayTopic(
     description: t.description,
     instructions: t.instructions,
     difficultyLevel: t.difficultyLevel as EssayDifficulty,
+    promptKind: (t.promptKind ?? EssayPromptKind.ESSAY) as EssayPromptKind,
     minWords: t.minWords,
     maxWords: t.maxWords,
     timeLimitMinutes: t.timeLimitMinutes,
@@ -119,6 +121,7 @@ function assignableFields(input: AdminEssayTopicUpsert): {
   description: string;
   instructions: string;
   difficultyLevel: EssayDifficulty;
+  promptKind: EssayPromptKind;
   minWords: number;
   maxWords: number;
   timeLimitMinutes: number;
@@ -131,6 +134,7 @@ function assignableFields(input: AdminEssayTopicUpsert): {
     description: input.description,
     instructions: input.instructions,
     difficultyLevel: input.difficultyLevel,
+    promptKind: input.promptKind,
     minWords: input.minWords,
     maxWords: input.maxWords,
     timeLimitMinutes: input.timeLimitMinutes,

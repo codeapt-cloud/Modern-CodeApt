@@ -18,6 +18,7 @@ import {
   EssayErrorCode,
   EssayGradingStatus,
   ESSAY_DEFAULT_MIN_WORDS,
+  EssayPromptKind,
   JobStatus,
   QueueName,
   TopicType,
@@ -32,6 +33,7 @@ import {
   type EssayAiFeedbackResponse,
   type EssayAnalyticsInput,
   type EssayDimensionScoresDto,
+  type EmailDimensionScoresDto,
   type EssayIntegrity,
   type EssayIntegrityRecord,
   type EssayDraftResponse,
@@ -141,6 +143,7 @@ export function toSummary(
     description: topic.description,
     // difficultyLevel is 1|2|3 in the schema; the union type mirrors that.
     difficultyLevel: (topic.difficultyLevel ?? 1) as 1 | 2 | 3,
+    promptKind: (topic.promptKind ?? EssayPromptKind.ESSAY) as EssayPromptKind,
     minWords: topic.minWords,
     maxWords: topic.maxWords,
     timeLimitMinutes: topic.timeLimitMinutes,
@@ -542,17 +545,42 @@ export async function getGradingResult(
   const completed = status === EssayGradingStatus.COMPLETED;
   const failed = status === EssayGradingStatus.FAILED;
 
-  const dimensions: EssayDimensionScoresDto | null = completed
-    ? {
-        grammar: attempt.subScores?.grammar ?? 0,
-        spelling: attempt.subScores?.spelling ?? 0,
-        punctuation: attempt.subScores?.punctuation ?? 0,
-        readability: attempt.subScores?.readability ?? 0,
-        vocabulary: attempt.subScores?.vocabulary ?? 0,
-        structure: attempt.subScores?.structure ?? 0,
-        relevance: attempt.subScores?.relevance ?? 0,
-      }
-    : null;
+  // An email topic grades on the email rubric, so its breakdown is the 8 email
+  // dimensions surfaced under `emailDimensions`; `dimensions` (the 7 essay
+  // sub-scores) is left null. An essay topic behaves EXACTLY as before: the 7
+  // essay sub-scores under `dimensions`, `emailDimensions` absent.
+  const topic = await EssayTopicModel.findById(attempt.essayTopic).select(
+    "promptKind",
+  );
+  const isEmail = topic?.promptKind === EssayPromptKind.EMAIL;
+  const s = attempt.subScores;
+
+  const dimensions: EssayDimensionScoresDto | null =
+    completed && !isEmail
+      ? {
+          grammar: s?.grammar ?? 0,
+          spelling: s?.spelling ?? 0,
+          punctuation: s?.punctuation ?? 0,
+          readability: s?.readability ?? 0,
+          vocabulary: s?.vocabulary ?? 0,
+          structure: s?.structure ?? 0,
+          relevance: s?.relevance ?? 0,
+        }
+      : null;
+
+  const emailDimensions: EmailDimensionScoresDto | null =
+    completed && isEmail
+      ? {
+          grammar: s?.grammar ?? 0,
+          spelling: s?.spelling ?? 0,
+          punctuation: s?.punctuation ?? 0,
+          readability: s?.readability ?? 0,
+          format: s?.format ?? 0,
+          register: s?.register ?? 0,
+          content: s?.content ?? 0,
+          tone: s?.tone ?? 0,
+        }
+      : null;
 
   return {
     jobId,
@@ -561,6 +589,9 @@ export async function getGradingResult(
     gradingPending: !completed && !failed,
     total: completed ? attempt.finalScore : null,
     dimensions,
+    // Additive: present (non-null) only for a completed email attempt; for an
+    // essay attempt this key is omitted entirely, so the response is unchanged.
+    ...(isEmail ? { emailDimensions } : {}),
     source: completed
       ? ((attempt.scoreSource as EssayScoreSource | null) ?? null)
       : null,

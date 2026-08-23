@@ -9,8 +9,10 @@
  */
 import {
   ESSAY_DIFFICULTY_VALUES,
+  ESSAY_PROMPT_KIND_VALUES,
   ESSAY_SCORE_SOURCE_VALUES,
   ESSAY_STATUS_VALUES,
+  EssayPromptKind,
   EssayStatus,
   JOB_STATUS_VALUES,
   JobStatus,
@@ -32,6 +34,12 @@ const essayTopicSchema = new Schema(
     maxWords: { type: Number, default: 0, min: 0 },
     timeLimitMinutes: { type: Number, default: 0, min: 0 },
     isActive: { type: Boolean, default: true },
+    // essay | email — the grader picks the rubric from this. Default essay.
+    promptKind: {
+      type: String,
+      enum: ESSAY_PROMPT_KIND_VALUES,
+      default: EssayPromptKind.ESSAY,
+    },
     // Reference keywords for the relevance analyzer — server-side only.
     semanticKeywords: { type: [String], default: [] },
   },
@@ -49,6 +57,11 @@ const subScoresSchema = new Schema(
     vocabulary: { type: Number, default: 0 },
     structure: { type: Number, default: 0 },
     relevance: { type: Number, default: 0 },
+    // Email rubric dimensions (Communication module).
+    format: { type: Number, default: 0 },
+    register: { type: Number, default: 0 },
+    content: { type: Number, default: 0 },
+    tone: { type: Number, default: 0 },
   },
   { _id: false },
 );

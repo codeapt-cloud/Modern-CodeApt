@@ -232,6 +232,50 @@ export const ESSAY_AI_BLEND = {
   relevance: 0.6,
 } as const;
 
+// ---------------------------------------------------------------------------
+// Email scoring weights (Communication module, Round 2 scenario email). The
+// email rubric EXTENDS the essay engine rather than replacing it: the four
+// mechanics dimensions (grammar/spelling/punctuation/readability) are the SAME
+// analyzers and the same concerns, so an email score is directly comparable to
+// an essay score. The three essay "meaning" dimensions (vocabulary/structure/
+// relevance) are swapped for four email-specific ones — `format` (subject line,
+// salutation, sign-off, paragraphing, length), `register` (no contractions/
+// slang/ALL-CAPS shouting), `content` (addresses the scenario + clear CTA), and
+// `tone` (right for the recipient). Weights are REBALANCED for email: subject
+// line and structure matter more than readability, and content carries the most
+// weight. Sum MUST remain 1.00 (asserted in a test).
+// ---------------------------------------------------------------------------
+
+export const EMAIL_SCORE_WEIGHTS = {
+  grammar: 0.12,
+  spelling: 0.05,
+  punctuation: 0.05,
+  readability: 0.05,
+  format: 0.18,
+  register: 0.1,
+  content: 0.28,
+  tone: 0.17,
+} as const;
+export type EmailScoreDimension = keyof typeof EMAIL_SCORE_WEIGHTS;
+
+/**
+ * Per-dimension LLM blend weights for email. ONLY `content` and `tone` are
+ * AI-influenced — the four mechanics dimensions AND the two structural
+ * deterministic dimensions (`format`, `register`) are never in this map, so the
+ * LLM can only refine judgement, never mechanics or structure. `content` leans
+ * hardest on the LLM (0.6) because "does it actually address the scenario and
+ * state a clear call-to-action" is a judgement the deterministic keyword-
+ * coverage baseline only approximates. Each blended sub-score is
+ * `deterministic * (1 - b) + llm * b`.
+ */
+export const EMAIL_AI_BLEND = {
+  content: 0.6,
+  tone: 0.5,
+} as const;
+
+/** +5 bonus if content, format, AND tone are ALL >= ESSAY_BONUS_THRESHOLD. */
+export const EMAIL_BONUS_DIMENSIONS = ["content", "format", "tone"] as const;
+
 /** Feature flags for the AI grading path (defaults match the original). */
 export const ESSAY_AI_FLAGS = {
   ENABLE_AI_FEEDBACK: true,

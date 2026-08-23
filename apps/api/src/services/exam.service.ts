@@ -97,6 +97,8 @@ interface ResponseData {
   markedForReview: string[];
   breakdown?: SectionResult[];
   shuffle?: ShuffleState;
+  /** Recorded plays of each section's comprehension stimulus (sectionId→count). */
+  stimulusPlays?: Record<string, number>;
 }
 
 function readResponseData(attempt: AttemptDoc): ResponseData {
@@ -108,6 +110,7 @@ function readResponseData(attempt: AttemptDoc): ResponseData {
     markedForReview: raw.markedForReview ?? [],
     breakdown: raw.breakdown,
     shuffle: raw.shuffle,
+    stimulusPlays: raw.stimulusPlays,
   };
 }
 
@@ -329,6 +332,9 @@ async function buildSectionView(
       order: section.order,
       description: section.description,
       durationMinutes: section.durationMinutes,
+      stimulusAudioUrl: section.stimulusAudioUrl ?? "",
+      stimulusPlayLimit: section.stimulusPlayLimit ?? 0,
+      stimulusPlaysUsed: data.stimulusPlays?.[section._id.toString()] ?? 0,
     },
     sectionRemainingSeconds: remaining,
     questions: orderedQuestions.map((q) =>
@@ -754,6 +760,62 @@ export async function recordWarning(
     warningsTriggered: attempt.warningsTriggered,
     isMalpractice: attempt.isMalpractice,
     autoSubmitted: false,
+  };
+}
+
+/**
+ * Record one play of a section's comprehension stimulus (Communication module).
+ * The server increments a per-(attempt, section) counter in responseData and
+ * reports it back with the section's play limit and whether it is exhausted.
+ *
+ * This is deliberately an HONEST RECORD, not a hard gate. The stimulus is a
+ * hosted Cloudinary file whose URL the client already holds to play it at all,
+ * so nothing server-side can make it truly un-replayable (a determined taker
+ * can re-fetch the URL directly). We therefore RECORD plays — which is
+ * auditable and drives the client's "disable after N plays" — rather than
+ * pretend to enforce a play cap we cannot actually guarantee. `exhausted` is
+ * reported even past the limit so re-plays are still counted, never hidden.
+ */
+export async function recordStimulusPlay(
+  attemptId: string,
+  caller: Caller,
+  sectionId: string,
+): Promise<{
+  sectionId: string;
+  playsUsed: number;
+  playLimit: number;
+  exhausted: boolean;
+}> {
+  const attempt = await loadAndAuthorize(attemptId, caller);
+  const exam = await requireExam(attempt.exam.toString());
+  const sections = await loadSections(exam._id);
+  // The section must belong to THIS attempt's exam and be the current one — a
+  // taker can only play the stimulus of the section they are actually on.
+  const idx = currentSectionIndex(attempt, sections);
+  const section = sections[idx];
+  if (!section || section._id.toString() !== sectionId) {
+    throw new AppError(
+      "Section not found",
+      404,
+      ExamErrorCode.EXAM_NOT_FOUND,
+    );
+  }
+
+  const data = readResponseData(attempt);
+  const plays = { ...(data.stimulusPlays ?? {}) };
+  const playsUsed = (plays[sectionId] ?? 0) + 1;
+  plays[sectionId] = playsUsed;
+  await StudentExamAttemptModel.updateOne(
+    { _id: attempt._id },
+    { $set: { "responseData.stimulusPlays": plays } },
+  );
+
+  const playLimit = section.stimulusPlayLimit ?? 0;
+  return {
+    sectionId,
+    playsUsed,
+    playLimit,
+    exhausted: playLimit > 0 && playsUsed >= playLimit,
   };
 }
 

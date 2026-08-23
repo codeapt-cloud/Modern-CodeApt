@@ -235,6 +235,7 @@ import {
   type PublicExamAvailability,
   type PublicStartRequest,
   type RecordWarningResponse,
+  type RecordStimulusPlayResponse,
   type SaveSectionAnswersResponse,
   type StartAttemptResponse,
   type MeResponse,
@@ -3374,6 +3375,19 @@ export const api = {
     ): Promise<RecordWarningResponse> => {
       const { data } = await http.post<RecordWarningResponse>(
         `${API_PREFIX}/attempts/${attemptId}/warning`,
+        undefined,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    /** Record a play of the current section's comprehension audio stimulus. */
+    stimulusPlay: async (
+      attemptId: string,
+      sectionId: string,
+      token?: string,
+    ): Promise<RecordStimulusPlayResponse> => {
+      const { data } = await http.post<RecordStimulusPlayResponse>(
+        `${API_PREFIX}/attempts/${attemptId}/sections/${sectionId}/stimulus-play`,
         undefined,
         attemptHeaders(token),
       );

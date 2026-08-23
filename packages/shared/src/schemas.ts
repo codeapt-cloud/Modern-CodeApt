@@ -60,6 +60,7 @@ import {
   type GameSelectionMode,
   type GameSetAttemptStatus,
   ESSAY_GRADING_STATUS_VALUES,
+  ESSAY_PROMPT_KIND_VALUES,
   ESSAY_SCORE_SOURCE_VALUES,
   ESSAY_STATUS_VALUES,
   EXAM_ATTEMPT_STATUS_VALUES,
@@ -73,6 +74,7 @@ import {
   TopicType,
   type CouponDiscountType as CouponDiscountTypeT,
   type EssayGradingStatus,
+  type EssayPromptKind,
   type EssayScoreSource,
   type EssayStatus,
   type ExamAttemptStatus,
@@ -100,6 +102,7 @@ import {
   GAME_DEFAULT_CLOCK_SECONDS,
   ESSAY_MAX_CONTENT_CHARS,
   ESSAY_SCORE_WEIGHTS,
+  EMAIL_SCORE_WEIGHTS,
   EXECUTION_PURPOSE_VALUES,
   LEADERBOARD_DEFAULT_PAGE_SIZE,
   LEADERBOARD_MAX_PAGE_SIZE,
@@ -109,6 +112,7 @@ import {
   QUEUE_NAME_VALUES,
   type CouponRejectReason,
   type EssayScoreDimension,
+  type EmailScoreDimension,
   type ExecutionPurpose,
   type QueueName,
 } from "./constants.js";
@@ -871,6 +875,18 @@ export const attemptSectionViewSchema = z.object({
     order: z.number(),
     description: z.string(),
     durationMinutes: z.number(),
+    /**
+     * Comprehension stimulus: a hosted audio file (Cloudinary) played before
+     * the section's questions. Empty when the section has no stimulus (every
+     * existing section). `stimulusPlayLimit` is the intended number of plays
+     * (0 = unlimited) — enforced on the client and recorded server-side; see
+     * the play-count note in the exam service (a hosted URL cannot be truly
+     * un-replayable).
+     */
+    stimulusAudioUrl: z.string().default(""),
+    stimulusPlayLimit: z.number().int().nonnegative().default(0),
+    /** Plays already recorded for this section on this attempt (server truth). */
+    stimulusPlaysUsed: z.number().int().nonnegative().default(0),
   }),
   sectionRemainingSeconds: z.number().int().nonnegative(),
   questions: z.array(sanitizedQuestionSchema),
@@ -913,6 +929,25 @@ export const recordWarningResponseSchema = z.object({
   autoSubmitted: z.boolean(),
 });
 export type RecordWarningResponse = z.infer<typeof recordWarningResponseSchema>;
+
+/**
+ * Record a play of the CURRENT section's comprehension stimulus. The server
+ * increments a per-(attempt, section) counter and reports it back. `exhausted`
+ * is true once `playsUsed >= stimulusPlayLimit` (with a non-zero limit) — the
+ * client uses it to disable the audio control. This is an HONEST record, not a
+ * hard gate: the audio lives at a hosted URL the client already holds, so a
+ * determined taker can re-fetch it; we record what happened rather than pretend
+ * the file is un-replayable.
+ */
+export const recordStimulusPlayResponseSchema = z.object({
+  sectionId: z.string(),
+  playsUsed: z.number().int().nonnegative(),
+  playLimit: z.number().int().nonnegative(),
+  exhausted: z.boolean(),
+});
+export type RecordStimulusPlayResponse = z.infer<
+  typeof recordStimulusPlayResponseSchema
+>;
 
 // --- Graded result / review (reveals correctOptions AFTER grading) ---
 export const questionResultSchema = z.object({
@@ -1047,6 +1082,10 @@ export const adminSectionUpsertSchema = z.object({
   order: z.number().int().nonnegative().default(0),
   durationMinutes: z.number().int().positive(),
   description: z.string().default(""),
+  /** Comprehension stimulus audio (Cloudinary URL); "" for a normal section. */
+  stimulusAudioUrl: z.string().default(""),
+  /** Intended plays for the stimulus (0 = unlimited). */
+  stimulusPlayLimit: z.number().int().nonnegative().default(0),
 });
 export type AdminSectionUpsert = z.infer<typeof adminSectionUpsertSchema>;
 
@@ -1149,6 +1188,8 @@ export const adminSectionSchema = z.object({
   order: z.number(),
   durationMinutes: z.number(),
   description: z.string(),
+  stimulusAudioUrl: z.string().default(""),
+  stimulusPlayLimit: z.number().int().nonnegative().default(0),
   questions: z.array(adminQuestionSchema),
 });
 export const adminExamDetailSchema = z.object({
@@ -2027,6 +2068,10 @@ export const essayDifficultySchema = z.union([
   z.literal(2),
   z.literal(3),
 ]);
+/** essay | email. Defaults to essay everywhere so existing topics are unchanged. */
+export const essayPromptKindSchema = z.enum(
+  ESSAY_PROMPT_KIND_VALUES as [EssayPromptKind, ...EssayPromptKind[]],
+);
 
 // ---------------------------------------------------------------------------
 // Essay-topic (prompt) admin authoring — CRUD over the EssayTopic model. The
@@ -2040,6 +2085,8 @@ export const adminEssayTopicUpsertSchema = z
     description: z.string().default(""),
     instructions: z.string().default(""),
     difficultyLevel: essayDifficultySchema.default(1),
+    /** essay (default, unchanged) | email (grades through the email rubric). */
+    promptKind: essayPromptKindSchema.default("essay"),
     minWords: z.number().int().nonnegative().default(0),
     maxWords: z.number().int().nonnegative().default(0),
     timeLimitMinutes: z.number().int().nonnegative().default(0),
@@ -2061,6 +2108,7 @@ export const adminEssayTopicSchema = z.object({
   description: z.string(),
   instructions: z.string(),
   difficultyLevel: essayDifficultySchema,
+  promptKind: essayPromptKindSchema,
   minWords: z.number().int().nonnegative(),
   maxWords: z.number().int().nonnegative(),
   timeLimitMinutes: z.number().int().nonnegative(),
@@ -2745,6 +2793,19 @@ export type EssayDimensionScoresDto = z.infer<
   typeof essayDimensionScoresSchema
 >;
 
+/** The eight weighted 0..100 email sub-scores. Keys fixed by EMAIL_SCORE_WEIGHTS. */
+export const emailDimensionScoresSchema = z.object(
+  Object.fromEntries(
+    (Object.keys(EMAIL_SCORE_WEIGHTS) as EmailScoreDimension[]).map((d) => [
+      d,
+      z.number(),
+    ]),
+  ) as Record<EmailScoreDimension, z.ZodNumber>,
+);
+export type EmailDimensionScoresDto = z.infer<
+  typeof emailDimensionScoresSchema
+>;
+
 /** Compact summary of the caller's latest attempt at a prompt (list view). */
 export const essayLastAttemptSchema = z.object({
   id: z.string(),
@@ -2762,6 +2823,8 @@ export const essayPromptSummarySchema = z.object({
   title: z.string(),
   description: z.string(),
   difficultyLevel: essayDifficultySchema,
+  /** essay | email — the student composer/instructions branch on this. */
+  promptKind: essayPromptKindSchema,
   minWords: z.number().int().nonnegative(),
   maxWords: z.number().int().nonnegative(),
   timeLimitMinutes: z.number().int().nonnegative(),
@@ -2851,6 +2914,13 @@ export const essayGradingResultSchema = z.object({
   gradingPending: z.boolean(),
   total: z.number().nullable(),
   dimensions: essayDimensionScoresSchema.nullable(),
+  /**
+   * Email breakdown, present ONLY for an `email` topic (Communication module).
+   * For an essay topic this is absent and `dimensions` carries the 7 essay
+   * sub-scores exactly as before — the field is additive and never appears in
+   * an essay response.
+   */
+  emailDimensions: emailDimensionScoresSchema.nullable().optional(),
   source: essayScoreSourceSchema.nullable(),
   feedback: z.string().nullable(),
   wordCount: z.number().int().nonnegative(),

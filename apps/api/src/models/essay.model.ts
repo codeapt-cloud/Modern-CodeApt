@@ -15,6 +15,8 @@ import {
   ESSAY_STATUS_VALUES,
   EssayStatus,
   ESSAY_DIFFICULTY_VALUES,
+  ESSAY_PROMPT_KIND_VALUES,
+  EssayPromptKind,
   JOB_STATUS_VALUES,
   JobStatus,
 } from "@codeapt/shared";
@@ -29,6 +31,13 @@ const essayTopicSchema = new Schema(
       type: Number,
       enum: ESSAY_DIFFICULTY_VALUES,
       default: 1,
+    },
+    // essay (default — existing topics read back as essay and are unchanged) |
+    // email (Communication Round 2; grades through the email rubric). ADDITIVE.
+    promptKind: {
+      type: String,
+      enum: ESSAY_PROMPT_KIND_VALUES,
+      default: EssayPromptKind.ESSAY,
     },
     minWords: { type: Number, default: 0, min: 0 },
     maxWords: { type: Number, default: 0, min: 0 },
@@ -65,7 +74,11 @@ essayTopicSchema.index({ college: 1 });
 export type EssayTopic = InferSchemaType<typeof essayTopicSchema>;
 export const EssayTopicModel = model("EssayTopic", essayTopicSchema);
 
-// Embedded 7-dimension sub-score block (weights live in @codeapt/shared).
+// Embedded sub-score block (weights live in @codeapt/shared). Holds BOTH the 7
+// essay dimensions and the 4 email-specific dimensions (format/register/content/
+// tone). An essay attempt writes only its 7 keys (the email fields stay 0 and
+// are never read for essays); an email attempt writes its 8 keys. Additive — the
+// extra fields default to 0 so every existing essay attempt is unchanged.
 const subScoresSchema = new Schema(
   {
     grammar: { type: Number, default: 0 },
@@ -75,6 +88,11 @@ const subScoresSchema = new Schema(
     vocabulary: { type: Number, default: 0 },
     structure: { type: Number, default: 0 },
     relevance: { type: Number, default: 0 },
+    // Email rubric dimensions (Communication module).
+    format: { type: Number, default: 0 },
+    register: { type: Number, default: 0 },
+    content: { type: Number, default: 0 },
+    tone: { type: Number, default: 0 },
   },
   { _id: false },
 );

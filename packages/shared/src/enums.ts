@@ -91,6 +91,13 @@ export const CollegeFeature = {
    * style). A GameSet bundles 1..N timed games; difficulty steps up/down per
    * answer. Distinct from EXAMS (fixed pre-authored question list). */
   GAMING: "gaming",
+  /** Communication: the Cognizant/CTS communication assessment. Phase 3 (the
+   * non-speech half) opens the module — grammar (an Exam), comprehension (an
+   * Exam with an audio stimulus), and Round-2 scenario email (an EssayTopic
+   * with promptKind=email). `authoring` gates a college creating its own
+   * communication content; `speaking` is a placeholder for the later speech
+   * phase, listed now so the console needs no schema change then. */
+  COMMUNICATION: "communication",
 } as const;
 export type CollegeFeature =
   (typeof CollegeFeature)[keyof typeof CollegeFeature];
@@ -483,6 +490,21 @@ export const EssayDifficulty = {
 export type EssayDifficulty =
   (typeof EssayDifficulty)[keyof typeof EssayDifficulty];
 export const ESSAY_DIFFICULTY_VALUES = Object.values(EssayDifficulty);
+
+/**
+ * What kind of prompt an EssayTopic is. `essay` is the original behaviour and
+ * the default — every existing topic reads back as `essay` and grades through
+ * the unchanged 7-dimension essay engine. `email` (Communication module,
+ * Round 2 scenario email) grades through the email rubric instead: the same
+ * deterministic mechanics, rebalanced weights, and email-specific dimensions.
+ */
+export const EssayPromptKind = {
+  ESSAY: "essay",
+  EMAIL: "email",
+} as const;
+export type EssayPromptKind =
+  (typeof EssayPromptKind)[keyof typeof EssayPromptKind];
+export const ESSAY_PROMPT_KIND_VALUES = Object.values(EssayPromptKind);
 
 /**
  * How an essay's final score was produced:

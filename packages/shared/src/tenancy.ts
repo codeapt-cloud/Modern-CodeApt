@@ -103,6 +103,13 @@ export const SUB_CAPABILITY_CATALOG: Record<
   // authorization). `ai_build` is a Step-8 placeholder listed now so the
   // super-admin console can expose it without a later schema change.
   [CollegeFeature.GAMING]: ["authoring", "ai_build"],
+  // Communication (non-speech Phase 3). `authoring` = a college creating its
+  // own communication content (email scenarios / grammar & comprehension
+  // papers); consuming a GRANTED course's communication content needs no
+  // feature — the grant is the authorization, exactly as gaming. `speaking` is
+  // a placeholder for the later speech phase (Sections A/B) so the console can
+  // expose it without a schema change then.
+  [CollegeFeature.COMMUNICATION]: ["authoring", "speaking"],
 };
 
 /** Canonical flat key for a sub-capability toggle. */

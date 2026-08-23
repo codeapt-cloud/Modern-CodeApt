@@ -52,6 +52,7 @@ import { Button } from "../ui/button.js";
 import { ExamCalculator } from "./ExamCalculator.js";
 import { QuestionCard } from "./QuestionCard.js";
 import { QuestionNavigator } from "./QuestionNavigator.js";
+import { StimulusPlayer } from "./StimulusPlayer.js";
 
 export function ExamRunner({
   attemptId,
@@ -212,6 +213,16 @@ export function ExamRunner({
       <div className="mx-auto grid max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[1fr_280px]">
         {/* One question at a time */}
         <main className="space-y-4">
+          {view.section.stimulusAudioUrl ? (
+            <StimulusPlayer
+              attemptId={attemptId}
+              sectionId={view.section.id}
+              token={token}
+              audioUrl={view.section.stimulusAudioUrl}
+              playLimit={view.section.stimulusPlayLimit}
+              initialPlaysUsed={view.section.stimulusPlaysUsed}
+            />
+          ) : null}
           {view.section.description ? (
             <p className="text-sm text-ink-muted">{view.section.description}</p>
           ) : null}

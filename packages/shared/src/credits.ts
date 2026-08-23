@@ -45,6 +45,7 @@ export const DEFAULT_AI_CREDIT_TIER: AiCreditTier = AiCreditTier.FREE;
  */
 export const AI_ACTION_WEIGHTS: Record<string, number> = {
   grading: 1, // essay grading (one LLM sub-score pass)
+  email_grading: 1, // email grading (one LLM judgement pass — content + tone)
   essay_feedback: 1, // on-demand essay AI feedback
   keywords: 1, // essay keyword generation
   ai_build: 4, // exam/section AI build — emits many questions, big output

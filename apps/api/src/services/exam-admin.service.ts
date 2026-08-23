@@ -257,6 +257,8 @@ export async function getAdminExamDetail(
       order: s.order,
       durationMinutes: s.durationMinutes,
       description: s.description,
+      stimulusAudioUrl: s.stimulusAudioUrl ?? "",
+      stimulusPlayLimit: s.stimulusPlayLimit ?? 0,
       questions: (questionsBySection.get(s._id.toString()) ?? []).map((q) => ({
         id: q._id.toString(),
         type: q.questionType as ExamQuestionTypeT,
@@ -305,6 +307,8 @@ export async function updateSection(
   section.order = input.order;
   section.durationMinutes = input.durationMinutes;
   section.description = input.description;
+  section.stimulusAudioUrl = input.stimulusAudioUrl;
+  section.stimulusPlayLimit = input.stimulusPlayLimit;
   await section.save();
   return getAdminExamDetail(section.exam.toString());
 }

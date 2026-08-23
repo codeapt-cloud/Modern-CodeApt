@@ -12,8 +12,11 @@
  * number and full bars instantly.
  */
 import {
+  EMAIL_SCORE_WEIGHTS,
   ESSAY_SCORE_WEIGHTS,
   EssayScoreSource,
+  type EmailDimensionScoresDto,
+  type EmailScoreDimension,
   type EssayAiFeedbackResponse,
   type EssayDimensionScoresDto,
   type EssayGradingResult,
@@ -44,6 +47,21 @@ const DIMENSION_LABEL: Record<EssayScoreDimension, string> = {
   punctuation: "Punctuation",
   spelling: "Spelling",
 };
+
+/** Email rubric labels (Communication module). */
+const EMAIL_DIMENSION_LABEL: Record<EmailScoreDimension, string> = {
+  content: "Content (scenario + CTA)",
+  format: "Format (subject/greeting/sign-off)",
+  tone: "Tone",
+  register: "Register (formality)",
+  grammar: "Grammar",
+  readability: "Readability",
+  punctuation: "Punctuation",
+  spelling: "Spelling",
+};
+const EMAIL_ORDER = (
+  Object.keys(EMAIL_SCORE_WEIGHTS) as EmailScoreDimension[]
+).sort((a, b) => EMAIL_SCORE_WEIGHTS[b] - EMAIL_SCORE_WEIGHTS[a]);
 
 // Highest-weight dimensions first, so the emphasis is visually obvious.
 const ORDER = (Object.keys(ESSAY_SCORE_WEIGHTS) as EssayScoreDimension[]).sort(
@@ -125,6 +143,8 @@ export function EssayResult({
   const reduced = reducedProp || Boolean(osReduced);
 
   const dims: EssayDimensionScoresDto | null = result.dimensions;
+  const emailDims: EmailDimensionScoresDto | null =
+    result.emailDimensions ?? null;
   const isAi = result.source === EssayScoreSource.AI_HYBRID;
   const integrity = result.integrity ?? null;
   const showIntegrity =
@@ -214,6 +234,59 @@ export function EssayResult({
               ))}
             </Stagger>
           )}
+        </div>
+      ) : null}
+
+      {/* Email breakdown (Communication module — email rubric). Same bar UI,
+          the email weight table, reduced-motion friendly (no stagger). */}
+      {emailDims ? (
+        <div className="space-y-3 rounded-2xl border border-subtle bg-surface-raised p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-ink">
+              Email breakdown
+            </h3>
+            <span className="text-xs text-ink-muted">
+              % = weight toward total
+            </span>
+          </div>
+          <div className="space-y-2.5">
+            {EMAIL_ORDER.map((dim) => {
+              const score = emailDims[dim];
+              const weightPct = Math.round(EMAIL_SCORE_WEIGHTS[dim] * 100);
+              const pct = Math.min(100, Math.max(0, score));
+              return (
+                <div
+                  key={dim}
+                  className="grid grid-cols-[11rem_1fr_3.5rem] items-center gap-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-ink">
+                      {EMAIL_DIMENSION_LABEL[dim]}
+                    </span>
+                    <span className="rounded bg-surface-overlay px-1.5 py-0.5 font-mono text-[10px] text-ink-muted">
+                      {weightPct}%
+                    </span>
+                  </div>
+                  <div
+                    className="h-2.5 overflow-hidden rounded-full bg-surface-sunken"
+                    role="progressbar"
+                    aria-valuenow={Math.round(score)}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={EMAIL_DIMENSION_LABEL[dim]}
+                  >
+                    <div
+                      className={`h-full rounded-full ${barColor(score)}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-right font-mono text-sm text-ink">
+                    {score.toFixed(0)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : null}
 

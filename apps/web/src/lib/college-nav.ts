@@ -37,6 +37,7 @@ export type CollegeNavIcon =
   | "attendance"
   | "coding"
   | "gaming"
+  | "communication"
   | "results";
 
 export type SectionStatus = "available" | "locked" | "coming_soon";
@@ -211,6 +212,17 @@ export const COLLEGE_SECTIONS: readonly CollegeSection[] = [
     comingSoon: false,
   },
   {
+    key: "communication",
+    label: "Communication",
+    description:
+      "Grammar & comprehension papers and scenario email writing (CTS-style).",
+    group: "Learning",
+    icon: "communication",
+    path: "communication",
+    feature: CollegeFeature.COMMUNICATION,
+    comingSoon: false,
+  },
+  {
     key: "challenges",
     label: "Challenges",
     description: "Your students' daily-challenge leaderboard.",
@@ -363,6 +375,16 @@ export const STUDENT_COLLEGE_SECTIONS: readonly CollegeSection[] = [
     icon: "gaming",
     path: "gaming",
     feature: CollegeFeature.GAMING,
+    comingSoon: false,
+  },
+  {
+    key: "my-communication",
+    label: "Communication",
+    description: "Grammar & comprehension papers and scenario email writing.",
+    group: "Learning",
+    icon: "communication",
+    path: "communication",
+    feature: CollegeFeature.COMMUNICATION,
     comingSoon: false,
   },
   {

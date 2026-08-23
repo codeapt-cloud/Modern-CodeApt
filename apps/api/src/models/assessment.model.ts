@@ -95,6 +95,14 @@ const examSectionSchema = new Schema(
     order: { type: Number, default: 0 },
     durationMinutes: { type: Number, required: true, min: 0 },
     description: { type: String, default: "" },
+    // Comprehension stimulus (Communication module) — ADDITIVE. A hosted audio
+    // file (Cloudinary, resource_type video/auto — no server change needed to
+    // upload) played before the section's MCQs. "" for every normal section.
+    // `stimulusPlayLimit` is the intended number of plays (0 = unlimited),
+    // enforced on the client and RECORDED server-side (a hosted URL cannot be
+    // made truly un-replayable — see recordStimulusPlay).
+    stimulusAudioUrl: { type: String, default: "" },
+    stimulusPlayLimit: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 );

@@ -7,8 +7,10 @@
  */
 import {
   EssayDifficulty,
+  EssayPromptKind,
   type AdminEssayTopic,
   type EssayDifficulty as EssayDifficultyT,
+  type EssayPromptKind as EssayPromptKindT,
   type OrgUnitTreeNode,
   type Role,
 } from "@codeapt/shared";
@@ -58,6 +60,7 @@ interface EssayTopicDraft {
   description: string;
   instructions: string;
   difficultyLevel: EssayDifficultyT;
+  promptKind: EssayPromptKindT;
   minWords: number;
   maxWords: number;
   timeLimitMinutes: number;
@@ -76,6 +79,7 @@ function toDraft(
     description: t?.description ?? "",
     instructions: t?.instructions ?? "",
     difficultyLevel: (t?.difficultyLevel ?? EssayDifficulty.EASY) as EssayDifficultyT,
+    promptKind: (t?.promptKind ?? EssayPromptKind.ESSAY) as EssayPromptKindT,
     minWords: t?.minWords ?? 0,
     maxWords: t?.maxWords ?? 0,
     timeLimitMinutes: t?.timeLimitMinutes ?? 0,
@@ -186,6 +190,7 @@ export function EssayTopicEditorDialog({
       description: draft.description,
       instructions: draft.instructions,
       difficultyLevel: draft.difficultyLevel,
+      promptKind: draft.promptKind,
       minWords: Math.max(0, Math.trunc(draft.minWords) || 0),
       maxWords: Math.max(0, Math.trunc(draft.maxWords) || 0),
       timeLimitMinutes: Math.max(0, Math.trunc(draft.timeLimitMinutes) || 0),
@@ -252,6 +257,26 @@ export function EssayTopicEditorDialog({
               value={draft.instructions}
               onChange={(e) => patch({ instructions: e.target.value })}
             />
+          </FormField>
+
+          <FormField
+            label="Prompt kind"
+            hint="Email grades on the email rubric (subject/salutation/sign-off, register, tone, CTA); mechanics carry over from the essay engine."
+          >
+            <Select
+              value={draft.promptKind}
+              onValueChange={(v) => patch({ promptKind: v as EssayPromptKindT })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={EssayPromptKind.ESSAY}>Essay</SelectItem>
+                <SelectItem value={EssayPromptKind.EMAIL}>
+                  Email (Communication)
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </FormField>
 
           <div className="grid gap-4 sm:grid-cols-4">

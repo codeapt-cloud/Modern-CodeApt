@@ -28,6 +28,9 @@ export interface EditableSection {
   order: number;
   durationMinutes: number;
   description: string;
+  /** Comprehension stimulus (Communication module) — optional. */
+  stimulusAudioUrl?: string;
+  stimulusPlayLimit?: number;
 }
 
 export function SectionEditorDialog({
@@ -58,6 +61,12 @@ export function SectionEditorDialog({
     initial?.durationMinutes ?? 30,
   );
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [stimulusAudioUrl, setStimulusAudioUrl] = useState(
+    initial?.stimulusAudioUrl ?? "",
+  );
+  const [stimulusPlayLimit, setStimulusPlayLimit] = useState(
+    initial?.stimulusPlayLimit ?? 0,
+  );
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -65,7 +74,14 @@ export function SectionEditorDialog({
     setFormError("");
     setSubmitting(true);
     try {
-      const body = { name: name.trim(), order, durationMinutes, description };
+      const body = {
+        name: name.trim(),
+        order,
+        durationMinutes,
+        description,
+        stimulusAudioUrl: stimulusAudioUrl.trim(),
+        stimulusPlayLimit,
+      };
       const detail = isEdit
         ? await authApi.updateSection(initial.id, body)
         : await authApi.createSection(examId, body);
@@ -135,6 +151,35 @@ export function SectionEditorDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </FormField>
+
+          <FormField
+            label="Comprehension audio URL"
+            hint="Optional. A hosted audio passage (Cloudinary) played before this section's questions — leave blank for a normal section."
+          >
+            <Input
+              value={stimulusAudioUrl}
+              placeholder="https://res.cloudinary.com/…/video/upload/passage.mp3"
+              onChange={(e) => setStimulusAudioUrl(e.target.value)}
+            />
+          </FormField>
+
+          {stimulusAudioUrl.trim() !== "" && (
+            <FormField
+              label="Play limit"
+              hint="Intended plays (0 = unlimited). Recorded server-side and enforced in the player; a hosted URL cannot be made truly un-replayable."
+            >
+              <Input
+                type="number"
+                min={0}
+                value={String(stimulusPlayLimit)}
+                onChange={(e) =>
+                  setStimulusPlayLimit(
+                    Math.max(0, Math.trunc(Number(e.target.value)) || 0),
+                  )
+                }
+              />
+            </FormField>
+          )}
         </div>
 
         <DialogFooter>

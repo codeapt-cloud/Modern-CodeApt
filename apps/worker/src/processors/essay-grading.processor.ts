@@ -15,10 +15,16 @@
  * result (deterministic fallback at worst), and any unexpected error finalizes
  * the job as failed.
  */
-import { EssayStatus, JobStatus, essayGradingJobSchema } from "@codeapt/shared";
+import {
+  EssayPromptKind,
+  EssayStatus,
+  JobStatus,
+  essayGradingJobSchema,
+} from "@codeapt/shared";
 import type { Job, Processor } from "bullmq";
 
 import { env } from "../config/env.js";
+import { gradeEmail } from "../lib/email-grader.js";
 import { gradeEssay } from "../lib/essay-grader.js";
 import { logger } from "../lib/logger.js";
 import { EssayAttemptModel, EssayTopicModel } from "../models/essay.model.js";
@@ -79,22 +85,39 @@ export const essayGradingProcessor: Processor = async (
       throw new Error(`EssayTopic ${String(attempt.essayTopic)} not found`);
     }
 
-    const graded = await gradeEssay({
-      essayText: attempt.content,
-      prompt: `${topic.title}\n\n${topic.description}\n\n${topic.instructions}`,
-      rubric:
-        "Weighted dimensions: relevance 0.25, structure 0.23, vocabulary " +
-        "0.22, grammar 0.12, readability 0.08, spelling 0.05, punctuation " +
-        "0.05. Score vocabulary, structure, and relevance from 0 to 100.",
-      referenceKeywords: topic.semanticKeywords,
-      // Absent (older jobs) → AI allowed, preserving prior behavior.
-      aiEnabled: aiEnabled ?? true,
-      // Owning college (Stage-1 AI credits) — the seam charges this grade to it.
-      collegeId,
-      // Set only when the college runs per-student distribution → the seam meters
-      // this grade against the STUDENT's own allocation instead of the pool.
-      userId,
-    });
+    const prompt = `${topic.title}\n\n${topic.description}\n\n${topic.instructions}`;
+    // Route to the email rubric for an `email` topic; every other topic (the
+    // default `essay`) grades through the unchanged essay engine.
+    const graded =
+      topic.promptKind === EssayPromptKind.EMAIL
+        ? await gradeEmail({
+            emailText: attempt.content,
+            prompt,
+            rubric:
+              "Email rubric. Deterministic: grammar 0.12, spelling 0.05, " +
+              "punctuation 0.05, readability 0.05, format 0.18, register 0.10. " +
+              "AI-judged: content 0.28, tone 0.17. Score content and tone 0–100.",
+            referenceKeywords: topic.semanticKeywords,
+            aiEnabled: aiEnabled ?? true,
+            collegeId,
+            userId,
+          })
+        : await gradeEssay({
+            essayText: attempt.content,
+            prompt,
+            rubric:
+              "Weighted dimensions: relevance 0.25, structure 0.23, vocabulary " +
+              "0.22, grammar 0.12, readability 0.08, spelling 0.05, punctuation " +
+              "0.05. Score vocabulary, structure, and relevance from 0 to 100.",
+            referenceKeywords: topic.semanticKeywords,
+            // Absent (older jobs) → AI allowed, preserving prior behavior.
+            aiEnabled: aiEnabled ?? true,
+            // Owning college (Stage-1 AI credits) — the seam charges this to it.
+            collegeId,
+            // Set only when the college runs per-student distribution → the
+            // seam meters this against the STUDENT's own allocation.
+            userId,
+          });
 
     await ExecutionJobModel.updateOne(
       { jobId, status: { $nin: FINALIZED } },

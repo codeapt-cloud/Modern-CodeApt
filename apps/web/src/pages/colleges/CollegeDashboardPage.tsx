@@ -23,6 +23,7 @@ import {
   BarChart3,
   BookOpen,
   Gamepad2,
+  MessagesSquare,
   Briefcase,
   CalendarCheck,
   Code2,
@@ -88,6 +89,7 @@ const ICON: Record<CollegeNavIcon, LucideIcon> = {
   attendance: CalendarCheck,
   coding: Code2,
   gaming: Gamepad2,
+  communication: MessagesSquare,
   results: BarChart3,
 };
 

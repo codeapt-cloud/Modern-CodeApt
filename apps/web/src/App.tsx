@@ -289,6 +289,10 @@ const CollegeGameSetsPage = named(
   () => import("./pages/colleges/CollegeGameSetsPage.js"),
   "CollegeGameSetsPage",
 );
+const CollegeCommunicationPage = named(
+  () => import("./pages/colleges/CollegeCommunicationPage.js"),
+  "CollegeCommunicationPage",
+);
 const CollegeGameSetEditorPage = named(
   () => import("./pages/colleges/CollegeGameSetEditorPage.js"),
   "CollegeGameSetEditorPage",
@@ -672,6 +676,10 @@ export function App() {
               <Route
                 path="essays/:essayTopicId/results"
                 element={<CollegeEssayResultsPage />}
+              />
+              <Route
+                path="communication"
+                element={<CollegeCommunicationPage />}
               />
               <Route path="challenges" element={<CollegeChallengesPage />} />
               <Route path="analytics" element={<CollegeAnalyticsPage />} />
