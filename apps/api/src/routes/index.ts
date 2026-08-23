@@ -17,6 +17,7 @@ import { collegeEssayRouter } from "./college-essay.routes.js";
 import { collegeExamRouter } from "./college-exam.routes.js";
 import { gameRouter } from "./game.routes.js";
 import { collegeGameRouter } from "./college-game.routes.js";
+import { collegeSpeakingRouter } from "./speaking.routes.js";
 import { attendanceRouter } from "./attendance.routes.js";
 import { codingProfileRouter } from "./coding-profile.routes.js";
 import { studentAiCreditRouter } from "./student-ai-credit.routes.js";
@@ -85,6 +86,10 @@ apiRouter.use(uploadCollegeRouter);
 // authoring; college play + authoring is tenant-scoped + GAMING-feature gated.
 apiRouter.use(gameRouter);
 apiRouter.use(collegeGameRouter);
+
+// Communication speech spine (Sections A/B): tenant-scoped speaking assessments
+// behind COMMUNICATION + the `speaking` sub-capability. Read-aloud only (Step 10).
+apiRouter.use(collegeSpeakingRouter);
 
 apiRouter.use(attendanceRouter);
 // Coding profiles (net-new): student handles + stored per-platform stats,

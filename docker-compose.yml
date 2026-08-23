@@ -79,6 +79,39 @@ services:
       # Public Piston by default; point at a self-hosted instance to avoid rate limits.
       PISTON_URL: ${PISTON_URL:-https://emkc.org/api/v2/piston}
       PISTON_TIMEOUT_MS: "15000"
+      # Speech transcription (Communication A/B) — the self-hosted ASR container.
+      ASR_URL: ${ASR_URL:-http://asr:2600}
+      ASR_TIMEOUT_MS: "30000"
+
+  # faster-whisper ASR (Communication speech spine). CPU-heavy, so it is the one
+  # service with an explicit CPU cap.
+  #
+  # ONE-SIDED CAP — READ THIS. `cpus: "2.0"` GUARANTEES only that ASR cannot
+  # exceed 2 cores. It does NOT reserve anything for worker/api/mongo/redis:
+  # no other service has a limit, so they still contend freely for whatever
+  # cores are left, and nothing protects them from EACH OTHER. This bounds the
+  # greediest new tenant (ASR), which is the acute risk, but it is not a full
+  # CPU budget. To actually partition the box, add `cpus:` to the neighbours
+  # too — that requires knowing the box size, which is NOT in the repo (no VPS
+  # notes exist) and must come from whoever owns the deploy. Recommended full
+  # division once the core count is known (see the Step-10 report):
+  #   4 vCPU: asr 2.0, worker 1.0, api 0.5, mongo 0.5   (Piston external)
+  #   8 vCPU: asr 3.0, worker 2.0, api 1.5, mongo 1.0, redis 0.5 (+ Piston if co-located)
+  # ASR_THREADS in the image bounds the model's own thread pool as a second lever.
+  asr:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: apps/asr/Dockerfile
+    container_name: codeapt-asr
+    restart: unless-stopped
+    cpus: "2.0"
+    environment:
+      ASR_MODEL: small
+      ASR_COMPUTE: int8
+      ASR_THREADS: "2"
+    ports:
+      - "2600:2600"
 
   web:
     profiles: ["full"]

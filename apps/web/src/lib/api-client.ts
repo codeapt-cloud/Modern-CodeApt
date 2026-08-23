@@ -219,6 +219,13 @@ import {
   type ProbeGameItemResponse,
   type RecordGameWarningResponse,
   type StartGameSetResponse,
+  type SpeakingPlayListResponse,
+  type StartSpeakingResponse,
+  type SubmitSpeakingItemResponse,
+  type SpeakingAttemptResult,
+  type SpeakingAssessmentListResponse,
+  type SpeakingAssessmentDetail,
+  type SpeakingAssessmentUpsert,
   type MockPayRequest,
   type OrderListResponse,
   type OrderStatusResponse,
@@ -3616,6 +3623,101 @@ export const api = {
         body,
       );
       return data;
+    },
+  },
+
+  /**
+   * Speaking (Communication A/B) — tenant-scoped. Student consumption (available
+   * / start / submit-item / result) + college authoring (list/create/get/update/
+   * publish/remove). Read-aloud only in Step 10.
+   */
+  collegeSpeaking: {
+    available: async (slug: string): Promise<SpeakingPlayListResponse> => {
+      const { data } = await http.get<SpeakingPlayListResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/available`,
+      );
+      return data;
+    },
+    start: async (
+      slug: string,
+      assessmentId: string,
+    ): Promise<StartSpeakingResponse> => {
+      const { data } = await http.post<StartSpeakingResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/attempts`,
+      );
+      return data;
+    },
+    submitItem: async (
+      slug: string,
+      attemptId: string,
+      itemIndex: number,
+      audioUrl: string,
+    ): Promise<SubmitSpeakingItemResponse> => {
+      const { data } = await http.post<SubmitSpeakingItemResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/items/${itemIndex}`,
+        { audioUrl },
+      );
+      return data;
+    },
+    result: async (
+      slug: string,
+      attemptId: string,
+    ): Promise<SpeakingAttemptResult> => {
+      const { data } = await http.get<SpeakingAttemptResult>(
+        `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/result`,
+      );
+      return data;
+    },
+    // --- Authoring (faculty/college_admin + COMMUNICATION.speaking) ---
+    list: async (slug: string): Promise<SpeakingAssessmentListResponse> => {
+      const { data } = await http.get<SpeakingAssessmentListResponse>(
+        `${API_PREFIX}/c/${slug}/speaking`,
+      );
+      return data;
+    },
+    get: async (
+      slug: string,
+      id: string,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.get<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/speaking/${id}`,
+      );
+      return data;
+    },
+    create: async (
+      slug: string,
+      body: SpeakingAssessmentUpsert,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.post<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/speaking`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      slug: string,
+      id: string,
+      body: SpeakingAssessmentUpsert,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.patch<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/speaking/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      slug: string,
+      id: string,
+      isPublished: boolean,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.post<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/speaking/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (slug: string, id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/c/${slug}/speaking/${id}`);
     },
   },
 

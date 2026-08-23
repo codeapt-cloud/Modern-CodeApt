@@ -293,6 +293,10 @@ const CollegeCommunicationPage = named(
   () => import("./pages/colleges/CollegeCommunicationPage.js"),
   "CollegeCommunicationPage",
 );
+const CollegeSpeakingPage = named(
+  () => import("./pages/colleges/CollegeSpeakingPage.js"),
+  "CollegeSpeakingPage",
+);
 const CollegeGameSetEditorPage = named(
   () => import("./pages/colleges/CollegeGameSetEditorPage.js"),
   "CollegeGameSetEditorPage",
@@ -681,6 +685,7 @@ export function App() {
                 path="communication"
                 element={<CollegeCommunicationPage />}
               />
+              <Route path="speaking" element={<CollegeSpeakingPage />} />
               <Route path="challenges" element={<CollegeChallengesPage />} />
               <Route path="analytics" element={<CollegeAnalyticsPage />} />
               <Route path="postings" element={<CollegeCareersPage />} />

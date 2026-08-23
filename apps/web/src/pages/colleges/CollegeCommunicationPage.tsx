@@ -57,9 +57,10 @@ export function CollegeCommunicationPage() {
     {
       icon: Mic,
       title: "Speaking (Sections A & B)",
-      operator: "Read-aloud, listen-and-repeat and spoken topics.",
-      student: "Read-aloud, listen-and-repeat and spoken topics.",
-      to: null,
+      operator:
+        "Read-aloud is live (record → transcribe → score); more item types soon.",
+      student: "Read aloud and get word-accuracy + fluency feedback.",
+      to: "../speaking",
     },
   ];
 

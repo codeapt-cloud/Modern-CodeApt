@@ -54,6 +54,23 @@ const envSchema = z.object({
     .default("false")
     .transform((v) => v === "true"),
 
+  // --- ASR (speech-to-text; Communication Sections A/B) ---
+  // Base URL of the self-hosted faster-whisper container (see apps/asr). Optional
+  // so the worker still boots for other queues; speech jobs fail with a clear
+  // message when unset. Mirrors the Piston primary/fallback/timeout convention.
+  ASR_URL: z.string().url().optional(),
+  ASR_FALLBACK_URL: z.string().url().optional(),
+  ASR_HEADER_NAME: z.string().optional(),
+  ASR_HEADER_VALUE: z.string().optional(),
+  // A ~15s clip transcribes in ~5s; 30s covers a ~45s clip with headroom.
+  ASR_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Demo/offline only: simulate ASR (no network) so the speech lifecycle can be
+  // shown with no container. NEVER enable in prod — it returns a canned transcript.
+  ASR_MOCK: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+
   // --- Essay AI grading ---
   // Which AI adapter the essay grader uses. `mock` (default) needs no network
   // and returns deterministic-from-text scores, mirroring the PISTON_MOCK

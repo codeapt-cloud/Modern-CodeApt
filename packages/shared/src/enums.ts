@@ -538,6 +538,52 @@ export type EssayGradingStatus =
 export const ESSAY_GRADING_STATUS_VALUES = Object.values(EssayGradingStatus);
 
 // ---------------------------------------------------------------------------
+// Speaking (Communication Sections A/B — the speech spine)
+// ---------------------------------------------------------------------------
+
+/**
+ * Speaking item types. Step 10 builds ONLY `read_aloud` (the whole spine
+ * validated on one item type, like `_probe` for the game engine). The other ten
+ * CTS item types (repeat, sentence build, dictation, story retell, open topic,
+ * etc.) are Step 11 — the enum is a const object so they extend it without a
+ * schema migration.
+ */
+export const SpeakingItemType = {
+  READ_ALOUD: "read_aloud",
+} as const;
+export type SpeakingItemType =
+  (typeof SpeakingItemType)[keyof typeof SpeakingItemType];
+export const SPEAKING_ITEM_TYPE_VALUES = Object.values(SpeakingItemType);
+
+/**
+ * Per-item transcription lifecycle. Mirrors {@link JobStatus} value-for-value
+ * (speech rides the same async-job model as code execution + essay grading).
+ * A `failed` item is FINALIZED — a failed transcription is not retried over
+ * student audio.
+ */
+export const SpeechJobStatus = {
+  QUEUED: "queued",
+  PROCESSING: "processing",
+  COMPLETED: "completed",
+  FAILED: "failed",
+} as const;
+export type SpeechJobStatus =
+  (typeof SpeechJobStatus)[keyof typeof SpeechJobStatus];
+export const SPEECH_JOB_STATUS_VALUES = Object.values(SpeechJobStatus);
+
+/** A speaking attempt's overall lifecycle. */
+export const SpeakingAttemptStatus = {
+  IN_PROGRESS: "in_progress",
+  SUBMITTED: "submitted",
+  SCORED: "scored",
+} as const;
+export type SpeakingAttemptStatus =
+  (typeof SpeakingAttemptStatus)[keyof typeof SpeakingAttemptStatus];
+export const SPEAKING_ATTEMPT_STATUS_VALUES = Object.values(
+  SpeakingAttemptStatus,
+);
+
+// ---------------------------------------------------------------------------
 // Grading / async jobs
 // ---------------------------------------------------------------------------
 

@@ -25,9 +25,32 @@ export const QueueName = {
    * students never bursts hundreds of outbound calls at the coding platforms.
    */
   CODING_REFRESH: "coding-refresh",
+  /**
+   * Speech transcription (Communication Sections A/B). Carries one job per
+   * recorded audio item; drained by a CONCURRENCY-CAPPED + RATE-LIMITED worker
+   * so ASR (a CPU-heavy container) can never starve Piston mid-coding-exam. See
+   * SPEECH_QUEUE_CONCURRENCY / SPEECH_MAX_PER_MINUTE and the arithmetic in the
+   * Step-10 report.
+   */
+  SPEECH: "speech",
 } as const;
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
 export const QUEUE_NAME_VALUES = Object.values(QueueName);
+
+/** BullMQ job name for a speech transcription job (dedicated `speech` queue). */
+export const SPEECH_JOB_NAME = "transcribe";
+
+/**
+ * Simultaneous in-flight ASR requests the worker will make. Sized from the
+ * measured ~5s-per-15s-clip throughput and the 90-speaker target (see the
+ * report): with 4 in flight against a 2-core ASR container a ~90-clip burst
+ * drains in ~2 minutes, and the normal spread-out arrival stays near-real-time.
+ */
+export const SPEECH_QUEUE_CONCURRENCY = 4;
+
+/** Rate cap (jobs/minute) on the speech queue — a burst guard beside the
+ * concurrency cap so a stampede can't peg the ASR container. */
+export const SPEECH_MAX_PER_MINUTE = 60;
 
 /** BullMQ job name for a governor-deferred (paced) AI call. */
 export const PACED_AI_JOB_NAME = "paced-ai-call";
@@ -73,6 +96,13 @@ export interface QueueConfig {
   readonly name: QueueName;
   readonly timeoutSeconds: number;
   readonly priority: boolean;
+  /**
+   * Optional per-queue BullMQ concurrency override. When unset the worker uses
+   * WORKER_CONCURRENCY (the default for CPU-cheap I/O queues). The `speech`
+   * queue sets this explicitly to bound simultaneous ASR requests so the shared
+   * box's CPU can't be monopolised by transcription.
+   */
+  readonly concurrency?: number;
 }
 
 export const QUEUE_CONFIGS: Record<QueueName, QueueConfig> = {
@@ -105,6 +135,16 @@ export const QUEUE_CONFIGS: Record<QueueName, QueueConfig> = {
     name: QueueName.CODING_REFRESH,
     timeoutSeconds: 120,
     priority: false,
+  },
+  [QueueName.SPEECH]: {
+    name: QueueName.SPEECH,
+    // A ~15s read-aloud clip transcribes in ~5s; 120s is a generous ceiling that
+    // comfortably exceeds ASR_TIMEOUT_MS (30s) + one fallback retry, so a wedged
+    // transcription is reclaimed as stalled rather than double-processed.
+    timeoutSeconds: 120,
+    priority: false,
+    // Cap simultaneous ASR requests (see the queue arithmetic in the report).
+    concurrency: SPEECH_QUEUE_CONCURRENCY,
   },
 };
 
@@ -611,6 +651,27 @@ export const GameErrorCode = {
   GAME_NOT_EXPIRED: "GAME_NOT_EXPIRED",
 } as const;
 export type GameErrorCode = (typeof GameErrorCode)[keyof typeof GameErrorCode];
+
+/** Machine-readable codes for the Speaking (Communication A/B) surface. */
+export const SpeakingErrorCode = {
+  ASSESSMENT_NOT_FOUND: "ASSESSMENT_NOT_FOUND",
+  ATTEMPT_NOT_FOUND: "ATTEMPT_NOT_FOUND",
+  NOT_AUTHORIZED: "NOT_AUTHORIZED",
+  /** Per-user attempt cap for this assessment reached. */
+  ATTEMPT_LIMIT_REACHED: "ATTEMPT_LIMIT_REACHED",
+  /** A referenced item index does not exist on this assessment. */
+  ITEM_NOT_FOUND: "ITEM_NOT_FOUND",
+  /** That item was already submitted (no re-record — one recording per item). */
+  ITEM_ALREADY_SUBMITTED: "ITEM_ALREADY_SUBMITTED",
+  /** A referenced target org-unit is unknown in this college / out of scope. */
+  ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
+  /** Publishing refused (e.g. no items). */
+  NOT_PUBLISHABLE: "NOT_PUBLISHABLE",
+  /** Delete refused (published, or has attempts). */
+  NOT_DELETABLE: "NOT_DELETABLE",
+} as const;
+export type SpeakingErrorCode =
+  (typeof SpeakingErrorCode)[keyof typeof SpeakingErrorCode];
 
 /**
  * Anonymous public-exam starts allowed per IP inside the window. Set high

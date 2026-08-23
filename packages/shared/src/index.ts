@@ -17,6 +17,7 @@ export * from "./challenge.js";
 export * from "./assessment.js";
 export * from "./essay.js";
 export * from "./email.js";
+export * from "./speech.js";
 export * from "./essay-risk.js";
 export * from "./essay-integrity.js";
 export * from "./credits.js";

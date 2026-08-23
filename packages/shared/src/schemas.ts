@@ -70,6 +70,9 @@ import {
   PAYMENT_STATUS_VALUES,
   POSTING_TYPE_VALUES,
   ROLE_VALUES,
+  SPEAKING_ATTEMPT_STATUS_VALUES,
+  SPEAKING_ITEM_TYPE_VALUES,
+  SPEECH_JOB_STATUS_VALUES,
   TOPIC_TYPE_VALUES,
   TopicType,
   type CouponDiscountType as CouponDiscountTypeT,
@@ -84,6 +87,9 @@ import {
   type PaymentStatus,
   type PostingType,
   type Role,
+  type SpeakingAttemptStatus,
+  type SpeakingItemType,
+  type SpeechJobStatus,
   type CollegeFeature,
   type CollegeStatus,
   type OrgUnitType,
@@ -5792,4 +5798,213 @@ export const gameExplanationResponseSchema = z.object({
 });
 export type GameExplanationResponse = z.infer<
   typeof gameExplanationResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Speaking (Communication Sections A/B — the speech spine). Step 10 wires the
+// whole path for ONE item type, read_aloud; the DTOs are shaped so Step 11's
+// item types extend them without a wire change. Word accuracy + fluency only —
+// there is NO pronunciation/clarity field anywhere.
+// ---------------------------------------------------------------------------
+
+export const speakingItemTypeSchema = z.enum(
+  SPEAKING_ITEM_TYPE_VALUES as [SpeakingItemType, ...SpeakingItemType[]],
+);
+export const speechJobStatusSchema = z.enum(
+  SPEECH_JOB_STATUS_VALUES as [SpeechJobStatus, ...SpeechJobStatus[]],
+);
+export const speakingAttemptStatusSchema = z.enum(
+  SPEAKING_ATTEMPT_STATUS_VALUES as [
+    SpeakingAttemptStatus,
+    ...SpeakingAttemptStatus[],
+  ],
+);
+
+/** One transcribed word with start/end offsets in seconds (mirrors WordTiming). */
+export const wordTimingSchema = z.object({
+  word: z.string(),
+  start: z.number(),
+  end: z.number(),
+});
+export type WordTimingDto = z.infer<typeof wordTimingSchema>;
+
+export const misspokenWordSchema = z.object({
+  expected: z.string(),
+  heard: z.string(),
+});
+
+/** The read-aloud score as it goes on the wire (mirrors shared ReadAloudScore). */
+export const readAloudScoreSchema = z.object({
+  wordAccuracy: z.number(),
+  wer: z.number(),
+  missedWords: z.array(z.string()),
+  missaidWords: z.array(misspokenWordSchema),
+  extraWords: z.array(z.string()),
+  fluency: z.object({
+    wordCount: z.number().int().nonnegative(),
+    durationSeconds: z.number(),
+    speechRate: z.number(),
+    pauseCount: z.number().int().nonnegative(),
+    longestPauseSeconds: z.number(),
+    fillerCount: z.number().int().nonnegative(),
+    fillerRate: z.number(),
+  }),
+});
+export type ReadAloudScoreDto = z.infer<typeof readAloudScoreSchema>;
+
+/** Worker job payload for one item's transcription (dedicated `speech` queue). */
+export const speechJobSchema = z.object({
+  jobId: z.string().min(1),
+  attemptId: z.string().min(1),
+  itemIndex: z.number().int().nonnegative(),
+  audioUrl: z.string().min(1),
+  /** Owning college (audit/metering context); absent for platform-internal. */
+  collegeId: z.string().optional(),
+});
+export type SpeechJob = z.infer<typeof speechJobSchema>;
+
+// --- Authoring ---
+export const speakingItemUpsertSchema = z.object({
+  itemType: speakingItemTypeSchema.default("read_aloud"),
+  /** The text the student reads aloud (the WER reference). Required. */
+  referenceText: z.string().trim().min(1),
+  /** Optional on-screen instructions for the item. */
+  promptText: z.string().default(""),
+  /** Optional TTS-generated spoken prompt (Cloudinary URL; authoring-time). */
+  promptAudioUrl: z.string().default(""),
+  /** Fixed recording window in seconds. */
+  responseWindowSeconds: z.number().int().positive().max(300).default(60),
+});
+export type SpeakingItemUpsert = z.infer<typeof speakingItemUpsertSchema>;
+
+export const speakingAssessmentUpsertSchema = z.object({
+  title: z.string().trim().min(1),
+  description: z.string().default(""),
+  items: z.array(speakingItemUpsertSchema).default([]),
+  /** Attempt cap; 0 = unlimited. */
+  maxAttempts: z.number().int().min(0).default(1),
+  /** College-surface org-unit targeting (empty = whole college). */
+  orgUnitIds: z.array(z.string()).optional(),
+});
+export type SpeakingAssessmentUpsert = z.infer<
+  typeof speakingAssessmentUpsertSchema
+>;
+
+export const setSpeakingPublishSchema = z.object({ isPublished: z.boolean() });
+export type SetSpeakingPublish = z.infer<typeof setSpeakingPublishSchema>;
+
+// --- Admin projections ---
+export const speakingAssessmentListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  itemCount: z.number().int().nonnegative(),
+  isPublished: z.boolean(),
+  maxAttempts: z.number().int().nonnegative(),
+  orgUnitIds: z.array(z.string()),
+  createdAt: z.string(),
+});
+export type SpeakingAssessmentListItem = z.infer<
+  typeof speakingAssessmentListItemSchema
+>;
+export const speakingAssessmentListResponseSchema = z.object({
+  items: z.array(speakingAssessmentListItemSchema),
+});
+export type SpeakingAssessmentListResponse = z.infer<
+  typeof speakingAssessmentListResponseSchema
+>;
+
+export const speakingAssessmentItemDetailSchema = z.object({
+  itemType: speakingItemTypeSchema,
+  referenceText: z.string(),
+  promptText: z.string(),
+  promptAudioUrl: z.string(),
+  responseWindowSeconds: z.number().int().positive(),
+});
+export const speakingAssessmentDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  isPublished: z.boolean(),
+  maxAttempts: z.number().int().nonnegative(),
+  orgUnitIds: z.array(z.string()),
+  items: z.array(speakingAssessmentItemDetailSchema),
+});
+export type SpeakingAssessmentDetail = z.infer<
+  typeof speakingAssessmentDetailSchema
+>;
+
+// --- Student consumption ---
+export const speakingPlayListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  itemCount: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().nonnegative(),
+  attemptsUsed: z.number().int().nonnegative(),
+});
+export type SpeakingPlayListItem = z.infer<typeof speakingPlayListItemSchema>;
+export const speakingPlayListResponseSchema = z.object({
+  items: z.array(speakingPlayListItemSchema),
+});
+export type SpeakingPlayListResponse = z.infer<
+  typeof speakingPlayListResponseSchema
+>;
+
+/** One item as the student sees it — NO scoring internals (reference is on
+ * screen for read-aloud by design; it is the text to read). */
+export const speakingItemViewSchema = z.object({
+  index: z.number().int().nonnegative(),
+  itemType: speakingItemTypeSchema,
+  referenceText: z.string(),
+  promptText: z.string(),
+  promptAudioUrl: z.string(),
+  responseWindowSeconds: z.number().int().positive(),
+});
+export type SpeakingItemView = z.infer<typeof speakingItemViewSchema>;
+
+export const startSpeakingResponseSchema = z.object({
+  attemptId: z.string(),
+  assessmentTitle: z.string(),
+  status: speakingAttemptStatusSchema,
+  items: z.array(speakingItemViewSchema),
+});
+export type StartSpeakingResponse = z.infer<typeof startSpeakingResponseSchema>;
+
+export const submitSpeakingItemRequestSchema = z.object({
+  /** The Cloudinary URL of the recorded audio (only the URL reaches the API). */
+  audioUrl: z.string().min(1),
+});
+export type SubmitSpeakingItemRequest = z.infer<
+  typeof submitSpeakingItemRequestSchema
+>;
+
+/** Poll status/result for one item. `score` is null until transcription
+ * completes; a `failed` status is FINAL, not pending. */
+export const speakingItemResultSchema = z.object({
+  index: z.number().int().nonnegative(),
+  status: speechJobStatusSchema,
+  audioUrl: z.string(),
+  transcript: z.string().nullable(),
+  score: readAloudScoreSchema.nullable(),
+  error: z.string().nullable(),
+});
+export type SpeakingItemResult = z.infer<typeof speakingItemResultSchema>;
+
+export const speakingAttemptResultSchema = z.object({
+  attemptId: z.string(),
+  status: speakingAttemptStatusSchema,
+  /** True once every item is finalized (completed or failed). */
+  complete: z.boolean(),
+  items: z.array(speakingItemResultSchema),
+});
+export type SpeakingAttemptResult = z.infer<
+  typeof speakingAttemptResultSchema
+>;
+
+export const submitSpeakingItemResponseSchema = z.object({
+  index: z.number().int().nonnegative(),
+  status: speechJobStatusSchema,
+});
+export type SubmitSpeakingItemResponse = z.infer<
+  typeof submitSpeakingItemResponseSchema
 >;

@@ -29,6 +29,7 @@ import {
   essayGradingProcessor,
 } from "./essay-grading.processor.js";
 import { pacedAiProcessor } from "./paced-ai.processor.js";
+import { speechProcessor } from "./speech.processor.js";
 
 /** Logging no-op fallback for unrecognized `default`-queue jobs. */
 async function noop(job: Job): Promise<{ ok: true }> {
@@ -63,4 +64,6 @@ export const processors: Record<QueueName, Processor> = {
   [QueueName.AI_PACED]: pacedAiProcessor,
   // Rate-limited per-student coding-profile refresh (see worker index).
   [QueueName.CODING_REFRESH]: codingRefreshStudentProcessor,
+  // Concurrency-capped + rate-limited speech transcription (Communication A/B).
+  [QueueName.SPEECH]: speechProcessor,
 };

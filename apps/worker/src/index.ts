@@ -11,6 +11,7 @@ import {
   QUEUE_CONFIGS,
   QUEUE_NAME_VALUES,
   QueueName,
+  SPEECH_MAX_PER_MINUTE,
 } from "@codeapt/shared";
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
@@ -32,6 +33,8 @@ import "./models/ai-governor.model.js";
 import "./models/coding-profile.model.js";
 // Register the per-student AI credit ledger (metered at the gateway seam).
 import "./models/student-ai-credit.model.js";
+// Register the speaking models (read + written by the speech processor).
+import "./models/speaking.model.js";
 
 /** Per-queue BullMQ rate limiter (paced drains); other queues run unlimited. */
 function limiterFor(queue: QueueName): { max: number; duration: number } | null {
@@ -40,6 +43,11 @@ function limiterFor(queue: QueueName): { max: number; duration: number } | null 
   }
   if (queue === QueueName.CODING_REFRESH) {
     return { max: CODING_REFRESH_MAX_PER_MINUTE, duration: 60_000 };
+  }
+  if (queue === QueueName.SPEECH) {
+    // Burst guard beside the concurrency cap: ASR is CPU-heavy, so a stampede
+    // of submissions can't peg the shared box (see the queue arithmetic).
+    return { max: SPEECH_MAX_PER_MINUTE, duration: 60_000 };
   }
   return null;
 }
@@ -53,7 +61,9 @@ function start(connection: Redis): Worker[] {
     const limiter = limiterFor(queue);
     const worker = new Worker(queue, processors[queue], {
       connection,
-      concurrency: env.WORKER_CONCURRENCY,
+      // Per-queue override (the speech queue caps simultaneous ASR requests so
+      // transcription can't monopolise the box); otherwise WORKER_CONCURRENCY.
+      concurrency: config.concurrency ?? env.WORKER_CONCURRENCY,
       // Lock as long as the queue's timeout: a job that outlives this (a wedged
       // execution) is treated as stalled and reclaimed rather than stuck.
       lockDuration: config.timeoutSeconds * 1000,
