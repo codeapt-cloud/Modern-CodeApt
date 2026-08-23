@@ -12,6 +12,7 @@ import { GameKey } from "@codeapt/shared";
 
 import type { GameRenderer } from "./renderer-contract.js";
 import { BubbleMathRenderer } from "./renderers/BubbleMathRenderer.js";
+import { DoorKeyRenderer } from "./renderers/DoorKeyRenderer.js";
 import { GeoSudoRenderer } from "./renderers/GeoSudoRenderer.js";
 import { InductiveRenderer } from "./renderers/InductiveRenderer.js";
 import { MotionRenderer } from "./renderers/MotionRenderer.js";
@@ -25,7 +26,8 @@ export const GAME_RENDERERS: Partial<Record<GameKey, GameRenderer>> = {
   [GameKey.MOTION_CHALLENGE]: MotionRenderer,
   [GameKey.INDUCTIVE_REASONING]: InductiveRenderer,
   [GameKey.BUBBLE_MATH]: BubbleMathRenderer,
-  // door_key (interactive) is 7c — it uses the `probe` channel, not onSubmit.
+  // door_key is INTERACTIVE — it drives the `probe` channel, not onSubmit.
+  [GameKey.DOOR_KEY]: DoorKeyRenderer,
 };
 
 export function getGameRenderer(key: GameKey): GameRenderer | undefined {

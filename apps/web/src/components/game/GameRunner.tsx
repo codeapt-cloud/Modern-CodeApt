@@ -8,7 +8,7 @@ import type { StartGameSetResponse } from "@codeapt/shared";
 import { AlertTriangle, Eye } from "lucide-react";
 
 import { GAME_COPY } from "../../lib/game-copy.js";
-import { ladderMove, type AnswerFeedback } from "../../lib/game-runner.js";
+import { ladderMove, probeFor, type AnswerFeedback } from "../../lib/game-runner.js";
 import { useGameRunner } from "../../lib/use-game-runner.js";
 import { useProctoring } from "../../lib/use-proctoring.js";
 import { Alert } from "../ui/alert.js";
@@ -159,6 +159,9 @@ export function GameRunner({
             difficulty={item.difficulty}
             locked={locked}
             onSubmit={(submission) => r.answer(submission)}
+            // Interactive items (door_key) get the probe channel; one-shot
+            // renderers never do (the server sets `interactive` on the item).
+            probe={probeFor(item, r.probe)}
           />
         ) : (
           <p className="text-center text-ink-muted">

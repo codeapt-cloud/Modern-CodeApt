@@ -25,6 +25,16 @@ export function nextTick(remaining: number): number {
   return remaining <= 0 ? 0 : remaining - 1;
 }
 
+/** The shell hands a renderer the interactive `probe` channel IFF the item is
+ * interactive (door_key); a one-shot renderer must never receive it. Extracted
+ * so the gating is unit-testable without rendering. */
+export function probeFor<P>(
+  item: { interactive: boolean },
+  probe: P,
+): P | undefined {
+  return item.interactive ? probe : undefined;
+}
+
 /** Seconds → m:ss (clamped at zero) for the countdown display. */
 export function formatClock(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));

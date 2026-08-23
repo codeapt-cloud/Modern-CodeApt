@@ -172,7 +172,7 @@ describe("attempts / unstartable derivation", () => {
 });
 
 describe("renderer registry", () => {
-  it("resolves the _probe + five one-shot renderers; door_key (7c) stays unregistered", () => {
+  it("resolves the _probe + all six real renderers (door_key registered in 7c)", () => {
     expect(getGameRenderer(GameKey.PROBE)).toBe(ProbeRenderer);
     for (const key of [
       GameKey.GEO_SUDO,
@@ -180,10 +180,9 @@ describe("renderer registry", () => {
       GameKey.MOTION_CHALLENGE,
       GameKey.INDUCTIVE_REASONING,
       GameKey.BUBBLE_MATH,
+      GameKey.DOOR_KEY,
     ]) {
       expect(getGameRenderer(key)).toBeDefined();
     }
-    // door_key is interactive (7c) — the shell shows a calm fallback for now.
-    expect(getGameRenderer(GameKey.DOOR_KEY)).toBeUndefined();
   });
 });

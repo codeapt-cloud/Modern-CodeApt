@@ -24,6 +24,7 @@ import {
 } from "@codeapt/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { GameProbeResult } from "../components/game/renderer-contract.js";
 import { api, parseApiError } from "./api-client.js";
 import {
   clockFromItem,
@@ -259,6 +260,48 @@ export function useGameRunner({ start }: UseGameRunnerArgs) {
     void sendAnswer("expire", undefined);
   }, [sendAnswer]);
 
+  // INTERACTIVE (door_key, 7c): one move through the probe channel. Returns the
+  // redacted next view for the renderer to draw. On RESOLUTION we funnel through
+  // the SAME feedback/next path as one-shot answers — the server already shares
+  // finalizeItem (ladder/marks/score identical); here we only adapt the probe
+  // response's two display-only omissions (`correct` is derivable from outcome;
+  // `answeredDifficulty` is the current item's own difficulty).
+  const probe = useCallback(
+    async (action: unknown): Promise<GameProbeResult> => {
+      const attemptId = attemptRef.current;
+      const current = item;
+      if (!attemptId || !current) {
+        return { view: null, movesUsed: 0, resolved: false, outcome: null };
+      }
+      const res = await api.games.probe(
+        attemptId,
+        { itemIndex: current.itemIndex, action },
+        tokenRef.current,
+      );
+      if (res.resolved) {
+        await applyAnswerResponse({
+          itemIndex: res.itemIndex,
+          outcome: res.outcome ?? "wrong",
+          marksAwarded: res.marksAwarded ?? 0,
+          answeredDifficulty: current.difficulty,
+          gameScore: res.gameScore,
+          questionsCorrect: 0, // not shown in feedback
+          questionsAttempted: 0,
+          correct: res.outcome === "correct",
+          next: res.next,
+          gameComplete: res.gameComplete,
+        });
+      }
+      return {
+        view: res.view,
+        movesUsed: res.movesUsed,
+        resolved: res.resolved,
+        outcome: res.outcome,
+      };
+    },
+    [item, applyAnswerResponse],
+  );
+
   const recordWarning = useCallback(async (): Promise<void> => {
     const attemptId = attemptRef.current;
     if (!attemptId) return;
@@ -308,6 +351,7 @@ export function useGameRunner({ start }: UseGameRunnerArgs) {
     answer,
     skip,
     retry,
+    probe,
     continueAfterFeedback,
     finish,
     recordWarning,
