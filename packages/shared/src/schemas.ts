@@ -1356,6 +1356,13 @@ export const adminTopicUpsertSchema = z.discriminatedUnion("topicType", [
     ...adminTopicBase,
   }),
   z.object({
+    // A GAME topic carries no extra authoring fields — its GameSet is created +
+    // linked separately (platform game-set create with topicId), exactly as an
+    // EXAM topic's Exam is created and linked by Exam.topic.
+    topicType: z.literal(TopicType.GAME),
+    ...adminTopicBase,
+  }),
+  z.object({
     topicType: z.literal(TopicType.ESSAY),
     ...adminTopicBase,
     // Optional + nullable: an essay topic may exist with no prompt linked yet.
@@ -5359,6 +5366,10 @@ export const gameSetUpsertSchema = z
     selectionMode: gameSelectionModeSchema.default("fixed"),
     pickCount: z.number().int().min(1).max(100).optional(),
     orgUnitIds: z.array(z.string().min(1)).default([]),
+    /** PLATFORM authoring only: attach this set to a curriculum Topic (type
+     * GAME), making it a course-attached set (college stays null). A tenant
+     * (college) set must NOT set this — rejected at the service layer. */
+    topicId: z.string().min(1).optional(),
     /** Practice-mode: optional per-question timer (0/undefined = none). */
     perQuestionTimerSeconds: z.number().int().min(0).max(600).default(0),
     /** Practice-mode: reveal correctness after each answer. */
@@ -5407,6 +5418,8 @@ export const setGameSetPublishSchema = z.object({
 export const gameSetDetailSchema = z.object({
   id: z.string(),
   college: z.string().nullable(),
+  /** Curriculum Topic id for a course-attached set; null otherwise. */
+  topic: z.string().nullable(),
   title: z.string(),
   description: z.string(),
   isPublished: z.boolean(),
@@ -5438,9 +5451,42 @@ export const gameSetListResponseSchema = z.object({
 });
 export type GameSetListResponse = z.infer<typeof gameSetListResponseSchema>;
 
+/** Clone a PLATFORM game set into a college (tenant-owned, unpublished copy). */
+export const cloneGameSetRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+});
+export type CloneGameSetRequest = z.infer<typeof cloneGameSetRequestSchema>;
+
 // --- Play ---
 
 export const startGameSetRequestSchema = z.object({}).default({});
+
+/**
+ * A game set a STUDENT can play, as the play/discovery surface shows it. Carries
+ * only operator-safe fields — title, which games, clock/attempt info — never a
+ * seed or any per-game internal. `topicId` is set for course-attached sets
+ * (reached through the learn player's topic tree, like exam topics) and null for
+ * a college's own tenant-authored sets.
+ */
+export const gamePlayListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  gameKeys: z.array(gameKeySchema),
+  selectionMode: gameSelectionModeSchema,
+  totalGames: z.number().int(),
+  perQuestionTimerSeconds: z.number().int(),
+  attemptsUsed: z.number().int(),
+  /** 0 = unlimited. */
+  maxAttempts: z.number().int(),
+  topicId: z.string().nullable(),
+});
+export type GamePlayListItem = z.infer<typeof gamePlayListItemSchema>;
+
+export const gamePlayListResponseSchema = z.object({
+  items: z.array(gamePlayListItemSchema),
+});
+export type GamePlayListResponse = z.infer<typeof gamePlayListResponseSchema>;
 
 /**
  * A served game item, as the CLIENT sees it. `view` is the game-specific client

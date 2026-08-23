@@ -98,8 +98,11 @@ export const SUB_CAPABILITY_CATALOG: Record<
   [CollegeFeature.ATTENDANCE]: [],
   // Coding-profile tracking. Leaderboard arrives in Prompt 2; none in Prompt 1.
   [CollegeFeature.CODING_PROFILES]: [],
-  // Adaptive game rounds. Practice-mode sub-capabilities may arrive later.
-  [CollegeFeature.GAMING]: [],
+  // Adaptive game rounds. `authoring` = a college creating/cloning its OWN game
+  // sets (consuming a GRANTED course's games needs no feature — the grant is the
+  // authorization). `ai_build` is a Step-8 placeholder listed now so the
+  // super-admin console can expose it without a later schema change.
+  [CollegeFeature.GAMING]: ["authoring", "ai_build"],
 };
 
 /** Canonical flat key for a sub-capability toggle. */

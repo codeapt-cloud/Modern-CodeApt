@@ -16,6 +16,7 @@ import type { Request, Response } from "express";
 
 import { AppError } from "../errors/app-error.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { listGamesForUser } from "../services/game-list.service.js";
 import * as adminSets from "../services/game-set-admin.service.js";
 import * as engine from "../services/game.service.js";
 
@@ -37,6 +38,14 @@ function caller(req: Request): { userId?: string; token?: string } {
 }
 
 // --- Play ---
+
+/** Course-attached game sets reachable by the caller's enrollments (mirrors the
+ * `GET /exams` learn-player surface — items carry `topicId`). */
+export const listMyGamesController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(200).json(await listGamesForUser(requireUserId(req)));
+  },
+);
 
 export const startGameSetController = asyncHandler(
   async (req: Request, res: Response) => {

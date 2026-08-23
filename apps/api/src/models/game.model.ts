@@ -54,6 +54,11 @@ const gameSpecSchema = new Schema(
 const gameSetSchema = new Schema(
   {
     college: { type: Schema.Types.ObjectId, ref: "College", default: null },
+    // Present ONLY for course-attached sets (college == null): 1:1 with a
+    // curriculum Topic (type GAME), mirroring Exam.topic. Absent for tenant sets
+    // (college != null) and platform-internal sets. The (college != null &&
+    // topic != null) combination is rejected at the service layer.
+    topic: { type: Schema.Types.ObjectId, ref: "Topic" },
     title: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
     isPublished: { type: Boolean, default: false },
@@ -77,6 +82,13 @@ const gameSetSchema = new Schema(
 );
 gameSetSchema.index({ college: 1 });
 gameSetSchema.index({ college: 1, isPublished: 1 });
+// Preserve the 1:1 GameSet↔Topic guarantee for course-attached sets WITHOUT
+// constraining topic-less sets — unique only over docs whose `topic` is set.
+// Mirrors the Exam.topic partial unique index exactly.
+gameSetSchema.index(
+  { topic: 1 },
+  { unique: true, partialFilterExpression: { topic: { $type: "objectId" } } },
+);
 export type GameSet = InferSchemaType<typeof gameSetSchema>;
 export const GameSetModel = model("GameSet", gameSetSchema);
 

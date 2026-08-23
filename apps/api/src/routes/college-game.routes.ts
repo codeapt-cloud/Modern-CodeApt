@@ -9,8 +9,10 @@ import { CollegeFeature } from "@codeapt/shared";
 import { Router } from "express";
 
 import {
+  cloneCollegeGameSetController,
   createCollegeGameSetController,
   getCollegeGameSetController,
+  listAvailableCollegeGameSetsController,
   listCollegeGameSetsController,
   setCollegeGameSetPublishController,
   updateCollegeGameSetController,
@@ -35,12 +37,27 @@ const member = [
 // Authoring = member stack + faculty authority (scope enforced in the service).
 const author = [...member, requireFaculty];
 
+// --- Student: the published, in-target sets they can play (member) ---
+// Registered BEFORE the "/:gameSetId" GET so "available" isn't captured as an id.
+collegeGameRouter.get(
+  "/c/:collegeSlug/game-sets/available",
+  ...member,
+  listAvailableCollegeGameSetsController,
+);
+
 // --- Student: start a game-set attempt (member) ---
 collegeGameRouter.post(
   "/c/:collegeSlug/game-sets/:gameSetId/attempts",
   ...member,
   startAttemptRateLimiter,
   startGameSetController,
+);
+
+// --- Authoring: clone a PLATFORM set into this college (GAMING gated) ---
+collegeGameRouter.post(
+  "/c/:collegeSlug/game-sets/:sourceId/clone",
+  ...author,
+  cloneCollegeGameSetController,
 );
 
 // --- Authoring: list / create / get / update / publish ---

@@ -266,6 +266,8 @@ export const TopicType = {
   QUIZ: "quiz",
   EXAM: "exam",
   ESSAY: "essay",
+  /** A curriculum topic that maps 1:1 to a GameSet (mirrors EXAM). */
+  GAME: "game",
 } as const;
 export type TopicType = (typeof TopicType)[keyof typeof TopicType];
 export const TOPIC_TYPE_VALUES = Object.values(TopicType);

@@ -8,19 +8,30 @@
 import {
   GameErrorCode,
   GameSelectionMode,
+  collectDescendantUnitIds,
+  type CloneGameSetRequest,
+  type GamePlayListItem,
+  type GamePlayListResponse,
   type GameSetDetail,
   type GameSetListResponse,
   type GameSetUpdate,
   type GameSetUpsert,
+  type GameSpecInput,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
 import { createTenantScope, type TenantScope } from "../lib/tenant-scope.js";
-import { GameSetModel, type GameSet } from "../models/game.model.js";
+import {
+  GameSetAttemptCounterModel,
+  GameSetModel,
+  type GameSet,
+} from "../models/game.model.js";
 import { OrgUnitModel } from "../models/org-unit.model.js";
+import { UserModel } from "../models/user.model.js";
 import {
   buildGames,
+  toGamePlayListItem,
   toGameSetDetail,
   toGameSetListItem,
 } from "./game-set-admin.service.js";
@@ -105,6 +116,16 @@ export async function createCollegeGameSet(
   actor: GameActor,
   input: GameSetUpsert,
 ): Promise<GameSetDetail> {
+  // A tenant set can never carry a curriculum topic — that would be the invalid
+  // (college != null && topic != null) shape. Reject it here (the schema allows
+  // topicId only so the platform authoring surface can use it).
+  if (input.topicId) {
+    throw new AppError(
+      "A college game set cannot attach to a curriculum topic",
+      400,
+      GameErrorCode.INVALID_GAME_SET_SHAPE,
+    );
+  }
   const scope = createTenantScope(collegeId);
   const actorScope = await resolveActorScope(scope, actor);
   const orgUnits = await validateTargetUnits(scope, actorScope, input.orgUnitIds);
@@ -209,4 +230,94 @@ export async function setCollegeGameSetPublished(
   gs.isPublished = isPublished;
   await gs.save();
   return toGameSetDetail(gs);
+}
+
+/**
+ * Clone a PLATFORM game set into this college as an INDEPENDENT, tenant-owned,
+ * UNPUBLISHED copy (college = X, topic = null, no org-unit targeting). Mirrors
+ * duplicateCollegeExam: it copies the games array + settings and does NOT link
+ * back to the source. The source must be a platform set (college:null) — so a
+ * college can neither clone another college's private set (not found) nor, since
+ * the destination is always the resolved tenant, clone into a different college.
+ * This is AUTHORING → gated by CollegeFeature.GAMING at the route.
+ */
+export async function cloneGameSetIntoCollege(
+  collegeId: string,
+  actor: GameActor,
+  sourceId: string,
+  input: CloneGameSetRequest,
+): Promise<GameSetDetail> {
+  const scope = createTenantScope(collegeId);
+  await resolveActorScope(scope, actor); // ensure the actor is a valid operator
+  if (!Types.ObjectId.isValid(sourceId)) throw NOT_FOUND();
+  const source = await GameSetModel.findOne({ _id: sourceId, college: null });
+  if (!source) throw NOT_FOUND();
+
+  const gs = await GameSetModel.create(
+    scope.attach({
+      topic: null, // an independent tenant copy — never course-linked
+      title: input.title,
+      description: source.description,
+      games: buildGames(
+        source.games.map((g) => ({
+          gameKey: g.gameKey as GameSpecInput["gameKey"],
+          durationSeconds: g.durationSeconds,
+          allowSkip: g.allowSkip,
+          startingDifficulty:
+            g.startingDifficulty as GameSpecInput["startingDifficulty"],
+          maxQuestions: g.maxQuestions,
+          onWallHit: (g.onWallHit ?? "block") as GameSpecInput["onWallHit"],
+        })),
+      ),
+      selectionMode: source.selectionMode,
+      pickCount: source.pickCount ?? null,
+      orgUnits: [], // no targeting until the college sets it
+      perQuestionTimerSeconds: source.perQuestionTimerSeconds,
+      instantFeedback: source.instantFeedback,
+      maxAttempts: source.maxAttempts,
+      isPublished: false,
+    }),
+  );
+  return toGameSetDetail(gs);
+}
+
+/**
+ * The published, in-target tenant sets a STUDENT of this college can play.
+ * Org-unit targeting is resolved against the student's own unit (descendant
+ * math), mirroring assertCanPlayGameSet's tenant branch. Projection is
+ * operator-safe (toGamePlayListItem) — no seeds, no internals.
+ */
+export async function listPlayableCollegeGameSets(
+  collegeId: string,
+  userId: string,
+): Promise<GamePlayListResponse> {
+  const scope = createTenantScope(collegeId);
+  const sets = await GameSetModel.find(scope.filter({ isPublished: true })).sort({
+    createdAt: -1,
+    _id: -1,
+  });
+  if (sets.length === 0) return { items: [] };
+
+  const user = await UserModel.findById(userId).select("orgUnit");
+  const studentUnit = user?.orgUnit ? user.orgUnit.toString() : null;
+  const units = await OrgUnitModel.find(scope.filter()).select("_id parent");
+  const refs = units.map((u) => ({
+    id: u._id.toString(),
+    parentId: u.parent ? u.parent.toString() : null,
+  }));
+
+  const items: GamePlayListItem[] = [];
+  for (const s of sets) {
+    const targets = (s.orgUnits ?? []).map((u) => u.toString());
+    if (targets.length > 0) {
+      const allowed = new Set(collectDescendantUnitIds(refs, targets));
+      if (!studentUnit || !allowed.has(studentUnit)) continue;
+    }
+    const counter = await GameSetAttemptCounterModel.findOne({
+      user: new Types.ObjectId(userId),
+      gameSet: s._id,
+    });
+    items.push(toGamePlayListItem(s, counter?.attemptCount ?? 0));
+  }
+  return { items };
 }

@@ -4,6 +4,7 @@ import {
   Circle,
   ClipboardList,
   FileText,
+  Gamepad2,
   PenLine,
   PlayCircle,
   type LucideIcon,
@@ -18,6 +19,7 @@ const TYPE_ICON: Record<TopicType, LucideIcon> = {
   quiz: ClipboardList,
   exam: ClipboardList,
   essay: PenLine,
+  game: Gamepad2,
 };
 
 export function PlayerSidebar({

@@ -554,6 +554,14 @@ export const GameErrorCode = {
   NOT_ONE_SHOT: "NOT_ONE_SHOT",
   /** A probe action failed validation (malformed move payload). */
   INVALID_PROBE: "INVALID_PROBE",
+  /** A referenced curriculum topic (for a course-attached set) was not found. */
+  TOPIC_NOT_FOUND: "TOPIC_NOT_FOUND",
+  /** The referenced topic exists but is not a GAME topic. */
+  TOPIC_NOT_GAME: "TOPIC_NOT_GAME",
+  /** That GAME topic already owns a game set (1:1). */
+  TOPIC_ALREADY_ATTACHED: "TOPIC_ALREADY_ATTACHED",
+  /** Invalid GameSet shape — a tenant (college) set cannot also carry a topic. */
+  INVALID_GAME_SET_SHAPE: "INVALID_GAME_SET_SHAPE",
 } as const;
 export type GameErrorCode = (typeof GameErrorCode)[keyof typeof GameErrorCode];
 

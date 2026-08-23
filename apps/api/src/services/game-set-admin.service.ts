@@ -5,7 +5,11 @@
  * both surfaces produce an identical GameSetDetail shape.
  */
 import {
+  GameErrorCode,
   GameSelectionMode,
+  TopicType,
+  type GameKey,
+  type GamePlayListItem,
   type GameSetDetail,
   type GameSetListItem,
   type GameSetListResponse,
@@ -16,12 +20,64 @@ import {
 import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
+import { TopicModel } from "../models/curriculum.model.js";
 import { GameSetModel, type GameSet } from "../models/game.model.js";
 
 type GameSetDoc = HydratedDocument<GameSet>;
 
 const NOT_FOUND = (): AppError =>
   new AppError("Game set not found", 404, "GAME_SET_NOT_FOUND");
+
+/**
+ * Validate a curriculum topic for a COURSE-ATTACHED set: it must exist, be a
+ * GAME topic, and not already own a game set (the partial unique index is the
+ * hard backstop; this gives a clean error first). Returns its ObjectId.
+ */
+export async function resolveGameTopic(
+  topicId: string,
+): Promise<Types.ObjectId> {
+  if (!Types.ObjectId.isValid(topicId)) {
+    throw new AppError("Topic not found", 404, GameErrorCode.TOPIC_NOT_FOUND);
+  }
+  const topic = await TopicModel.findById(topicId).select("topicType");
+  if (!topic || topic.topicType !== TopicType.GAME) {
+    throw new AppError(
+      "A game set can only attach to a GAME topic",
+      400,
+      GameErrorCode.TOPIC_NOT_GAME,
+    );
+  }
+  const existing = await GameSetModel.findOne({ topic: topic._id }).select("_id");
+  if (existing) {
+    throw new AppError(
+      "That topic already has a game set",
+      409,
+      GameErrorCode.TOPIC_ALREADY_ATTACHED,
+    );
+  }
+  return topic._id;
+}
+
+/** Shared student-facing projection — operator-safe fields only (no seeds, no
+ * per-game internals). `attemptsUsed` comes from the per-user counter; `topicId`
+ * is set for course-attached sets, null for tenant-authored ones. */
+export function toGamePlayListItem(
+  gs: GameSetDoc,
+  attemptsUsed: number,
+): GamePlayListItem {
+  return {
+    id: gs._id.toString(),
+    title: gs.title,
+    description: gs.description,
+    gameKeys: gs.games.map((g) => g.gameKey as GameKey),
+    selectionMode: gs.selectionMode as GamePlayListItem["selectionMode"],
+    totalGames: gs.games.length,
+    perQuestionTimerSeconds: gs.perQuestionTimerSeconds,
+    attemptsUsed,
+    maxAttempts: gs.maxAttempts,
+    topicId: gs.topic ? gs.topic.toString() : null,
+  };
+}
 
 /** Assign `order` from array position — authoring order IS play order. */
 export function buildGames(specs: GameSpecInput[]): GameSet["games"] {
@@ -40,6 +96,7 @@ export function toGameSetDetail(gs: GameSetDoc): GameSetDetail {
   return {
     id: gs._id.toString(),
     college: gs.college ? gs.college.toString() : null,
+    topic: gs.topic ? gs.topic.toString() : null,
     title: gs.title,
     description: gs.description,
     isPublished: gs.isPublished,
@@ -93,8 +150,13 @@ async function requireAdminGameSet(id: string): Promise<GameSetDoc> {
 export async function createGameSet(
   input: GameSetUpsert,
 ): Promise<GameSetDetail> {
+  // Platform sets are college:null. An optional topicId makes it course-attached
+  // (still college:null) — validated to be a real, unused GAME topic. Omitting
+  // it yields a platform-internal set (topic:null).
+  const topic = input.topicId ? await resolveGameTopic(input.topicId) : null;
   const gs = await GameSetModel.create({
     college: null,
+    topic,
     title: input.title,
     description: input.description,
     games: buildGames(input.games),

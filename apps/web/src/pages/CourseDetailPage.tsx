@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ClipboardList,
   FileText,
+  Gamepad2,
   Lock,
   PenLine,
   PlayCircle,
@@ -42,6 +43,7 @@ const TOPIC_META: Record<TopicType, { icon: LucideIcon; label: string }> = {
   quiz: { icon: ClipboardList, label: "Quiz" },
   exam: { icon: ClipboardList, label: "Exam" },
   essay: { icon: PenLine, label: "Essay" },
+  game: { icon: Gamepad2, label: "Game" },
 };
 
 export function CourseDetailPage() {

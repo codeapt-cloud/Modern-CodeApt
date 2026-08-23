@@ -5,6 +5,7 @@
  */
 import { AuthErrorCode, TenantErrorCode } from "@codeapt/shared";
 import {
+  cloneGameSetRequestSchema,
   gameSetUpdateSchema,
   gameSetUpsertSchema,
   setGameSetPublishSchema,
@@ -98,6 +99,37 @@ export const setCollegeGameSetPublishController = asyncHandler(
           actor(req),
           req.params.gameSetId ?? "",
           isPublished,
+        ),
+      );
+  },
+);
+
+/** Clone a PLATFORM set into this college (authoring — GAMING gated at route). */
+export const cloneCollegeGameSetController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = cloneGameSetRequestSchema.parse(req.body);
+    res
+      .status(201)
+      .json(
+        await gameSets.cloneGameSetIntoCollege(
+          tenantId(req),
+          actor(req),
+          req.params.sourceId ?? "",
+          input,
+        ),
+      );
+  },
+);
+
+/** Student-facing: the published, in-target tenant sets they can play. */
+export const listAvailableCollegeGameSetsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await gameSets.listPlayableCollegeGameSets(
+          tenantId(req),
+          actor(req).userId,
         ),
       );
   },

@@ -22,9 +22,11 @@ import {
   GameOutcome,
   GameSelectionMode,
   GameSetAttemptStatus,
+  TopicType,
   applyLadderOutcome,
   collectDescendantUnitIds,
   createRng,
+  isCourseGranted,
   isPlatformAdmin,
   rngShuffle,
   type AdvanceGameResponse,
@@ -53,8 +55,15 @@ import {
   type GameSet,
   type GameSetAttempt,
 } from "../models/game.model.js";
+import { CollegeModel } from "../models/college.model.js";
+import {
+  EnrollmentModel,
+  ModuleModel,
+  TopicModel,
+} from "../models/curriculum.model.js";
 import { OrgUnitModel } from "../models/org-unit.model.js";
 import { UserModel } from "../models/user.model.js";
+import { normalizeEntitlements } from "./college.service.js";
 
 type GameSetDoc = HydratedDocument<GameSet>;
 type ParentDoc = HydratedDocument<GameSetAttempt>;
@@ -117,21 +126,33 @@ function itemExpired(item: GameAttempt["served"][number], now: Date): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Authorization FLOOR for playing a game set — mirrors `assertCanTakeExam`
- * (exam.service) exactly so the same class of IDOR cannot reappear.
+ * Authorization FLOOR for playing a game set — the full access matrix. Mirrors
+ * `assertCanTakeExam` (exam.service) and REUSES its predicates rather than
+ * reimplementing them. A GameSet is exactly one of three shapes:
  *
- *   - college set (`college != null`): must be a student of THAT college, the
- *     set published, and (if targeted) in a targeted org-unit — cross-tenant /
- *     unpublished collapse to a 404, cohort mismatch is a 403.
- *   - college null: PLATFORM ADMIN ONLY. There is no enrollment chain for game
- *     sets and no B2C purchase surface yet, so a null-college set is an internal
- *     /platform artifact; restrict it to platform admins until a real B2C
- *     entry point exists (at which point this branch grows the B2C rule).
+ *   1. TENANT (`college != null`, topic null): a college's own set. Must be a
+ *      student of THAT college, set published, and (if targeted) in a targeted
+ *      org-unit. Another college's member or a B2C user → 404; cohort mismatch
+ *      → 403. Byte-for-byte the exam tenant branch. GAMING is the college's own
+ *      authoring/consumption feature (gated at the /c/:slug route).
+ *   2. COURSE-ATTACHED (`college == null`, `topic != null`): platform content
+ *      mapped to a curriculum GAME topic. Reachable two ways:
+ *        - B2C learner: an active enrollment in the subject owning the topic —
+ *          the SAME inverted-`listExamsForUser` chain assertCanTakeExam uses
+ *          (Topic→Module→Subject→Enrollment.exists), only topicType == GAME.
+ *        - college student: their college has been GRANTED the course (subject)
+ *          owning the topic — reusing `isCourseGranted` over the college's
+ *          normalized entitlements. NOTE: this path does NOT require
+ *          CollegeFeature.GAMING — the grant IS the authorization; GAMING gates
+ *          AUTHORING, not consumption of granted platform content.
+ *   3. PLATFORM-INTERNAL (`college == null`, topic null): dev/probe sets.
+ *      Platform admins only; anyone else → 404.
  */
 export async function assertCanPlayGameSet(
   userId: string,
   gameSet: GameSetDoc,
 ): Promise<void> {
+  // 1. TENANT set.
   if (gameSet.college) {
     const user = await UserModel.findById(userId).select("college orgUnit");
     if (
@@ -158,6 +179,44 @@ export async function assertCanPlayGameSet(
     }
     return;
   }
+
+  // 2. COURSE-ATTACHED set (college == null, topic set).
+  if (gameSet.topic) {
+    // Resolve the owning subject via the exam engine's chain: an attached topic
+    // must be a GAME topic to be reachable, exactly as assertCanTakeExam
+    // requires topicType == EXAM.
+    const topic = await TopicModel.findById(gameSet.topic).select(
+      "module topicType",
+    );
+    const mod =
+      topic && topic.topicType === TopicType.GAME
+        ? await ModuleModel.findById(topic.module).select("subject")
+        : null;
+    if (!mod) throw NOT_FOUND();
+    const subjectId = mod.subject.toString();
+
+    // B2C: reuse listExamsForUser's predicate, inverted — an active enrollment
+    // in the owning subject.
+    const enrolled = await EnrollmentModel.exists({
+      user: userId,
+      subject: mod.subject,
+    });
+    if (enrolled) return;
+
+    // College student: their college has GRANTED the owning course. Reuse
+    // isCourseGranted over the college's normalized entitlements — the same
+    // grant check the tenant course surface uses. No GAMING feature required.
+    const user = await UserModel.findById(userId).select("college");
+    if (user?.college) {
+      const college = await CollegeModel.findById(user.college);
+      if (college && isCourseGranted(normalizeEntitlements(college), subjectId)) {
+        return;
+      }
+    }
+    throw NOT_FOUND();
+  }
+
+  // 3. PLATFORM-INTERNAL set (college == null, topic == null).
   const user = await UserModel.findById(userId).select("role");
   if (!user || !isPlatformAdmin(user.role)) throw NOT_FOUND();
 }

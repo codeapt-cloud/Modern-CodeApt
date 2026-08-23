@@ -17,6 +17,7 @@ import {
   answerGameItemController,
   explainGameItemController,
   finishGameSetController,
+  listMyGamesController,
   probeGameItemController,
   startGameSetController,
 } from "../controllers/game.controller.js";
@@ -35,6 +36,10 @@ export const gameRouter: Router = Router();
 const authed = [requireAuth, enforcePasswordChange];
 const engine = [optionalAuth];
 const adminGuard = [requireAuth, enforcePasswordChange, requireAdmin];
+
+// --- Student discovery: course-attached sets reachable by enrollment ---
+// Mirrors GET /exams; each item carries topicId for the learn player.
+gameRouter.get("/games", ...authed, listMyGamesController);
 
 // --- Student play start (requires login) ---
 gameRouter.post(

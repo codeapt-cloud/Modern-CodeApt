@@ -87,6 +87,8 @@ function toPayload(d: TopicDraft): AdminTopicUpsert {
       return { topicType: TopicType.QUIZ, ...base };
     case TopicType.EXAM:
       return { topicType: TopicType.EXAM, ...base };
+    case TopicType.GAME:
+      return { topicType: TopicType.GAME, ...base };
     case TopicType.ESSAY:
       // Picker-driven link (nullable) — a real EssayTopic or none.
       return {
