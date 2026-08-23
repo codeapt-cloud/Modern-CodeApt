@@ -73,3 +73,30 @@ export const GAME_REGISTRY: Record<GameKey, AnyGameModule> = {
 export function getGameModule(key: GameKey): AnyGameModule | undefined {
   return GAME_REGISTRY[key];
 }
+
+/** The metadata an authoring picker needs, per game — DERIVED from the registry
+ * so a newly-registered game appears with no picker change. `interactive` lets
+ * the picker surface door_key-only options (e.g. onWallHit) sensibly. */
+export interface GameCatalogEntry {
+  readonly key: GameKey;
+  readonly displayName: string;
+  readonly devOnly: boolean;
+  readonly interactive: boolean;
+  readonly allowSkipDefault: boolean;
+  readonly defaultClockSeconds: number;
+  readonly defaultItemSeconds: number | null;
+}
+
+/** Registry-driven authoring catalog. The picker filters out `devOnly` (so
+ * `_probe` never appears) and reads per-game defaults straight from the module. */
+export const GAME_CATALOG: GameCatalogEntry[] = Object.values(GAME_REGISTRY).map(
+  (m) => ({
+    key: m.key,
+    displayName: m.displayName,
+    devOnly: m.devOnly,
+    interactive: m.interactive,
+    allowSkipDefault: m.allowSkipDefault,
+    defaultClockSeconds: m.defaultClockSeconds,
+    defaultItemSeconds: m.defaultItemSeconds,
+  }),
+);

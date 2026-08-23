@@ -5358,6 +5358,11 @@ export type GameSpecInput = z.infer<typeof gameSpecSchema>;
  * (platform-admin sets ignore it). `pickCount` is required + validated for
  * random_n_of_pool.
  */
+/** How a set was first drafted — an operator audit trail only (never affects
+ * play/scoring/access). `ai_drafted` is sticky through manual edits. */
+export const gameSetSourceSchema = z.enum(["manual", "ai_drafted"]);
+export type GameSetSource = z.infer<typeof gameSetSourceSchema>;
+
 export const gameSetUpsertSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -5376,6 +5381,9 @@ export const gameSetUpsertSchema = z
     instantFeedback: z.boolean().default(false),
     /** Per-user attempt cap. 1 = single attempt (default); 0 = unlimited. */
     maxAttempts: z.number().int().min(0).max(100).default(1),
+    /** Audit trail only — set "ai_drafted" when creating from an AI draft.
+     * Never affects play/scoring/access, so it is not a security boundary. */
+    source: gameSetSourceSchema.default("manual"),
   })
   .superRefine((v, ctx) => {
     if (v.selectionMode === "random_n_of_pool") {
@@ -5432,6 +5440,7 @@ export const gameSetDetailSchema = z.object({
   perQuestionTimerSeconds: z.number().int(),
   instantFeedback: z.boolean(),
   maxAttempts: z.number().int(),
+  source: gameSetSourceSchema,
   createdAt: z.string(),
 });
 export type GameSetDetail = z.infer<typeof gameSetDetailSchema>;
@@ -5442,6 +5451,7 @@ export const gameSetListItemSchema = z.object({
   isPublished: z.boolean(),
   gameCount: z.number().int(),
   selectionMode: gameSelectionModeSchema,
+  source: gameSetSourceSchema,
   createdAt: z.string(),
 });
 export type GameSetListItem = z.infer<typeof gameSetListItemSchema>;
@@ -5450,6 +5460,26 @@ export const gameSetListResponseSchema = z.object({
   items: z.array(gameSetListItemSchema),
 });
 export type GameSetListResponse = z.infer<typeof gameSetListResponseSchema>;
+
+/** AI set-builder: a free-text brief in → a reviewable DRAFT config out. The AI
+ * composes CONFIGURATION ONLY (which games, timings, difficulty, counts); it
+ * never authors game content, which is seed-generated. */
+export const aiBuildGameSetRequestSchema = z.object({
+  brief: z.string().trim().min(1).max(4000),
+});
+export type AiBuildGameSetRequest = z.infer<typeof aiBuildGameSetRequestSchema>;
+
+/** Two-flag result (mirrors the AI challenge builder): `configured` = an LLM is
+ * available at all; `draft` null = the model returned nothing usable / credits
+ * exhausted → the operator composes manually. The draft, when present, has
+ * already been validated + clamped against the registry and gameSetUpsertSchema. */
+export const aiBuildGameSetResponseSchema = z.object({
+  configured: z.boolean(),
+  draft: gameSetUpsertSchema.nullable(),
+});
+export type AiBuildGameSetResponse = z.infer<
+  typeof aiBuildGameSetResponseSchema
+>;
 
 /** Clone a PLATFORM game set into a college (tenant-owned, unpublished copy). */
 export const cloneGameSetRequestSchema = z.object({

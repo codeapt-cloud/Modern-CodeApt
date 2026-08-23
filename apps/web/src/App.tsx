@@ -135,6 +135,14 @@ const AdminExamEditorPage = named(
   () => import("./pages/exam/admin/AdminExamEditorPage.js"),
   "AdminExamEditorPage",
 );
+const AdminGameSetsPage = named(
+  () => import("./pages/game/admin/AdminGameSetsPage.js"),
+  "AdminGameSetsPage",
+);
+const AdminGameSetEditorPage = named(
+  () => import("./pages/game/admin/AdminGameSetEditorPage.js"),
+  "AdminGameSetEditorPage",
+);
 const AdminCurriculumPage = named(
   () => import("./pages/curriculum/admin/AdminCurriculumPage.js"),
   "AdminCurriculumPage",
@@ -276,6 +284,14 @@ const CollegeExamsPage = named(
 const CollegeGamingPage = named(
   () => import("./pages/colleges/CollegeGamingPage.js"),
   "CollegeGamingPage",
+);
+const CollegeGameSetsPage = named(
+  () => import("./pages/colleges/CollegeGameSetsPage.js"),
+  "CollegeGameSetsPage",
+);
+const CollegeGameSetEditorPage = named(
+  () => import("./pages/colleges/CollegeGameSetEditorPage.js"),
+  "CollegeGameSetEditorPage",
 );
 const CollegeExamEditorPage = named(
   () => import("./pages/colleges/CollegeExamEditorPage.js"),
@@ -448,6 +464,15 @@ function CollegeExamsRoute() {
     <CollegeExamsPage />
   );
 }
+function CollegeGamingRoute() {
+  const { context } = useCollege();
+  // Students play (available list); operators author (manage list).
+  return context.membership.role === Role.STUDENT ? (
+    <CollegeGamingPage />
+  ) : (
+    <CollegeGameSetsPage />
+  );
+}
 function CollegeEssaysRoute() {
   const { context } = useCollege();
   return context.membership.role === Role.STUDENT ? (
@@ -526,6 +551,11 @@ export function App() {
               <Route
                 path="/admin/exams/:examId"
                 element={<AdminExamEditorPage />}
+              />
+              <Route path="/admin/game-sets" element={<AdminGameSetsPage />} />
+              <Route
+                path="/admin/game-sets/:gameSetId"
+                element={<AdminGameSetEditorPage />}
               />
               <Route
                 path="/admin/curriculum"
@@ -633,7 +663,11 @@ export function App() {
                 path="exams/:examId/analysis"
                 element={<CollegeExamAnalysisPage />}
               />
-              <Route path="gaming" element={<CollegeGamingPage />} />
+              <Route path="gaming" element={<CollegeGamingRoute />} />
+              <Route
+                path="gaming/:gameSetId"
+                element={<CollegeGameSetEditorPage />}
+              />
               <Route path="essays" element={<CollegeEssaysRoute />} />
               <Route
                 path="essays/:essayTopicId/results"

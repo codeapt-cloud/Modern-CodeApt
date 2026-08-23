@@ -48,6 +48,7 @@ export const AI_ACTION_WEIGHTS: Record<string, number> = {
   essay_feedback: 1, // on-demand essay AI feedback
   keywords: 1, // essay keyword generation
   ai_build: 4, // exam/section AI build — emits many questions, big output
+  game_build: 2, // game-set AI build — one pass, small config JSON (no content)
 };
 export const DEFAULT_AI_ACTION_WEIGHT = 1;
 

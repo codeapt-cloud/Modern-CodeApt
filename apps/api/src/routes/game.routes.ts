@@ -9,7 +9,9 @@ import { Router } from "express";
 
 import {
   advanceGameController,
+  adminAiBuildGameSetController,
   adminCreateGameSetController,
+  adminDeleteGameSetController,
   adminGetGameSetController,
   adminListGameSetsController,
   adminPublishGameSetController,
@@ -94,6 +96,12 @@ gameRouter.post(
 // --- Platform-admin authoring (requireAdmin) ---
 gameRouter.get("/admin/game-sets", ...adminGuard, adminListGameSetsController);
 gameRouter.post("/admin/game-sets", ...adminGuard, adminCreateGameSetController);
+// AI set-builder (draft only). Literal path — before the "/:gameSetId" routes.
+gameRouter.post(
+  "/admin/game-sets/ai-build",
+  ...adminGuard,
+  adminAiBuildGameSetController,
+);
 gameRouter.get(
   "/admin/game-sets/:gameSetId",
   ...adminGuard,
@@ -108,4 +116,9 @@ gameRouter.post(
   "/admin/game-sets/:gameSetId/publish",
   ...adminGuard,
   adminPublishGameSetController,
+);
+gameRouter.delete(
+  "/admin/game-sets/:gameSetId",
+  ...adminGuard,
+  adminDeleteGameSetController,
 );

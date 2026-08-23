@@ -5,6 +5,7 @@
  */
 import { AuthErrorCode } from "@codeapt/shared";
 import {
+  aiBuildGameSetRequestSchema,
   answerGameItemRequestSchema,
   explainGameItemRequestSchema,
   gameSetUpdateSchema,
@@ -17,6 +18,7 @@ import type { Request, Response } from "express";
 
 import { AppError } from "../errors/app-error.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { buildAiGameSetDraft } from "../services/game-ai.service.js";
 import { listGamesForUser } from "../services/game-list.service.js";
 import * as adminSets from "../services/game-set-admin.service.js";
 import * as engine from "../services/game.service.js";
@@ -176,5 +178,20 @@ export const adminPublishGameSetController = asyncHandler(
           isPublished,
         ),
       );
+  },
+);
+
+export const adminDeleteGameSetController = asyncHandler(
+  async (req: Request, res: Response) => {
+    await adminSets.deleteGameSet(req.params.gameSetId ?? "");
+    res.status(204).end();
+  },
+);
+
+/** Platform AI set-builder — not credit-metered (platform admins bypass). */
+export const adminAiBuildGameSetController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { brief } = aiBuildGameSetRequestSchema.parse(req.body);
+    res.status(200).json(await buildAiGameSetDraft(brief));
   },
 );

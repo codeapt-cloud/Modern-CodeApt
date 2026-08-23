@@ -21,7 +21,11 @@ import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
 import { TopicModel } from "../models/curriculum.model.js";
-import { GameSetModel, type GameSet } from "../models/game.model.js";
+import {
+  GameSetAttemptModel,
+  GameSetModel,
+  type GameSet,
+} from "../models/game.model.js";
 
 type GameSetDoc = HydratedDocument<GameSet>;
 
@@ -120,6 +124,7 @@ export function toGameSetDetail(gs: GameSetDoc): GameSetDetail {
     perQuestionTimerSeconds: gs.perQuestionTimerSeconds,
     instantFeedback: gs.instantFeedback,
     maxAttempts: gs.maxAttempts,
+    source: (gs.source ?? "manual") as GameSetDetail["source"],
     createdAt: (gs.createdAt ?? new Date()).toISOString(),
   };
 }
@@ -131,6 +136,7 @@ export function toGameSetListItem(gs: GameSetDoc): GameSetListItem {
     isPublished: gs.isPublished,
     gameCount: gs.games.length,
     selectionMode: gs.selectionMode as GameSetListItem["selectionMode"],
+    source: (gs.source ?? "manual") as GameSetListItem["source"],
     createdAt: (gs.createdAt ?? new Date()).toISOString(),
   };
 }
@@ -170,9 +176,57 @@ export async function createGameSet(
     perQuestionTimerSeconds: input.perQuestionTimerSeconds,
     instantFeedback: input.instantFeedback,
     maxAttempts: input.maxAttempts,
+    source: input.source, // audit trail — "ai_drafted" when created from a draft
     isPublished: false,
   });
   return toGameSetDetail(gs);
+}
+
+/**
+ * Publish-safety FLOOR, shared by the platform + college publish paths. A
+ * published set is visible to students, so it must be playable: at least one
+ * game, and a random_n_of_pool set's pickCount must not exceed its pool (an
+ * update can leave pickCount > games.length, which would try to pick more games
+ * than exist). Enforced in the SERVICE — a UI-only guard is not a guard.
+ */
+export function assertPublishable(gs: GameSetDoc): void {
+  if (gs.games.length === 0) {
+    throw new AppError(
+      "Add at least one game before publishing",
+      400,
+      GameErrorCode.GAME_SET_NOT_PUBLISHABLE,
+    );
+  }
+  if (
+    gs.selectionMode === GameSelectionMode.RANDOM_N_OF_POOL &&
+    (gs.pickCount ?? 0) > gs.games.length
+  ) {
+    throw new AppError(
+      "The pick count exceeds the number of games in the pool",
+      400,
+      GameErrorCode.GAME_SET_NOT_PUBLISHABLE,
+    );
+  }
+}
+
+/** Delete a set — only a DRAFT with no attempts, so play history is never
+ * orphaned and a live set can't vanish under students. */
+export async function assertDeletable(gs: GameSetDoc): Promise<void> {
+  if (gs.isPublished) {
+    throw new AppError(
+      "Unpublish the set before deleting it",
+      409,
+      GameErrorCode.GAME_SET_NOT_PUBLISHABLE,
+    );
+  }
+  const attempts = await GameSetAttemptModel.countDocuments({ gameSet: gs._id });
+  if (attempts > 0) {
+    throw new AppError(
+      "This set has play attempts and cannot be deleted",
+      409,
+      GameErrorCode.GAME_SET_NOT_PUBLISHABLE,
+    );
+  }
 }
 
 export async function updateGameSet(
@@ -204,16 +258,16 @@ export async function setGameSetPublished(
   isPublished: boolean,
 ): Promise<GameSetDetail> {
   const gs = await requireAdminGameSet(id);
-  if (isPublished && gs.games.length === 0) {
-    throw new AppError(
-      "Add at least one game before publishing",
-      400,
-      "GAME_SET_NOT_PUBLISHABLE",
-    );
-  }
+  if (isPublished) assertPublishable(gs);
   gs.isPublished = isPublished;
   await gs.save();
   return toGameSetDetail(gs);
+}
+
+export async function deleteGameSet(id: string): Promise<void> {
+  const gs = await requireAdminGameSet(id);
+  await assertDeletable(gs);
+  await GameSetModel.deleteOne({ _id: gs._id });
 }
 
 export async function listGameSets(): Promise<GameSetListResponse> {
@@ -226,4 +280,14 @@ export async function listGameSets(): Promise<GameSetListResponse> {
 
 export async function getGameSet(id: string): Promise<GameSetDetail> {
   return toGameSetDetail(await requireAdminGameSet(id));
+}
+
+/** Published PLATFORM sets a college may clone as a starting template. Read-only
+ * and content-free (list items only) — the clone itself is tenant-scoped. */
+export async function listGameSetTemplates(): Promise<GameSetListResponse> {
+  const sets = await GameSetModel.find({
+    college: null,
+    isPublished: true,
+  }).sort({ createdAt: -1, _id: -1 });
+  return { items: sets.map(toGameSetListItem) };
 }

@@ -9,11 +9,14 @@ import { CollegeFeature } from "@codeapt/shared";
 import { Router } from "express";
 
 import {
+  aiBuildCollegeGameSetController,
   cloneCollegeGameSetController,
   createCollegeGameSetController,
+  deleteCollegeGameSetController,
   getCollegeGameSetController,
   listAvailableCollegeGameSetsController,
   listCollegeGameSetsController,
+  listGameSetTemplatesController,
   setCollegeGameSetPublishController,
   updateCollegeGameSetController,
 } from "../controllers/college-game-admin.controller.js";
@@ -53,6 +56,23 @@ collegeGameRouter.post(
   startGameSetController,
 );
 
+// --- Authoring: browse published platform sets to clone as a template. Literal
+//     path registered before the "/:gameSetId" GET. ---
+collegeGameRouter.get(
+  "/c/:collegeSlug/game-sets/templates",
+  ...author,
+  listGameSetTemplatesController,
+);
+
+// --- Authoring: AI set-builder (GAMING.ai_build sub-capability). Literal path
+//     registered before the "/:sourceId" and "/:gameSetId" routes. ---
+collegeGameRouter.post(
+  "/c/:collegeSlug/game-sets/ai-build",
+  ...author,
+  requireFeature(CollegeFeature.GAMING, "ai_build"),
+  aiBuildCollegeGameSetController,
+);
+
 // --- Authoring: clone a PLATFORM set into this college (GAMING gated) ---
 collegeGameRouter.post(
   "/c/:collegeSlug/game-sets/:sourceId/clone",
@@ -85,4 +105,9 @@ collegeGameRouter.post(
   "/c/:collegeSlug/game-sets/:gameSetId/publish",
   ...author,
   setCollegeGameSetPublishController,
+);
+collegeGameRouter.delete(
+  "/c/:collegeSlug/game-sets/:gameSetId",
+  ...author,
+  deleteCollegeGameSetController,
 );

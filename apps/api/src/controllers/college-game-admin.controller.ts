@@ -5,6 +5,7 @@
  */
 import { AuthErrorCode, TenantErrorCode } from "@codeapt/shared";
 import {
+  aiBuildGameSetRequestSchema,
   cloneGameSetRequestSchema,
   gameSetUpdateSchema,
   gameSetUpsertSchema,
@@ -16,6 +17,8 @@ import { AppError } from "../errors/app-error.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import * as gameSets from "../services/college-game.service.js";
 import type { GameActor } from "../services/college-game.service.js";
+import { buildAiGameSetDraft } from "../services/game-ai.service.js";
+import { listGameSetTemplates } from "../services/game-set-admin.service.js";
 
 function tenantId(req: Request): string {
   if (!req.tenant) {
@@ -104,6 +107,13 @@ export const setCollegeGameSetPublishController = asyncHandler(
   },
 );
 
+/** Published platform sets this college may clone as a starting template. */
+export const listGameSetTemplatesController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(await listGameSetTemplates());
+  },
+);
+
 /** Clone a PLATFORM set into this college (authoring — GAMING gated at route). */
 export const cloneCollegeGameSetController = asyncHandler(
   async (req: Request, res: Response) => {
@@ -118,6 +128,28 @@ export const cloneCollegeGameSetController = asyncHandler(
           input,
         ),
       );
+  },
+);
+
+export const deleteCollegeGameSetController = asyncHandler(
+  async (req: Request, res: Response) => {
+    await gameSets.deleteCollegeGameSet(
+      tenantId(req),
+      actor(req),
+      req.params.gameSetId ?? "",
+    );
+    res.status(204).end();
+  },
+);
+
+/** College AI set-builder — credit-metered by collegeId; GAMING.ai_build gated
+ * at the route. Returns a reviewable draft ({configured, draft}). */
+export const aiBuildCollegeGameSetController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { brief } = aiBuildGameSetRequestSchema.parse(req.body);
+    res
+      .status(200)
+      .json(await buildAiGameSetDraft(brief, { collegeId: tenantId(req) }));
   },
 );
 

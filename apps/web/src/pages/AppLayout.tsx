@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Cpu,
   FilePenLine,
+  Gamepad2,
   Flame,
   FolderTree,
   IndianRupee,
@@ -82,6 +83,7 @@ export function AppLayout() {
           },
           { label: "Manage postings", to: "/admin/careers", icon: Settings },
           { label: "Manage exams", to: "/admin/exams", icon: FilePenLine },
+          { label: "Manage game sets", to: "/admin/game-sets", icon: Gamepad2 },
           {
             label: "Manage essay prompts",
             to: "/admin/essay-topics",

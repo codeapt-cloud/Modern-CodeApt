@@ -30,6 +30,8 @@ import {
 import { OrgUnitModel } from "../models/org-unit.model.js";
 import { UserModel } from "../models/user.model.js";
 import {
+  assertDeletable,
+  assertPublishable,
   buildGames,
   toGamePlayListItem,
   toGameSetDetail,
@@ -140,6 +142,7 @@ export async function createCollegeGameSet(
       perQuestionTimerSeconds: input.perQuestionTimerSeconds,
       instantFeedback: input.instantFeedback,
       maxAttempts: input.maxAttempts,
+      source: input.source, // audit trail — "ai_drafted" when from an AI draft
       isPublished: false,
     }),
   );
@@ -220,16 +223,23 @@ export async function setCollegeGameSetPublished(
   const actorScope = await resolveActorScope(scope, actor);
   const gs = await requireTenantGameSet(scope, id);
   assertManageable(gs, actorScope);
-  if (isPublished && gs.games.length === 0) {
-    throw new AppError(
-      "Add at least one game before publishing",
-      400,
-      GameErrorCode.GAME_SET_NOT_PUBLISHABLE,
-    );
-  }
+  if (isPublished) assertPublishable(gs); // games>0 AND pickCount<=pool (shared)
   gs.isPublished = isPublished;
   await gs.save();
   return toGameSetDetail(gs);
+}
+
+export async function deleteCollegeGameSet(
+  collegeId: string,
+  actor: GameActor,
+  id: string,
+): Promise<void> {
+  const scope = createTenantScope(collegeId);
+  const actorScope = await resolveActorScope(scope, actor);
+  const gs = await requireTenantGameSet(scope, id);
+  assertManageable(gs, actorScope);
+  await assertDeletable(gs); // draft only, no attempts (shared)
+  await GameSetModel.deleteOne(scope.filter({ _id: gs._id }));
 }
 
 /**

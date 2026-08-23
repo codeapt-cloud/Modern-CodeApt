@@ -205,11 +205,17 @@ import {
   type ExamListResponse,
   type ExamResult,
   type AdvanceGameResponse,
+  type AiBuildGameSetRequest,
+  type AiBuildGameSetResponse,
   type AnswerGameItemResponse,
   type BeginGameResponse,
   type GameExplanationResponse,
   type GamePlayListResponse,
   type GameResult,
+  type GameSetDetail,
+  type GameSetListResponse,
+  type GameSetUpdate,
+  type GameSetUpsert,
   type ProbeGameItemResponse,
   type RecordGameWarningResponse,
   type StartGameSetResponse,
@@ -3522,6 +3528,130 @@ export const api = {
       const { data } = await http.post<StartGameSetResponse>(
         `${API_PREFIX}/c/${slug}/game-sets/${gameSetId}/attempts`,
         { serve },
+      );
+      return data;
+    },
+    // --- Authoring (faculty/college_admin + GAMING feature) ---
+    list: async (slug: string): Promise<GameSetListResponse> => {
+      const { data } = await http.get<GameSetListResponse>(
+        `${API_PREFIX}/c/${slug}/game-sets`,
+      );
+      return data;
+    },
+    get: async (slug: string, id: string): Promise<GameSetDetail> => {
+      const { data } = await http.get<GameSetDetail>(
+        `${API_PREFIX}/c/${slug}/game-sets/${id}`,
+      );
+      return data;
+    },
+    create: async (slug: string, body: GameSetUpsert): Promise<GameSetDetail> => {
+      const { data } = await http.post<GameSetDetail>(
+        `${API_PREFIX}/c/${slug}/game-sets`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      slug: string,
+      id: string,
+      body: GameSetUpdate,
+    ): Promise<GameSetDetail> => {
+      const { data } = await http.patch<GameSetDetail>(
+        `${API_PREFIX}/c/${slug}/game-sets/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      slug: string,
+      id: string,
+      isPublished: boolean,
+    ): Promise<GameSetDetail> => {
+      const { data } = await http.post<GameSetDetail>(
+        `${API_PREFIX}/c/${slug}/game-sets/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (slug: string, id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/c/${slug}/game-sets/${id}`);
+    },
+    templates: async (slug: string): Promise<GameSetListResponse> => {
+      const { data } = await http.get<GameSetListResponse>(
+        `${API_PREFIX}/c/${slug}/game-sets/templates`,
+      );
+      return data;
+    },
+    clone: async (
+      slug: string,
+      sourceId: string,
+      title: string,
+    ): Promise<GameSetDetail> => {
+      const { data } = await http.post<GameSetDetail>(
+        `${API_PREFIX}/c/${slug}/game-sets/${sourceId}/clone`,
+        { title },
+      );
+      return data;
+    },
+    aiBuild: async (
+      slug: string,
+      body: AiBuildGameSetRequest,
+    ): Promise<AiBuildGameSetResponse> => {
+      const { data } = await http.post<AiBuildGameSetResponse>(
+        `${API_PREFIX}/c/${slug}/game-sets/ai-build`,
+        body,
+      );
+      return data;
+    },
+  },
+
+  /** Platform-admin GameSet authoring (college:null sets). */
+  adminGameSets: {
+    list: async (): Promise<GameSetListResponse> => {
+      const { data } = await http.get<GameSetListResponse>(
+        `${API_PREFIX}/admin/game-sets`,
+      );
+      return data;
+    },
+    get: async (id: string): Promise<GameSetDetail> => {
+      const { data } = await http.get<GameSetDetail>(
+        `${API_PREFIX}/admin/game-sets/${id}`,
+      );
+      return data;
+    },
+    create: async (body: GameSetUpsert): Promise<GameSetDetail> => {
+      const { data } = await http.post<GameSetDetail>(
+        `${API_PREFIX}/admin/game-sets`,
+        body,
+      );
+      return data;
+    },
+    update: async (id: string, body: GameSetUpdate): Promise<GameSetDetail> => {
+      const { data } = await http.patch<GameSetDetail>(
+        `${API_PREFIX}/admin/game-sets/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      id: string,
+      isPublished: boolean,
+    ): Promise<GameSetDetail> => {
+      const { data } = await http.post<GameSetDetail>(
+        `${API_PREFIX}/admin/game-sets/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/admin/game-sets/${id}`);
+    },
+    aiBuild: async (
+      body: AiBuildGameSetRequest,
+    ): Promise<AiBuildGameSetResponse> => {
+      const { data } = await http.post<AiBuildGameSetResponse>(
+        `${API_PREFIX}/admin/game-sets/ai-build`,
+        body,
       );
       return data;
     },

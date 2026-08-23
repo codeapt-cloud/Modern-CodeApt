@@ -77,6 +77,10 @@ const gameSetSchema = new Schema(
     instantFeedback: { type: Boolean, default: false },
     // Per-user attempt cap. 1 = single attempt (default); 0 = unlimited.
     maxAttempts: { type: Number, default: 1, min: 0 },
+    // Operator audit trail ONLY: how the set was first drafted. Never affects
+    // play, scoring, or access. `ai_drafted` is sticky — a human editing an AI
+    // draft leaves it ai_drafted (it records provenance, not current authorship).
+    source: { type: String, enum: ["manual", "ai_drafted"], default: "manual" },
   },
   { timestamps: true },
 );

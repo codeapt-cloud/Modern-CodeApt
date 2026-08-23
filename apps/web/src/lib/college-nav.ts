@@ -191,6 +191,16 @@ export const COLLEGE_SECTIONS: readonly CollegeSection[] = [
     comingSoon: false,
   },
   {
+    key: "gaming",
+    label: "Games",
+    description: "Author, clone, or AI-draft adaptive game sets for your cohorts.",
+    group: "Learning",
+    icon: "gaming",
+    path: "gaming",
+    feature: CollegeFeature.GAMING,
+    comingSoon: false,
+  },
+  {
     key: "essays",
     label: "Essays",
     description: "Author writing prompts and review submissions.",
