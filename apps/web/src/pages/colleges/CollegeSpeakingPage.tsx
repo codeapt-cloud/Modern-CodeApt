@@ -389,7 +389,10 @@ function SpeakingResults({
                 {it.error ?? "This recording could not be scored."}
               </Alert>
             )}
-            {it.score && (
+            {it.score && !("kind" in it.score) && (
+              // Read-aloud family (read_aloud / repeat / sentence_build /
+              // error_correct): the only union member with no `kind` tag. The
+              // per-type result UI for the other item types lands in Step 13.
               <div className="space-y-1 text-sm text-ink-secondary">
                 <div>
                   Word accuracy:{" "}
@@ -426,6 +429,11 @@ function SpeakingResults({
                   Accent and clarity are not scored.
                 </div>
               </div>
+            )}
+            {it.score && "kind" in it.score && (
+              // Other item types are scored server-side now; their detailed
+              // student result view is Step 13. Show an honest "scored" marker.
+              <div className="text-sm text-ink-secondary">Response recorded and scored.</div>
             )}
           </CardContent>
         </Card>

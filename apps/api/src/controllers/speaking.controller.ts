@@ -70,7 +70,7 @@ export const submitSpeakingItemController = asyncHandler(
       userId(req),
       req.params.attemptId ?? "",
       itemIndex,
-      body.audioUrl,
+      body,
     );
     res.status(202).json(data);
   },

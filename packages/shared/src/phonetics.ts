@@ -215,15 +215,23 @@ export function metaphone(input: string): string {
  * ("right"→"write"). Requires non-empty, equal Metaphone keys so unencodable
  * tokens are never silently collapsed.
  *
- * SCOPE: phonetic tolerance is a REFERENCE-COMPARISON concern. It only makes
- * sense for item types that score a transcript against a KNOWN reference string
- * (read_aloud, and later repeat / sentence_build / error_correct). It must NEVER
- * be applied to open-ended items (story retell, open topic) whose transcript has
- * no reference and is handed to an LLM — there is nothing to phonetically match
- * against, and "tolerance" would be meaningless there. This is enforced
- * structurally: `phoneticMatch` is called ONLY inside `wordErrorRate` (this
- * package), which requires a reference argument; the reference-less paths score
- * through entirely different code that never imports this function.
+ * SCOPE: phonetic tolerance is a REFERENCE-KNOWN SPOKEN concern — it forgives
+ * Whisper's homophone SPELLING when the student's articulation was correct. It
+ * is therefore in-scope only for spoken item types scored against a known
+ * reference: read_aloud / repeat / sentence_build / error_correct (via
+ * wordErrorRate), the missing-word presence check (fill_missing_word), and the
+ * answer-set match (short_answer / conversation / passage_question). It must
+ * NEVER reach:
+ *   - DICTATION, which is TYPED — a typed homophone IS the student's error, so
+ *     the dictation scorer runs the same alignment with phonetics OFF
+ *     (computeWordAccuracy(..., allowPhonetic=false)); there is no transcription
+ *     step to forgive.
+ *   - the LLM-JUDGED items (story_retell, open_topic), whose scoring has no
+ *     word-for-word reference — story_retell's paraphrase tolerance comes from
+ *     keyword overlap + number-word normalization, not phonetics.
+ * Enforced structurally: `phoneticMatch` is reached only from the scorers named
+ * above, and `computeWordAccuracy` gates it behind `allowPhonetic`; the typed
+ * and reference-less paths call it nowhere.
  */
 export function phoneticMatch(a: string, b: string): boolean {
   const ka = metaphone(a);

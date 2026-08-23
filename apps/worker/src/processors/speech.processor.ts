@@ -13,20 +13,100 @@
  */
 import {
   SpeakingAttemptStatus,
+  SpeakingItemType,
   SpeechJobStatus,
   JobStatus,
+  matchAnswerSet,
+  scoreFillMissingWord,
   scoreReadAloud,
   speechJobSchema,
+  type WordTiming,
 } from "@codeapt/shared";
 import type { Job, Processor } from "bullmq";
 
 import { AsrError, asrTranscribe } from "../lib/asr.js";
 import { logger } from "../lib/logger.js";
+import { gradeOpenTopic, gradeStoryRetell } from "../lib/speech-grader.js";
 import { ExecutionJobModel } from "../models/execution.model.js";
 import {
   SpeakingAssessmentModel,
   SpeakingAttemptModel,
 } from "../models/speaking.model.js";
+
+/** A stored speech item score — the union across item types is opaque here. */
+type SpeechScore = Record<string, unknown>;
+
+/** A single numeric headline for the ExecutionJob result summary, per type. */
+function scoreHeadline(score: SpeechScore): number {
+  for (const key of ["wordAccuracy", "score", "total"] as const) {
+    const v = score[key];
+    if (typeof v === "number") return v;
+  }
+  return 0;
+}
+
+/**
+ * Dispatch an item to its scorer. Reference-known spoken types reuse the
+ * phonetic-tolerant WER; answer-set types use the fuzzy+phonetic matcher; the
+ * two hybrid (LLM) types compute a deterministic floor and optionally blend an
+ * AI judgement (never phonetic). Dictation never reaches here — it is scored
+ * inline at submit (typed, no ASR).
+ */
+async function scoreSpeechItem(
+  item: {
+    itemType: string;
+    referenceText: string;
+    promptText: string;
+    missingWord: string;
+    answerSet: string[];
+    keyFacts: string[];
+  },
+  transcript: string,
+  words: readonly WordTiming[],
+  ctx: { collegeId?: string; userId?: string },
+): Promise<SpeechScore> {
+  switch (item.itemType) {
+    case SpeakingItemType.SHORT_ANSWER:
+    case SpeakingItemType.CONVERSATION:
+    case SpeakingItemType.PASSAGE_QUESTION:
+      return matchAnswerSet(
+        transcript,
+        item.answerSet,
+      ) as unknown as SpeechScore;
+    case SpeakingItemType.FILL_MISSING_WORD:
+      return scoreFillMissingWord(
+        item.referenceText,
+        item.missingWord,
+        transcript,
+        words,
+      ) as unknown as SpeechScore;
+    case SpeakingItemType.STORY_RETELL:
+      return (await gradeStoryRetell({
+        keyFacts: item.keyFacts,
+        transcript,
+        wordTimings: words,
+        collegeId: ctx.collegeId,
+        userId: ctx.userId,
+      })) as unknown as SpeechScore;
+    case SpeakingItemType.OPEN_TOPIC:
+      return (await gradeOpenTopic({
+        promptText: item.promptText,
+        transcript,
+        wordTimings: words,
+        collegeId: ctx.collegeId,
+        userId: ctx.userId,
+      })) as unknown as SpeechScore;
+    case SpeakingItemType.DICTATION:
+      throw new Error("dictation is scored inline at submit, not via ASR");
+    // read_aloud, repeat, sentence_build, error_correct — all word accuracy.
+    default:
+      return scoreReadAloud(
+        item.referenceText,
+        transcript,
+        words,
+      ) as unknown as SpeechScore;
+  }
+}
 
 const FINALIZED: readonly JobStatus[] = [JobStatus.COMPLETED, JobStatus.FAILED];
 
@@ -76,7 +156,8 @@ export const speechProcessor: Processor = async (
     );
     return { ok: false };
   }
-  const { jobId, attemptId, itemIndex, audioUrl } = parsed.data;
+  const { jobId, attemptId, itemIndex, audioUrl, collegeId, userId } =
+    parsed.data;
   const log = logger.child({ queue: "speech", jobId, attemptId, itemIndex });
 
   const doc = await ExecutionJobModel.findOne({ jobId });
@@ -108,8 +189,22 @@ export const speechProcessor: Processor = async (
     if (!item) throw new Error(`Speaking item ${itemIndex} not found`);
 
     const asr = await asrTranscribe({ audioUrl });
-    // Pure, deterministic scoring (WER + fluency) from @codeapt/shared.
-    const score = scoreReadAloud(item.referenceText, asr.transcript, asr.words);
+    // Dispatch to the item type's scorer (pure for the deterministic types; a
+    // deterministic floor + optional AI blend for story_retell / open_topic).
+    const score = await scoreSpeechItem(
+      {
+        itemType: item.itemType,
+        referenceText: item.referenceText ?? "",
+        promptText: item.promptText ?? "",
+        missingWord: item.missingWord ?? "",
+        answerSet: item.answerSet ?? [],
+        keyFacts: item.keyFacts ?? [],
+      },
+      asr.transcript,
+      asr.words,
+      { collegeId, userId },
+    );
+    const headline = scoreHeadline(score as SpeechScore);
 
     // Persist onto the attempt item, guarded so a duplicate delivery cannot
     // overwrite a finalized item.
@@ -133,14 +228,14 @@ export const speechProcessor: Processor = async (
       {
         $set: {
           status: JobStatus.COMPLETED,
-          result: { wordAccuracy: score.wordAccuracy, wer: score.wer },
+          result: { itemType: item.itemType, score: headline },
           error: null,
           completedAt: new Date(),
         },
       },
     );
     await rollUpAttempt(attemptId);
-    log.info({ wordAccuracy: score.wordAccuracy }, "transcription scored");
+    log.info({ itemType: item.itemType, score: headline }, "speech item scored");
     return { ok: true };
   } catch (err) {
     const message =

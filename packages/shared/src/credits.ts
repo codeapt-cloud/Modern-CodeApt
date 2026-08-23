@@ -50,6 +50,12 @@ export const AI_ACTION_WEIGHTS: Record<string, number> = {
   keywords: 1, // essay keyword generation
   ai_build: 4, // exam/section AI build — emits many questions, big output
   game_build: 2, // game-set AI build — one pass, small config JSON (no content)
+  speech_grading: 1, // one LLM pass per hybrid speech item (story_retell coherence
+  // OR open_topic relevance+grammar). Only items 9-11 spend AI; the other eight
+  // speech item types are fully deterministic and cost 0. A speaking attempt
+  // charges one unit PER hybrid item scored — a full CTS run (~3 open topics +
+  // up to 3 retells) is ~6 units worst case, an order of magnitude under a mock
+  // interview. The deterministic floor still scores the item if the reserve fails.
 };
 export const DEFAULT_AI_ACTION_WEIGHT = 1;
 

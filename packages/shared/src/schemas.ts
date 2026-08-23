@@ -5856,6 +5856,103 @@ export const readAloudScoreSchema = z.object({
 });
 export type ReadAloudScoreDto = z.infer<typeof readAloudScoreSchema>;
 
+const fluencyResultSchema = z.object({
+  wordCount: z.number().int().nonnegative(),
+  durationSeconds: z.number(),
+  speechRate: z.number(),
+  pauseCount: z.number().int().nonnegative(),
+  longestPauseSeconds: z.number(),
+  fillerCount: z.number().int().nonnegative(),
+  fillerRate: z.number(),
+});
+
+/** Answer-set match (short_answer / conversation / passage_question). */
+export const answerMatchScoreSchema = z.object({
+  kind: z.literal("answer_set"),
+  matched: z.boolean(),
+  matchedAnswer: z.string().nullable(),
+  score: z.number(),
+  transcript: z.string(),
+  acceptableAnswers: z.array(z.string()),
+});
+
+/** fill_missing_word: the gap word present AND the full sentence matched. */
+export const fillMissingWordScoreSchema = z.object({
+  kind: z.literal("fill_missing_word"),
+  missingWordPresent: z.boolean(),
+  sentenceAccuracy: z.number(),
+  score: z.number(),
+  missedWords: z.array(z.string()),
+  missaidWords: z.array(misspokenWordSchema),
+  extraWords: z.array(z.string()),
+  fluency: fluencyResultSchema,
+});
+
+/** dictation: TYPED string comparison, phonetic tolerance OFF. */
+export const dictationScoreSchema = z.object({
+  kind: z.literal("dictation"),
+  wordAccuracy: z.number(),
+  wer: z.number(),
+  exactMatches: z.number().int().nonnegative(),
+  missedWords: z.array(z.string()),
+  missaidWords: z.array(misspokenWordSchema),
+  extraWords: z.array(z.string()),
+  phoneticTolerant: z.literal(false),
+});
+
+const factCoverageSchema = z.object({
+  fact: z.string(),
+  covered: z.boolean(),
+  matchedTokens: z.number().int().nonnegative(),
+  requiredTokens: z.number().int().nonnegative(),
+});
+
+/** story_retell: key-fact coverage floor + optional AI coherence blend. */
+export const storyRetellScoreSchema = z.object({
+  kind: z.literal("story_retell"),
+  source: z.enum(["deterministic_floor", "ai_hybrid"]),
+  coverage: z.object({
+    covered: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+    ratio: z.number(),
+    facts: z.array(factCoverageSchema),
+  }),
+  coverageScore: z.number(),
+  aiCoherence: z.number().nullable(),
+  total: z.number(),
+  approximate: z.boolean(),
+  fluency: fluencyResultSchema,
+});
+
+/** open_topic: fluency floor + optional AI relevance/grammar (APPROXIMATE). */
+export const openTopicScoreSchema = z.object({
+  kind: z.literal("open_topic"),
+  source: z.enum(["deterministic_floor", "ai_hybrid"]),
+  fluency: fluencyResultSchema,
+  fluencyScore: z.number(),
+  latencySeconds: z.number(),
+  aiRelevance: z.number().nullable(),
+  aiGrammar: z.number().nullable(),
+  total: z.number(),
+  approximate: z.boolean(),
+});
+
+/**
+ * Any item's stored score. The read-aloud family (read_aloud / repeat /
+ * sentence_build / error_correct) all use readAloudScoreSchema (no `kind`); the
+ * rest are tagged by `kind`. Tagged variants are tried first so the untagged
+ * read-aloud shape is the fallback.
+ */
+export const speakingItemScoreSchema = z.union([
+  answerMatchScoreSchema,
+  fillMissingWordScoreSchema,
+  dictationScoreSchema,
+  storyRetellScoreSchema,
+  openTopicScoreSchema,
+  readAloudScoreSchema,
+]);
+export type SpeakingItemScoreDto = z.infer<typeof speakingItemScoreSchema>;
+
 /** Worker job payload for one item's transcription (dedicated `speech` queue). */
 export const speechJobSchema = z.object({
   jobId: z.string().min(1),
@@ -5864,21 +5961,102 @@ export const speechJobSchema = z.object({
   audioUrl: z.string().min(1),
   /** Owning college (audit/metering context); absent for platform-internal. */
   collegeId: z.string().optional(),
+  /** The student, for per-student AI metering of the hybrid (LLM) item types. */
+  userId: z.string().optional(),
 });
 export type SpeechJob = z.infer<typeof speechJobSchema>;
 
 // --- Authoring ---
-export const speakingItemUpsertSchema = z.object({
-  itemType: speakingItemTypeSchema.default("read_aloud"),
-  /** The text the student reads aloud (the WER reference). Required. */
-  referenceText: z.string().trim().min(1),
-  /** Optional on-screen instructions for the item. */
-  promptText: z.string().default(""),
-  /** Optional TTS-generated spoken prompt (Cloudinary URL; authoring-time). */
-  promptAudioUrl: z.string().default(""),
-  /** Fixed recording window in seconds. */
-  responseWindowSeconds: z.number().int().positive().max(300).default(60),
-});
+/** Item types whose scoring needs `referenceText` (the WER / typed reference). */
+const REFERENCE_TEXT_TYPES: readonly SpeakingItemType[] = [
+  "read_aloud",
+  "repeat",
+  "sentence_build",
+  "error_correct",
+  "fill_missing_word",
+  "dictation",
+];
+/** Item types scored against an authored answer set. */
+const ANSWER_SET_TYPES: readonly SpeakingItemType[] = [
+  "short_answer",
+  "conversation",
+  "passage_question",
+];
+
+/**
+ * One authored speaking item. The base object holds every possible field
+ * (optional) and a superRefine enforces the fields each item TYPE actually
+ * needs — so read_aloud still requires referenceText, an answer-set type
+ * requires answerSet, story_retell requires keyFacts, etc. Fields not relevant
+ * to a type are simply left at their defaults (no per-type object churn on the
+ * wire — the item type is the discriminator).
+ */
+export const speakingItemUpsertSchema = z
+  .object({
+    itemType: speakingItemTypeSchema.default("read_aloud"),
+    /** WER / typed reference (read_aloud, repeat, sentence_build,
+     *  error_correct, fill_missing_word full sentence, dictation). */
+    referenceText: z.string().trim().default(""),
+    /** On-screen instructions / the topic prompt (required for open_topic). */
+    promptText: z.string().default(""),
+    /** TTS-generated spoken prompt (Cloudinary URL; authoring-time). */
+    promptAudioUrl: z.string().default(""),
+    /** Listening stimulus audio (conversation / passage_question / story_retell). */
+    stimulusAudioUrl: z.string().default(""),
+    /** How many times the stimulus may be played; 0 = unlimited (Step-9 precedent). */
+    stimulusPlayLimit: z.number().int().min(0).default(0),
+    /** Acceptable answers (short_answer / conversation / passage_question). */
+    answerSet: z.array(z.string().trim().min(1)).default([]),
+    /** The blanked word (fill_missing_word). */
+    missingWord: z.string().trim().default(""),
+    /** Authored key facts a retell should cover (story_retell). */
+    keyFacts: z.array(z.string().trim().min(1)).default([]),
+    /** Optional preset-composition grouping label (e.g. "Section B"). */
+    section: z.string().default(""),
+    /** Fixed recording window in seconds. */
+    responseWindowSeconds: z.number().int().positive().max(300).default(60),
+  })
+  .superRefine((item, ctx) => {
+    const need = (cond: boolean, path: string, message: string) => {
+      if (!cond)
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+    };
+    if (REFERENCE_TEXT_TYPES.includes(item.itemType)) {
+      need(
+        item.referenceText.trim().length > 0,
+        "referenceText",
+        `${item.itemType} requires referenceText`,
+      );
+    }
+    if (ANSWER_SET_TYPES.includes(item.itemType)) {
+      need(
+        item.answerSet.length > 0,
+        "answerSet",
+        `${item.itemType} requires at least one acceptable answer`,
+      );
+    }
+    if (item.itemType === "fill_missing_word") {
+      need(
+        item.missingWord.trim().length > 0,
+        "missingWord",
+        "fill_missing_word requires missingWord",
+      );
+    }
+    if (item.itemType === "story_retell") {
+      need(
+        item.keyFacts.length > 0,
+        "keyFacts",
+        "story_retell requires at least one key fact",
+      );
+    }
+    if (item.itemType === "open_topic") {
+      need(
+        item.promptText.trim().length > 0,
+        "promptText",
+        "open_topic requires a topic prompt (promptText)",
+      );
+    }
+  });
 export type SpeakingItemUpsert = z.infer<typeof speakingItemUpsertSchema>;
 
 export const speakingAssessmentUpsertSchema = z.object({
@@ -5922,6 +6100,12 @@ export const speakingAssessmentItemDetailSchema = z.object({
   referenceText: z.string(),
   promptText: z.string(),
   promptAudioUrl: z.string(),
+  stimulusAudioUrl: z.string(),
+  stimulusPlayLimit: z.number().int().nonnegative(),
+  answerSet: z.array(z.string()),
+  missingWord: z.string(),
+  keyFacts: z.array(z.string()),
+  section: z.string(),
   responseWindowSeconds: z.number().int().positive(),
 });
 export const speakingAssessmentDetailSchema = z.object({
@@ -5954,14 +6138,25 @@ export type SpeakingPlayListResponse = z.infer<
   typeof speakingPlayListResponseSchema
 >;
 
-/** One item as the student sees it — NO scoring internals (reference is on
- * screen for read-aloud by design; it is the text to read). */
+/**
+ * One item as the student sees it — NO scoring internals. `referenceText` is
+ * populated ONLY for read_aloud, where the text on screen IS the task; for every
+ * other type (repeat / sentence_build / dictation / error_correct /
+ * fill_missing_word / the answer-set + LLM types) the reference, answer set,
+ * key facts and missing word are WITHHELD — the student hears the stimulus and
+ * reproduces it, so showing the text would defeat the item. The service is
+ * responsible for blanking those fields (see itemViews).
+ */
 export const speakingItemViewSchema = z.object({
   index: z.number().int().nonnegative(),
   itemType: speakingItemTypeSchema,
+  /** Present only for read_aloud; "" for every other type. */
   referenceText: z.string(),
   promptText: z.string(),
   promptAudioUrl: z.string(),
+  stimulusAudioUrl: z.string(),
+  stimulusPlayLimit: z.number().int().nonnegative(),
+  section: z.string(),
   responseWindowSeconds: z.number().int().positive(),
 });
 export type SpeakingItemView = z.infer<typeof speakingItemViewSchema>;
@@ -5974,10 +6169,17 @@ export const startSpeakingResponseSchema = z.object({
 });
 export type StartSpeakingResponse = z.infer<typeof startSpeakingResponseSchema>;
 
-export const submitSpeakingItemRequestSchema = z.object({
-  /** The Cloudinary URL of the recorded audio (only the URL reaches the API). */
-  audioUrl: z.string().min(1),
-});
+export const submitSpeakingItemRequestSchema = z
+  .object({
+    /** Cloudinary URL of the recorded audio (spoken items; only the URL reaches
+     *  the API). Absent for dictation. */
+    audioUrl: z.string().min(1).optional(),
+    /** The TYPED sentence for a dictation item — scored inline, no ASR. */
+    text: z.string().optional(),
+  })
+  .refine((b) => Boolean(b.audioUrl) || typeof b.text === "string", {
+    message: "provide audioUrl (spoken items) or text (dictation)",
+  });
 export type SubmitSpeakingItemRequest = z.infer<
   typeof submitSpeakingItemRequestSchema
 >;
@@ -5986,10 +6188,12 @@ export type SubmitSpeakingItemRequest = z.infer<
  * completes; a `failed` status is FINAL, not pending. */
 export const speakingItemResultSchema = z.object({
   index: z.number().int().nonnegative(),
+  itemType: speakingItemTypeSchema,
   status: speechJobStatusSchema,
   audioUrl: z.string(),
   transcript: z.string().nullable(),
-  score: readAloudScoreSchema.nullable(),
+  /** The item's score in its type's shape (union across all item types). */
+  score: speakingItemScoreSchema.nullable(),
   error: z.string().nullable(),
 });
 export type SpeakingItemResult = z.infer<typeof speakingItemResultSchema>;

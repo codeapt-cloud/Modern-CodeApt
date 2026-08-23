@@ -542,14 +542,32 @@ export const ESSAY_GRADING_STATUS_VALUES = Object.values(EssayGradingStatus);
 // ---------------------------------------------------------------------------
 
 /**
- * Speaking item types. Step 10 builds ONLY `read_aloud` (the whole spine
- * validated on one item type, like `_probe` for the game engine). The other ten
- * CTS item types (repeat, sentence build, dictation, story retell, open topic,
- * etc.) are Step 11 — the enum is a const object so they extend it without a
- * schema migration.
+ * Speaking item types. Step 10 built ONLY `read_aloud` (the whole spine
+ * validated on one item type, like `_probe` for the game engine). Step 12 adds
+ * the rest of the Communication catalogue. The enum is a const object so new
+ * types extend it without a schema migration.
+ *
+ * Scoring family of each (see packages/shared/src/speech.ts):
+ *   - Reference-known SPOKEN, phonetic-tolerant WER: read_aloud, repeat,
+ *     sentence_build, error_correct, fill_missing_word.
+ *   - Answer-set match (fuzzy + phonetic): short_answer, conversation,
+ *     passage_question.
+ *   - TYPED, phonetics OFF: dictation.
+ *   - LLM-judged HYBRID (deterministic floor + AI blend): story_retell,
+ *     open_topic. (role_play is DEFERRED — see the Step 12 report.)
  */
 export const SpeakingItemType = {
   READ_ALOUD: "read_aloud",
+  REPEAT: "repeat",
+  SHORT_ANSWER: "short_answer",
+  SENTENCE_BUILD: "sentence_build",
+  CONVERSATION: "conversation",
+  PASSAGE_QUESTION: "passage_question",
+  FILL_MISSING_WORD: "fill_missing_word",
+  ERROR_CORRECT: "error_correct",
+  DICTATION: "dictation",
+  STORY_RETELL: "story_retell",
+  OPEN_TOPIC: "open_topic",
 } as const;
 export type SpeakingItemType =
   (typeof SpeakingItemType)[keyof typeof SpeakingItemType];

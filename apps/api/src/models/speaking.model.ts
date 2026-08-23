@@ -5,8 +5,10 @@
  *   - course-attached  (college null, topic set),
  *   - platform-internal (college null, topic null) —
  * with org-unit targeting + a draft→publish gate, exactly like gaming. Step 10
- * ships ONE item type (read_aloud); items[] + the embedded score are shaped so
- * Step 11's item types extend them without a migration.
+ * shipped ONE item type (read_aloud); Step 12 adds the rest. items[] + the
+ * embedded score (Mixed) were shaped to extend without a migration — per-type
+ * required fields are enforced at the zod (schema) layer, so the mongoose item
+ * keeps every content field optional.
  *
  * Audio is student PII: SpeakingAttempt.items[].audioUrl is a hosted Cloudinary
  * URL. Retention position (documented, enforced by ops + the delete path): audio
@@ -31,12 +33,24 @@ const speakingItemSchema = new Schema(
       enum: SPEAKING_ITEM_TYPE_VALUES,
       default: SpeakingItemType.READ_ALOUD,
     },
-    // The text the student reads aloud (the WER reference). Server-side only in
-    // spirit, but for read-aloud it IS the on-screen text, so it's shown.
-    referenceText: { type: String, required: true },
+    // WER / typed reference (read_aloud shows it on screen; other reference
+    // types hear it). Optional at the model layer — the zod schema enforces
+    // which item types actually require it.
+    referenceText: { type: String, default: "" },
     promptText: { type: String, default: "" },
     // TTS-generated spoken prompt (Cloudinary URL), produced at authoring time.
     promptAudioUrl: { type: String, default: "" },
+    // Listening stimulus audio (conversation / passage_question / story_retell).
+    stimulusAudioUrl: { type: String, default: "" },
+    stimulusPlayLimit: { type: Number, default: 0, min: 0 },
+    // Acceptable answers (short_answer / conversation / passage_question).
+    answerSet: { type: [String], default: [] },
+    // The blanked word (fill_missing_word).
+    missingWord: { type: String, default: "" },
+    // Authored key facts a retell should cover (story_retell).
+    keyFacts: { type: [String], default: [] },
+    // Preset-composition grouping label (e.g. "Section B").
+    section: { type: String, default: "" },
     responseWindowSeconds: { type: Number, default: 60, min: 1, max: 300 },
     order: { type: Number, default: 0 },
   },

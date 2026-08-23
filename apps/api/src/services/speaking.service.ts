@@ -20,19 +20,23 @@ import {
   JobStatus,
   QueueName,
   SpeakingAttemptStatus,
+  SpeakingItemType,
   SpeechJobStatus,
   SpeakingErrorCode,
   collectDescendantUnitIds,
   isCourseGranted,
   isPlatformAdmin,
-  type ReadAloudScoreDto,
+  scoreDictation,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentListResponse,
   type SpeakingAssessmentUpsert,
   type SpeakingAttemptResult,
   type SpeakingItemResult,
+  type SpeakingItemScoreDto,
+  type SpeakingItemType as SpeakingItemTypeName,
   type SpeakingPlayListResponse,
   type StartSpeakingResponse,
+  type SubmitSpeakingItemRequest,
   type SubmitSpeakingItemResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
@@ -144,9 +148,17 @@ function itemViews(a: AssessmentDoc): StartSpeakingResponse["items"] {
   return a.items.map((it, index) => ({
     index,
     itemType: it.itemType,
-    referenceText: it.referenceText,
+    // referenceText is the TASK only for read_aloud (the text on screen). For
+    // every other reference type the student hears it and reproduces it, so
+    // showing the text would defeat the item — withhold it. answerSet / keyFacts
+    // / missingWord are never exposed to the student view at all.
+    referenceText:
+      it.itemType === SpeakingItemType.READ_ALOUD ? it.referenceText : "",
     promptText: it.promptText ?? "",
     promptAudioUrl: it.promptAudioUrl ?? "",
+    stimulusAudioUrl: it.stimulusAudioUrl ?? "",
+    stimulusPlayLimit: it.stimulusPlayLimit ?? 0,
+    section: it.section ?? "",
     responseWindowSeconds: it.responseWindowSeconds ?? 60,
   }));
 }
@@ -226,27 +238,30 @@ async function loadOwnedAttempt(
 }
 
 /**
- * Submit one item's recorded audio URL. Creates the ExecutionJob + enqueues a
- * transcription on the `speech` queue. No re-record: a completed/processing item
- * is refused. Returns fast (queued) — the score arrives asynchronously.
+ * Submit one item's response. For SPOKEN items this stores the recorded audio
+ * URL, creates the ExecutionJob and enqueues a transcription on the `speech`
+ * queue (the score arrives asynchronously). For DICTATION — which is TYPED, with
+ * NO ASR — the typed text is scored INLINE here (string comparison, phonetics
+ * off) and the item is finalized COMPLETED in the same request; nothing is
+ * queued. No re-record either way: an already-submitted item is refused.
  */
 export async function submitSpeakingItem(
   userId: string,
   attemptId: string,
   itemIndex: number,
-  audioUrl: string,
+  body: SubmitSpeakingItemRequest,
 ): Promise<SubmitSpeakingItemResponse> {
   const attempt = await loadOwnedAttempt(userId, attemptId);
-  const item = attempt.items[itemIndex];
-  if (!item) {
-    throw new AppError(
-      "Item not found",
-      404,
-      SpeakingErrorCode.ITEM_NOT_FOUND,
-    );
+  const attemptItem = attempt.items[itemIndex];
+  if (!attemptItem) {
+    throw new AppError("Item not found", 404, SpeakingErrorCode.ITEM_NOT_FOUND);
   }
-  // One recording per item: only a not-yet-recorded item may be submitted.
-  if (item.audioUrl && item.audioUrl.length > 0) {
+  // One response per item: refuse if already recorded (spoken) or finalized
+  // (dictation completes inline, so its status flips to COMPLETED on submit).
+  if (
+    (attemptItem.audioUrl && attemptItem.audioUrl.length > 0) ||
+    attemptItem.jobStatus === SpeechJobStatus.COMPLETED
+  ) {
     throw new AppError(
       "This item was already submitted",
       409,
@@ -254,6 +269,47 @@ export async function submitSpeakingItem(
     );
   }
 
+  // The authored item carries the type + reference; the attempt item does not.
+  const assessment = await SpeakingAssessmentModel.findById(attempt.assessment);
+  const authored = assessment?.items[itemIndex];
+  if (!authored) {
+    throw new AppError("Item not found", 404, SpeakingErrorCode.ITEM_NOT_FOUND);
+  }
+
+  // --- DICTATION: typed, scored inline, no ASR / no queue. ---
+  if (authored.itemType === SpeakingItemType.DICTATION) {
+    if (typeof body.text !== "string") {
+      throw new AppError(
+        "Dictation requires typed text",
+        400,
+        SpeakingErrorCode.ITEM_NOT_FOUND,
+      );
+    }
+    const score = scoreDictation(authored.referenceText, body.text);
+    await SpeakingAttemptModel.updateOne(
+      { _id: attempt._id },
+      {
+        $set: {
+          [`items.${itemIndex}.transcript`]: body.text,
+          [`items.${itemIndex}.subScores`]: score,
+          [`items.${itemIndex}.jobStatus`]: SpeechJobStatus.COMPLETED,
+          status: SpeakingAttemptStatus.SUBMITTED,
+          submittedAt: new Date(),
+        },
+      },
+    );
+    return { index: itemIndex, status: SpeechJobStatus.COMPLETED };
+  }
+
+  // --- SPOKEN items: enqueue a transcription job. ---
+  const audioUrl = body.audioUrl;
+  if (!audioUrl) {
+    throw new AppError(
+      "This item requires a recorded audio URL",
+      400,
+      SpeakingErrorCode.ITEM_NOT_FOUND,
+    );
+  }
   const jobId = randomUUID();
   await ExecutionJobModel.create({
     jobId,
@@ -281,6 +337,7 @@ export async function submitSpeakingItem(
     itemIndex,
     audioUrl,
     collegeId: attempt.college ? attempt.college.toString() : undefined,
+    userId,
   });
 
   return { index: itemIndex, status: SpeechJobStatus.QUEUED };
@@ -288,13 +345,15 @@ export async function submitSpeakingItem(
 
 function toItemResult(
   it: SpeakingAttempt["items"][number],
+  itemType: SpeakingItemTypeName,
 ): SpeakingItemResult {
   return {
     index: it.itemIndex,
+    itemType,
     status: it.jobStatus as SpeechJobStatus,
     audioUrl: it.audioUrl ?? "",
     transcript: it.transcript ? it.transcript : null,
-    score: (it.subScores as ReadAloudScoreDto | null) ?? null,
+    score: (it.subScores as SpeakingItemScoreDto | null) ?? null,
     error: it.error ? it.error : null,
   };
 }
@@ -304,11 +363,16 @@ export async function getSpeakingAttemptResult(
   attemptId: string,
 ): Promise<SpeakingAttemptResult> {
   const attempt = await loadOwnedAttempt(userId, attemptId);
-  // "complete" = every RECORDED item is finalized. Items never recorded (no
-  // audioUrl) don't block completion — a student may leave an item unrecorded.
+  // The item TYPE lives on the authored assessment, not the attempt item.
+  const assessment = await SpeakingAssessmentModel.findById(attempt.assessment);
+  const typeAt = (index: number): SpeakingItemTypeName =>
+    (assessment?.items[index]?.itemType as SpeakingItemTypeName) ??
+    SpeakingItemType.READ_ALOUD;
+  // "complete" = every RECORDED/answered item is finalized. Items never answered
+  // (no audioUrl, still QUEUED) don't block — a student may leave an item blank.
   const complete = attempt.items.every(
     (it) =>
-      !it.audioUrl ||
+      (!it.audioUrl && it.jobStatus === SpeechJobStatus.QUEUED) ||
       it.jobStatus === SpeechJobStatus.COMPLETED ||
       it.jobStatus === SpeechJobStatus.FAILED,
   );
@@ -316,7 +380,7 @@ export async function getSpeakingAttemptResult(
     attemptId: attempt._id.toString(),
     status: attempt.status as SpeakingAttemptStatus,
     complete,
-    items: attempt.items.map(toItemResult),
+    items: attempt.items.map((it) => toItemResult(it, typeAt(it.itemIndex))),
   };
 }
 
@@ -337,6 +401,12 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
       referenceText: it.referenceText,
       promptText: it.promptText ?? "",
       promptAudioUrl: it.promptAudioUrl ?? "",
+      stimulusAudioUrl: it.stimulusAudioUrl ?? "",
+      stimulusPlayLimit: it.stimulusPlayLimit ?? 0,
+      answerSet: it.answerSet ?? [],
+      missingWord: it.missingWord ?? "",
+      keyFacts: it.keyFacts ?? [],
+      section: it.section ?? "",
       responseWindowSeconds: it.responseWindowSeconds ?? 60,
     })),
   };
@@ -368,6 +438,12 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
   referenceText: string;
   promptText: string;
   promptAudioUrl: string;
+  stimulusAudioUrl: string;
+  stimulusPlayLimit: number;
+  answerSet: string[];
+  missingWord: string;
+  keyFacts: string[];
+  section: string;
   responseWindowSeconds: number;
   order: number;
 }> {
@@ -376,6 +452,12 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
     referenceText: it.referenceText,
     promptText: it.promptText,
     promptAudioUrl: it.promptAudioUrl,
+    stimulusAudioUrl: it.stimulusAudioUrl,
+    stimulusPlayLimit: it.stimulusPlayLimit,
+    answerSet: it.answerSet,
+    missingWord: it.missingWord,
+    keyFacts: it.keyFacts,
+    section: it.section,
     responseWindowSeconds: it.responseWindowSeconds,
     order,
   }));
