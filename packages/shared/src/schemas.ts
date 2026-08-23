@@ -6013,6 +6013,13 @@ export const speakingItemUpsertSchema = z
     keyFacts: z.array(z.string().trim().min(1)).default([]),
     /** Optional preset-composition grouping label (e.g. "Section B"). */
     section: z.string().default(""),
+    /**
+     * Prep countdown (seconds) BEFORE the recording window opens — the
+     * prep-then-speak family (open_topic / role_play): CTS gives 90s prep,
+     * Versant ~40s. 0 = no prep (record immediately). This is a client-side UX
+     * clock, not server-enforced (the audio is captured in the browser).
+     */
+    prepSeconds: z.number().int().min(0).max(300).default(0),
     /** Fixed recording window in seconds. */
     responseWindowSeconds: z.number().int().positive().max(300).default(60),
   })
@@ -6106,6 +6113,7 @@ export const speakingAssessmentItemDetailSchema = z.object({
   missingWord: z.string(),
   keyFacts: z.array(z.string()),
   section: z.string(),
+  prepSeconds: z.number().int().nonnegative(),
   responseWindowSeconds: z.number().int().positive(),
 });
 export const speakingAssessmentDetailSchema = z.object({
@@ -6157,6 +6165,7 @@ export const speakingItemViewSchema = z.object({
   stimulusAudioUrl: z.string(),
   stimulusPlayLimit: z.number().int().nonnegative(),
   section: z.string(),
+  prepSeconds: z.number().int().nonnegative(),
   responseWindowSeconds: z.number().int().positive(),
 });
 export type SpeakingItemView = z.infer<typeof speakingItemViewSchema>;

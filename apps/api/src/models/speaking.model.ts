@@ -51,6 +51,8 @@ const speakingItemSchema = new Schema(
     keyFacts: { type: [String], default: [] },
     // Preset-composition grouping label (e.g. "Section B").
     section: { type: String, default: "" },
+    // Client-side prep countdown before recording (open_topic/role_play); 0 = none.
+    prepSeconds: { type: Number, default: 0, min: 0, max: 300 },
     responseWindowSeconds: { type: Number, default: 60, min: 1, max: 300 },
     order: { type: Number, default: 0 },
   },

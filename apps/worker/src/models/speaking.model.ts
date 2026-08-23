@@ -30,6 +30,7 @@ const speakingItemSchema = new Schema(
     missingWord: { type: String, default: "" },
     keyFacts: { type: [String], default: [] },
     section: { type: String, default: "" },
+    prepSeconds: { type: Number, default: 0 },
     responseWindowSeconds: { type: Number, default: 60 },
     order: { type: Number, default: 0 },
   },

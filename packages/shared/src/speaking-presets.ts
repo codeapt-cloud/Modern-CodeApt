@@ -26,6 +26,7 @@ export interface PresetItemSpec {
   readonly answerSet?: readonly string[];
   readonly missingWord?: string;
   readonly keyFacts?: readonly string[];
+  readonly prepSeconds?: number;
   readonly responseWindowSeconds?: number;
 }
 
@@ -143,12 +144,14 @@ const CTS: SpeakingPreset = {
       itemType: SpeakingItemType.OPEN_TOPIC,
       section: "Section B — Speaking",
       promptText: "Talk about healthy eating. You have 90 seconds to prepare and 60 seconds to speak.",
+      prepSeconds: 90,
       responseWindowSeconds: 60,
     },
     {
       itemType: SpeakingItemType.OPEN_TOPIC,
       section: "Section B — Speaking",
       promptText: "Talk about the role of sport in society.",
+      prepSeconds: 90,
       responseWindowSeconds: 60,
     },
     {
@@ -156,6 +159,7 @@ const CTS: SpeakingPreset = {
       section: "Section B — Speaking",
       promptText:
         "Talk about the most useful thing you learned from your family.",
+      prepSeconds: 90,
       responseWindowSeconds: 60,
     },
   ],
@@ -356,6 +360,7 @@ const SVAR: SpeakingPreset = {
       section: "Spoken topic",
       promptText:
         "Talk about how technology has changed the way we communicate (60 seconds). You have time to prepare.",
+      prepSeconds: 30,
       responseWindowSeconds: 60,
     },
   ],

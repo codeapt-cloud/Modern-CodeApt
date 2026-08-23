@@ -3651,11 +3651,12 @@ export const api = {
       slug: string,
       attemptId: string,
       itemIndex: number,
-      audioUrl: string,
+      // Spoken items send { audioUrl }; a dictation item sends { text }.
+      payload: { audioUrl?: string; text?: string },
     ): Promise<SubmitSpeakingItemResponse> => {
       const { data } = await http.post<SubmitSpeakingItemResponse>(
         `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/items/${itemIndex}`,
-        { audioUrl },
+        payload,
       );
       return data;
     },

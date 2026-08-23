@@ -159,6 +159,7 @@ function itemViews(a: AssessmentDoc): StartSpeakingResponse["items"] {
     stimulusAudioUrl: it.stimulusAudioUrl ?? "",
     stimulusPlayLimit: it.stimulusPlayLimit ?? 0,
     section: it.section ?? "",
+    prepSeconds: it.prepSeconds ?? 0,
     responseWindowSeconds: it.responseWindowSeconds ?? 60,
   }));
 }
@@ -407,6 +408,7 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
       missingWord: it.missingWord ?? "",
       keyFacts: it.keyFacts ?? [],
       section: it.section ?? "",
+      prepSeconds: it.prepSeconds ?? 0,
       responseWindowSeconds: it.responseWindowSeconds ?? 60,
     })),
   };
@@ -444,6 +446,7 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
   missingWord: string;
   keyFacts: string[];
   section: string;
+  prepSeconds: number;
   responseWindowSeconds: number;
   order: number;
 }> {
@@ -458,6 +461,7 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
     missingWord: it.missingWord,
     keyFacts: it.keyFacts,
     section: it.section,
+    prepSeconds: it.prepSeconds,
     responseWindowSeconds: it.responseWindowSeconds,
     order,
   }));
