@@ -204,6 +204,13 @@ import {
   type SaveEssayDraftResponse,
   type ExamListResponse,
   type ExamResult,
+  type AdvanceGameResponse,
+  type AnswerGameItemResponse,
+  type GameExplanationResponse,
+  type GamePlayListResponse,
+  type GameResult,
+  type ProbeGameItemResponse,
+  type StartGameSetResponse,
   type MockPayRequest,
   type OrderListResponse,
   type OrderStatusResponse,
@@ -3380,6 +3387,104 @@ export const api = {
       const { data } = await http.post<StartAttemptResponse>(
         `${API_PREFIX}/public/exams/${token}/attempts`,
         body,
+      );
+      return data;
+    },
+  },
+
+  /**
+   * Gaming — course-attached discovery + the attempt lifecycle. The attempt
+   * ENGINE (answer/advance/finish/explain/probe) is shared global regardless of
+   * how the set was reached; only START differs (global for course-attached,
+   * `collegeGames.start` for a tenant set). Mirrors the exam engine's shape.
+   */
+  games: {
+    /** Course-attached sets reachable by the caller's enrollments (carry topicId). */
+    list: async (): Promise<GamePlayListResponse> => {
+      const { data } = await http.get<GamePlayListResponse>(
+        `${API_PREFIX}/games`,
+      );
+      return data;
+    },
+    start: async (gameSetId: string): Promise<StartGameSetResponse> => {
+      const { data } = await http.post<StartGameSetResponse>(
+        `${API_PREFIX}/game-sets/${gameSetId}/attempts`,
+      );
+      return data;
+    },
+    answer: async (
+      attemptId: string,
+      body: { itemIndex: number; action: "answer" | "skip"; submission?: unknown },
+      token?: string,
+    ): Promise<AnswerGameItemResponse> => {
+      const { data } = await http.post<AnswerGameItemResponse>(
+        `${API_PREFIX}/game-attempts/${attemptId}/answer`,
+        body,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    advance: async (
+      attemptId: string,
+      token?: string,
+    ): Promise<AdvanceGameResponse> => {
+      const { data } = await http.post<AdvanceGameResponse>(
+        `${API_PREFIX}/game-attempts/${attemptId}/advance`,
+        undefined,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    finish: async (attemptId: string, token?: string): Promise<GameResult> => {
+      const { data } = await http.post<GameResult>(
+        `${API_PREFIX}/game-attempts/${attemptId}/finish`,
+        undefined,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    explain: async (
+      attemptId: string,
+      itemIndex: number,
+      token?: string,
+    ): Promise<GameExplanationResponse> => {
+      const { data } = await http.post<GameExplanationResponse>(
+        `${API_PREFIX}/game-attempts/${attemptId}/explain`,
+        { itemIndex },
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    /** Interactive move-by-move play (door_key; wired for 7c, unused by 7a). */
+    probe: async (
+      attemptId: string,
+      body: { itemIndex: number; action: unknown },
+      token?: string,
+    ): Promise<ProbeGameItemResponse> => {
+      const { data } = await http.post<ProbeGameItemResponse>(
+        `${API_PREFIX}/game-attempts/${attemptId}/probe`,
+        body,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+  },
+
+  /** Tenant-scoped gaming: a college student's available published sets + the
+   * tenant start (the shared engine above drives the rest). */
+  collegeGames: {
+    available: async (slug: string): Promise<GamePlayListResponse> => {
+      const { data } = await http.get<GamePlayListResponse>(
+        `${API_PREFIX}/c/${slug}/game-sets/available`,
+      );
+      return data;
+    },
+    start: async (
+      slug: string,
+      gameSetId: string,
+    ): Promise<StartGameSetResponse> => {
+      const { data } = await http.post<StartGameSetResponse>(
+        `${API_PREFIX}/c/${slug}/game-sets/${gameSetId}/attempts`,
       );
       return data;
     },

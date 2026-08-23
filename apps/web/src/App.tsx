@@ -98,6 +98,11 @@ const ExamRunnerPage = named(
   () => import("./pages/exam/ExamRunnerPage.js"),
   "ExamRunnerPage",
 );
+const GamesPage = named(() => import("./pages/game/GamesPage.js"), "GamesPage");
+const GamePlayPage = named(
+  () => import("./pages/game/GamePlayPage.js"),
+  "GamePlayPage",
+);
 const PublicExamPage = named(
   () => import("./pages/exam/PublicExamPage.js"),
   "PublicExamPage",
@@ -267,6 +272,10 @@ const CollegeCoursesPage = named(
 const CollegeExamsPage = named(
   () => import("./pages/colleges/CollegeExamsPage.js"),
   "CollegeExamsPage",
+);
+const CollegeGamingPage = named(
+  () => import("./pages/colleges/CollegeGamingPage.js"),
+  "CollegeGamingPage",
 );
 const CollegeExamEditorPage = named(
   () => import("./pages/colleges/CollegeExamEditorPage.js"),
@@ -492,6 +501,7 @@ export function App() {
             <Route path="/challenge" element={<DailyChallengePage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
             <Route path="/exams" element={<ExamsPage />} />
+            <Route path="/games" element={<GamesPage />} />
             <Route path="/essays" element={<EssaysPage />} />
             <Route path="/essays/:id" element={<EssayWriterPage />} />
             <Route path="/checkout/:slug" element={<CheckoutPage />} />
@@ -562,6 +572,9 @@ export function App() {
 
           {/* Fullscreen exam runner — outside the AppShell */}
           <Route path="/exam/:examId" element={<ExamRunnerPage />} />
+
+          {/* Fullscreen game runner — outside the AppShell */}
+          <Route path="/play/game/:gameSetId" element={<GamePlayPage />} />
         </Route>
 
         {/* College workspace — its OWN TOP-LEVEL full-page layout, a sibling of
@@ -620,6 +633,7 @@ export function App() {
                 path="exams/:examId/analysis"
                 element={<CollegeExamAnalysisPage />}
               />
+              <Route path="gaming" element={<CollegeGamingPage />} />
               <Route path="essays" element={<CollegeEssaysRoute />} />
               <Route
                 path="essays/:essayTopicId/results"

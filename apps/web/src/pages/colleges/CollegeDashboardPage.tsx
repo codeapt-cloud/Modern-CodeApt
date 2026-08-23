@@ -22,6 +22,7 @@ import {
   ArrowRight,
   BarChart3,
   BookOpen,
+  Gamepad2,
   Briefcase,
   CalendarCheck,
   Code2,
@@ -86,6 +87,7 @@ const ICON: Record<CollegeNavIcon, LucideIcon> = {
   analytics: BarChart3,
   attendance: CalendarCheck,
   coding: Code2,
+  gaming: Gamepad2,
   results: BarChart3,
 };
 

@@ -36,6 +36,7 @@ export type CollegeNavIcon =
   | "analytics"
   | "attendance"
   | "coding"
+  | "gaming"
   | "results";
 
 export type SectionStatus = "available" | "locked" | "coming_soon";
@@ -342,6 +343,16 @@ export const STUDENT_COLLEGE_SECTIONS: readonly CollegeSection[] = [
     icon: "coding",
     path: "coding",
     feature: CollegeFeature.CODING_PROFILES,
+    comingSoon: false,
+  },
+  {
+    key: "my-games",
+    label: "Games",
+    description: "Adaptive aptitude games assigned to your cohort.",
+    group: "Learning",
+    icon: "gaming",
+    path: "gaming",
+    feature: CollegeFeature.GAMING,
     comingSoon: false,
   },
   {

@@ -15,6 +15,7 @@ import { getAdjacent, type FlatTopic } from "../../lib/player.js";
 import { useQuery } from "../../lib/use-query.js";
 import { EssayStatusCard } from "../essay/EssayStatusCard.js";
 import { ExamStatusCard } from "../exam/ExamStatusCard.js";
+import { GameStatusCard } from "../game/GameStatusCard.js";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
@@ -29,6 +30,7 @@ const TYPE_LABEL: Record<string, string> = {
   quiz: "Quiz",
   exam: "Exam",
   essay: "Essay",
+  game: "Game",
 };
 
 export function TopicPane({
@@ -126,6 +128,8 @@ export function TopicPane({
           <ExamTopicLauncher topicId={topicId} />
         ) : content.topicType === "essay" ? (
           <EssayTopicLauncher topicId={topicId} />
+        ) : content.topicType === "game" ? (
+          <GameTopicLauncher topicId={topicId} />
         ) : (
           <PlaceholderTopic />
         )}
@@ -229,6 +233,31 @@ function EssayTopicLauncher({ topicId }: { topicId: string }) {
     );
   }
   return <EssayStatusCard item={item} />;
+}
+
+/**
+ * In-course game entry point. Reuses the SAME status source as the Games page
+ * (GET /games via `api.games.list()`), matching the set whose `topicId` is this
+ * curriculum topic, and renders the shared <GameStatusCard> → the fullscreen
+ * /play/game/:id runner. Identical to the exam/essay topic launchers; no play
+ * logic is duplicated.
+ */
+function GameTopicLauncher({ topicId }: { topicId: string }) {
+  const { data, loading, error } = useQuery(() => api.games.list(), []);
+  const item = data?.items.find((g) => g.topicId === topicId);
+
+  if (loading) {
+    return <Skeleton className="h-56 w-full rounded-2xl" />;
+  }
+  if (error || !item) {
+    return (
+      <Alert variant="info">
+        {error ??
+          "This game isn’t available to you yet. It appears once it’s published for your subject."}
+      </Alert>
+    );
+  }
+  return <GameStatusCard item={item} href={`/play/game/${item.id}`} />;
 }
 
 function PlaceholderTopic() {
