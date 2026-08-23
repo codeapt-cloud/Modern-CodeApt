@@ -562,6 +562,9 @@ export const GameErrorCode = {
   TOPIC_ALREADY_ATTACHED: "TOPIC_ALREADY_ATTACHED",
   /** Invalid GameSet shape — a tenant (college) set cannot also carry a topic. */
   INVALID_GAME_SET_SHAPE: "INVALID_GAME_SET_SHAPE",
+  /** The client reported its clock expired but the SERVER clock disagrees — the
+   * item is still live, so no outcome is recorded (the client keeps playing). */
+  GAME_NOT_EXPIRED: "GAME_NOT_EXPIRED",
 } as const;
 export type GameErrorCode = (typeof GameErrorCode)[keyof typeof GameErrorCode];
 

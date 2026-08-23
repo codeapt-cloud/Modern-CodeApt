@@ -64,7 +64,7 @@ function listItem(over: Partial<GamePlayListItem> = {}): GamePlayListItem {
     id: "s1",
     title: "Set",
     description: "",
-    gameKeys: [GameKey.PROBE],
+    games: [{ gameKey: GameKey.PROBE, durationSeconds: 360, allowSkip: true }],
     selectionMode: "fixed",
     totalGames: 1,
     perQuestionTimerSeconds: 0,
@@ -172,10 +172,18 @@ describe("attempts / unstartable derivation", () => {
 });
 
 describe("renderer registry", () => {
-  it("resolves the _probe renderer and leaves unimplemented games undefined", () => {
+  it("resolves the _probe + five one-shot renderers; door_key (7c) stays unregistered", () => {
     expect(getGameRenderer(GameKey.PROBE)).toBe(ProbeRenderer);
-    // 7b/7c games are not registered yet — the shell shows a calm fallback.
-    expect(getGameRenderer(GameKey.GEO_SUDO)).toBeUndefined();
+    for (const key of [
+      GameKey.GEO_SUDO,
+      GameKey.SWITCH_CHALLENGE,
+      GameKey.MOTION_CHALLENGE,
+      GameKey.INDUCTIVE_REASONING,
+      GameKey.BUBBLE_MATH,
+    ]) {
+      expect(getGameRenderer(key)).toBeDefined();
+    }
+    // door_key is interactive (7c) — the shell shows a calm fallback for now.
     expect(getGameRenderer(GameKey.DOOR_KEY)).toBeUndefined();
   });
 });

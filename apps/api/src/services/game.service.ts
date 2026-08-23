@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  EXAM_MAX_WARNINGS,
   GAME_MAX_PROBES_PER_ITEM,
   GAME_MAX_SERVED_ITEMS,
   GAME_REGISTRY,
@@ -33,7 +34,9 @@ import {
   type AnswerGameItemRequest,
   type AnswerGameItemResponse,
   type AnyGameModule,
+  type BeginGameResponse,
   type GameDifficulty as GameDifficultyT,
+  type GameInfo,
   type GameItemView,
   type GameExplanationResponse,
   type GameKey,
@@ -41,6 +44,7 @@ import {
   type LadderOutcome,
   type ProbeGameItemRequest,
   type ProbeGameItemResponse,
+  type RecordGameWarningResponse,
   type StartGameSetResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
@@ -366,6 +370,7 @@ async function createGameAttempt(
 export async function startGameSetAttempt(
   userId: string,
   gameSetId: string,
+  serve = true,
 ): Promise<StartGameSetResponse> {
   const gameSet = await requireGameSet(gameSetId);
   await assertCanPlayGameSet(userId, gameSet);
@@ -428,9 +433,16 @@ export async function startGameSetAttempt(
     instantFeedback: gameSet.instantFeedback,
   });
 
-  const firstSpec = games[pickedIndices[0]!]!;
-  const ga = await createGameAttempt(parent, 0, firstSpec);
-
+  // A1: the deferred (UI) flow passes serve:false — return the first game's
+  // pre-flight INFO only, with NO child created and NO clock started, so the
+  // tutorial runs against a stopped clock; `begin` serves + starts the clock.
+  // serve:true (the default — tests / quick-start) also serves the first item.
+  let item: GameItemView | null = null;
+  if (serve) {
+    const firstSpec = games[pickedIndices[0]!]!;
+    const ga = await createGameAttempt(parent, 0, firstSpec);
+    item = buildItemView(parent, ga, ga.served[0]!);
+  }
   return {
     attemptId: parent._id.toString(),
     attemptToken: parent.attemptToken,
@@ -438,8 +450,69 @@ export async function startGameSetAttempt(
     sequence: sequence as GameKey[],
     totalGames: sequence.length,
     attemptsRemaining,
-    item: buildItemView(parent, ga, ga.served[0]!),
+    firstGame: gameInfoFor(gameSet, parent, 0),
+    item,
   };
+}
+
+/** Pre-flight info for a game in the frozen sequence, WITHOUT serving it (no
+ * clock started). Derived from the authored spec + the module — operator-safe. */
+function gameInfoFor(
+  gameSet: GameSetDoc,
+  parent: ParentDoc,
+  gameIndex: number,
+): GameInfo {
+  const spec = gameSet.games[parent.pickedIndices[gameIndex]!]!;
+  const gameModule = GAME_REGISTRY[spec.gameKey as GameKey];
+  return {
+    gameKey: spec.gameKey as GameKey,
+    gameIndex,
+    allowSkip: spec.allowSkip && gameModule.allowSkipDefault,
+    durationSeconds: spec.durationSeconds,
+    itemSeconds: effectiveItemSeconds(gameModule, parent.perQuestionTimerSeconds),
+    instantFeedback: parent.instantFeedback,
+    maxQuestions: spec.maxQuestions,
+  };
+}
+
+/**
+ * Serve the current game's first item and START its clock (A1). The clock end
+ * (`expiresAt`) is server-set inside createGameAttempt at THIS moment, so the
+ * countdown begins exactly when the player leaves the tutorial — never at start.
+ *
+ * UN-GAMEABLE: `expiresAt` is server-computed from the server's own now; the
+ * client can neither set nor extend it. Withholding `begin` only delays SEEING
+ * the puzzle (no item is served until begin), so it grants no time advantage.
+ * And begin is IDEMPOTENT — once the child exists, a re-call returns the current
+ * item and does NOT reset the clock, so it cannot be used to buy more time.
+ */
+export async function beginGame(
+  attemptId: string,
+  caller: Caller,
+): Promise<BeginGameResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  if (parent.status === GameSetAttemptStatus.GRADED) {
+    throw new AppError(
+      "This attempt is already finished",
+      409,
+      GameErrorCode.ALREADY_GRADED,
+    );
+  }
+  const existing = await GameAttemptModel.findOne({
+    parent: parent._id,
+    gameIndex: parent.currentIndex,
+  });
+  if (existing) {
+    // Idempotent — return the current pending (or last) item, clock untouched.
+    const pending =
+      existing.served.find((s) => s.outcome == null) ??
+      existing.served[existing.served.length - 1]!;
+    return { item: buildItemView(parent, existing, pending) };
+  }
+  const gameSet = await requireGameSet(parent.gameSet.toString());
+  const spec = gameSet.games[parent.pickedIndices[parent.currentIndex]!]!;
+  const ga = await createGameAttempt(parent, parent.currentIndex, spec);
+  return { item: buildItemView(parent, ga, ga.served[0]!) };
 }
 
 export async function answerGameItem(
@@ -481,6 +554,16 @@ export async function answerGameItem(
     // The game clock OR this item's intrinsic per-item timer ran out (both
     // server-authoritative) — recorded as expired, no marks.
     outcome = GameOutcome.EXPIRED;
+  } else if (input.action === "expire") {
+    // A3: the client's clock hit zero but the SERVER's has NOT. Do NOT record a
+    // bogus `wrong` (an empty submission would fail the schema and step the
+    // ladder DOWN) — the item is still live. Reject so the client keeps playing;
+    // the server clock is the only authority on expiry.
+    throw new AppError(
+      "This item has not expired yet",
+      409,
+      GameErrorCode.GAME_NOT_EXPIRED,
+    );
   } else if (input.action === "skip") {
     if (!ga.allowSkip) {
       throw new AppError(
@@ -758,6 +841,7 @@ export async function explainGameItem(
 export async function advanceGame(
   attemptId: string,
   caller: Caller,
+  serve = true,
 ): Promise<AdvanceGameResponse> {
   const parent = await loadAndAuthorize(attemptId, caller);
   if (parent.status === GameSetAttemptStatus.GRADED) {
@@ -791,16 +875,26 @@ export async function advanceGame(
   const nextIndex = parent.currentIndex + 1;
   if (nextIndex >= parent.sequence.length) {
     // No further game — the client should call finish.
-    return { item: null, setComplete: true };
+    return { nextGame: null, item: null, setComplete: true };
   }
 
   parent.currentIndex = nextIndex;
   await parent.save();
 
+  // A1: serve:false (UI) returns the next game's pre-flight INFO only, deferring
+  // the serve + clock to the following `begin`; serve:true also serves it now.
   const gameSet = await requireGameSet(parent.gameSet.toString());
-  const spec = gameSet.games[parent.pickedIndices[nextIndex]!]!;
-  const nextGa = await createGameAttempt(parent, nextIndex, spec);
-  return { item: buildItemView(parent, nextGa, nextGa.served[0]!), setComplete: false };
+  let item: GameItemView | null = null;
+  if (serve) {
+    const spec = gameSet.games[parent.pickedIndices[nextIndex]!]!;
+    const nextGa = await createGameAttempt(parent, nextIndex, spec);
+    item = buildItemView(parent, nextGa, nextGa.served[0]!);
+  }
+  return {
+    nextGame: gameInfoFor(gameSet, parent, nextIndex),
+    item,
+    setComplete: false,
+  };
 }
 
 export async function finishGameSet(
@@ -838,5 +932,42 @@ export async function finishGameSet(
       questionsAttempted: g.questionsAttempted,
       questionsCorrect: g.questionsCorrect,
     })),
+  };
+}
+
+/**
+ * A4: record one proctoring warning on the attempt, mirroring the exam warning
+ * route and reusing EXAM_MAX_WARNINGS. A gaming round is a SCORED, attempt-
+ * limited assessment like an exam, so it gets the same integrity policy: past
+ * the threshold the attempt is flagged malpractice AND force-finished (whatever
+ * has been scored is committed), exactly as an exam auto-submits. Counts live on
+ * the parent GameSetAttempt (the previously capture-only fields).
+ */
+export async function recordGameWarning(
+  attemptId: string,
+  caller: Caller,
+): Promise<RecordGameWarningResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  // Already finished (incl. a prior force-finish) — report the frozen counts.
+  if (parent.status === GameSetAttemptStatus.GRADED) {
+    return {
+      warningsTriggered: parent.warningsTriggered,
+      isMalpractice: parent.isMalpractice,
+      autoFinished: true,
+    };
+  }
+  parent.warningsTriggered += 1;
+  parent.isMalpractice = parent.warningsTriggered > EXAM_MAX_WARNINGS;
+  await parent.save();
+
+  let autoFinished = false;
+  if (parent.isMalpractice) {
+    await finishGameSet(attemptId, caller); // atomic IN_PROGRESS → GRADED
+    autoFinished = true;
+  }
+  return {
+    warningsTriggered: parent.warningsTriggered,
+    isMalpractice: parent.isMalpractice,
+    autoFinished,
   };
 }

@@ -15,10 +15,12 @@ import {
   adminPublishGameSetController,
   adminUpdateGameSetController,
   answerGameItemController,
+  beginGameController,
   explainGameItemController,
   finishGameSetController,
   listMyGamesController,
   probeGameItemController,
+  recordGameWarningController,
   startGameSetController,
 } from "../controllers/game.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
@@ -50,11 +52,19 @@ gameRouter.post(
 );
 
 // --- Attempt engine (owner session OR attempt token) ---
+// Begin the current game: serves its first item + starts the (server-set) clock.
+gameRouter.post("/game-attempts/:attemptId/begin", ...engine, beginGameController);
 gameRouter.post(
   "/game-attempts/:attemptId/answer",
   ...engine,
   gameAnswerRateLimiter,
   answerGameItemController,
+);
+// Proctoring warning (mirrors the exam warning route).
+gameRouter.post(
+  "/game-attempts/:attemptId/warning",
+  ...engine,
+  recordGameWarningController,
 );
 // Interactive move-by-move play (door_key). Higher rate limit than answer — a
 // probe is a single keypress. A probe against a one-shot game 400s in the service.

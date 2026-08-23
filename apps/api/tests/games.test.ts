@@ -6,6 +6,7 @@
  * allowed). The last test prints a 4-game transcript. Mirrors college-exams.test.ts.
  */
 import {
+  EXAM_MAX_WARNINGS,
   GAME_MAX_PROBES_PER_ITEM,
   GAME_MAX_SERVED_ITEMS,
   Role,
@@ -22,6 +23,7 @@ import { createApp } from "../src/app.js";
 import {
   GameAttemptModel,
   GameSetAttemptCounterModel,
+  GameSetAttemptModel,
 } from "../src/models/game.model.js";
 import { UserModel } from "../src/models/user.model.js";
 import * as colleges from "../src/services/college.service.js";
@@ -1383,4 +1385,195 @@ describe("gaming — the Accenture two through the seam: 6-game e2e transcript",
     // reached move-by-move via the probe API. Total 33.
     expect(finish.body.compositeScore).toBe(33);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// Step 7b Part A — lazy clock (begin), preview fields, expiry-skew, warnings
+// ---------------------------------------------------------------------------
+
+describe("gaming — Step 7b/A1: lazy clock via begin (un-gameable)", () => {
+  it("serve:false returns pre-flight info with NO item/clock; begin serves + starts the clock", async () => {
+    const { adminToken } = await setupCollege("gm-a1");
+    const dept = await createUnit("gm-a1", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-a1", adminToken, {
+      games: [gameSpec("_probe", { durationSeconds: 200, maxQuestions: 3 })],
+    });
+    const student = await addStudent("gm-a1", adminToken, "a1@c.edu", "R1", dept);
+
+    // Deferred (UI) start: info only, no serve, clock stopped.
+    const start = await request(app)
+      .post(`/api/c/gm-a1/game-sets/${setId}/attempts`)
+      .set(auth(student.token))
+      .send({ serve: false });
+    expect(start.status).toBe(201);
+    expect(start.body.item).toBeNull();
+    expect(start.body.firstGame.gameKey).toBe("_probe");
+    // Pre-flight can now read server-authoritative facts BEFORE the clock.
+    expect(start.body.firstGame.allowSkip).toBe(true);
+    expect(start.body.firstGame.durationSeconds).toBe(200);
+    expect(start.body.firstGame.itemSeconds).toBeNull(); // _probe: no per-item timer
+    const attemptId = start.body.attemptId as string;
+
+    // No child yet → the clock has not started.
+    expect(
+      await GameAttemptModel.findOne({
+        parent: new Types.ObjectId(attemptId),
+        gameIndex: 0,
+      }),
+    ).toBeNull();
+
+    // begin serves the first item and starts the clock.
+    const begin = await request(app)
+      .post(`/api/game-attempts/${attemptId}/begin`)
+      .set(auth(student.token));
+    expect(begin.status).toBe(200);
+    expect(begin.body.item.itemIndex).toBe(0);
+    const ga1 = await GameAttemptModel.findOne({
+      parent: new Types.ObjectId(attemptId),
+      gameIndex: 0,
+    });
+    const firstExpiry = ga1!.expiresAt.getTime();
+    expect(firstExpiry).toBeGreaterThan(Date.now());
+
+    // A client CANNOT extend the clock by re-calling begin — it is idempotent
+    // and never resets expiresAt or serves an extra item.
+    const begin2 = await request(app)
+      .post(`/api/game-attempts/${attemptId}/begin`)
+      .set(auth(student.token));
+    expect(begin2.status).toBe(200);
+    const ga2 = await GameAttemptModel.findOne({
+      parent: new Types.ObjectId(attemptId),
+      gameIndex: 0,
+    });
+    expect(ga2!.expiresAt.getTime()).toBe(firstExpiry);
+    expect(ga2!.served).toHaveLength(1);
+  });
+});
+
+describe("gaming — Step 7b/A2: list preview fields", () => {
+  it("each list item carries per-game durationSeconds + allowSkip (operator-safe)", async () => {
+    const { adminToken } = await setupCollege("gm-a2");
+    const dept = await createUnit("gm-a2", adminToken, "CSE");
+    await authorPublishedSet("gm-a2", adminToken, {
+      games: [
+        gameSpec("_probe", { durationSeconds: 300, allowSkip: true }),
+        gameSpec("switch_challenge", { durationSeconds: 240, allowSkip: true }),
+      ],
+    });
+    const student = await addStudent("gm-a2", adminToken, "a2@c.edu", "R1", dept);
+    const res = await request(app)
+      .get(`/api/c/gm-a2/game-sets/available`)
+      .set(auth(student.token));
+    expect(res.status).toBe(200);
+    const item = res.body.items[0];
+    expect(item.games).toHaveLength(2);
+    expect(item.games[0]).toEqual({
+      gameKey: "_probe",
+      durationSeconds: 300,
+      allowSkip: true,
+    });
+    expect(item.games[1].gameKey).toBe("switch_challenge");
+    expect("seed" in item).toBe(false); // no internals leak
+  });
+});
+
+describe("gaming — Step 7b/A3: expiry-skew never scores a bogus wrong", () => {
+  it("action expire with the server clock NOT expired → 409, item stays live (no ladder-down)", async () => {
+    const { adminToken } = await setupCollege("gm-a3");
+    const dept = await createUnit("gm-a3", adminToken, "CSE");
+    // switch_challenge: allowSkip is FALSE — the exact case the {} workaround
+    // scored wrong and stepped the ladder DOWN on sub-second skew.
+    const setId = await authorPublishedSet("gm-a3", adminToken, {
+      games: [gameSpec("switch_challenge", { durationSeconds: 300, maxQuestions: 3 })],
+    });
+    const student = await addStudent("gm-a3", adminToken, "a3@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-a3/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+    const item = start.body.item;
+
+    // Client believes its clock hit zero, but the server clock has ~300s left.
+    const expire = await request(app)
+      .post(`/api/game-attempts/${attemptId}/answer`)
+      .set(auth(student.token))
+      .send({ itemIndex: item.itemIndex, action: "expire" });
+    expect(expire.status).toBe(409);
+    expect(expire.body.error.code).toBe("GAME_NOT_EXPIRED");
+
+    // The item is untouched — a correct answer still scores correct (ladder UP),
+    // proving no bogus `wrong` was recorded by the false expiry.
+    const ans = await request(app)
+      .post(`/api/game-attempts/${attemptId}/answer`)
+      .set(auth(student.token))
+      .send({
+        itemIndex: item.itemIndex,
+        action: "answer",
+        submission: { order: solveSwitch(item.view) },
+      });
+    expect(ans.status).toBe(200);
+    expect(ans.body.outcome).toBe("correct");
+    expect(ans.body.answeredDifficulty).toBe("easy");
+    expect(ans.body.next.difficulty).toBe("moderate"); // moved UP, not down
+  });
+
+  it("action expire with the server clock genuinely past → records expired", async () => {
+    const { adminToken } = await setupCollege("gm-a3b");
+    const dept = await createUnit("gm-a3b", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-a3b", adminToken, {
+      games: [gameSpec("switch_challenge", { maxQuestions: 3 })],
+    });
+    const student = await addStudent("gm-a3b", adminToken, "a3b@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-a3b/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+    await GameAttemptModel.updateOne(
+      { parent: new Types.ObjectId(attemptId), gameIndex: 0 },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } },
+    );
+    const expire = await request(app)
+      .post(`/api/game-attempts/${attemptId}/answer`)
+      .set(auth(student.token))
+      .send({ itemIndex: start.body.item.itemIndex, action: "expire" });
+    expect(expire.status).toBe(200);
+    expect(expire.body.outcome).toBe("expired");
+    expect(expire.body.marksAwarded).toBe(0);
+  });
+});
+
+describe("gaming — Step 7b/A4: proctoring warning endpoint", () => {
+  it("counts warnings and force-finishes past the malpractice threshold", async () => {
+    const { adminToken } = await setupCollege("gm-a4");
+    const dept = await createUnit("gm-a4", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-a4", adminToken, {
+      games: [gameSpec("_probe", { maxQuestions: 5 })],
+    });
+    const student = await addStudent("gm-a4", adminToken, "a4@c.edu", "R1", dept);
+    const start = await request(app)
+      .post(`/api/c/gm-a4/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+
+    let last: {
+      warningsTriggered: number;
+      isMalpractice: boolean;
+      autoFinished: boolean;
+    } | null = null;
+    for (let i = 0; i < EXAM_MAX_WARNINGS + 1; i += 1) {
+      const res = await request(app)
+        .post(`/api/game-attempts/${attemptId}/warning`)
+        .set(auth(student.token));
+      expect(res.status).toBe(200);
+      last = res.body;
+    }
+    expect(last!.warningsTriggered).toBe(EXAM_MAX_WARNINGS + 1);
+    expect(last!.isMalpractice).toBe(true);
+    expect(last!.autoFinished).toBe(true);
+
+    // The attempt is force-finished (graded) and flagged.
+    const parent = await GameSetAttemptModel.findById(attemptId);
+    expect(parent!.status).toBe("graded");
+    expect(parent!.isMalpractice).toBe(true);
+  });
 });

@@ -55,11 +55,12 @@ export function GamePlayPage() {
     <div className="min-h-screen bg-surface-base">
       <GameRunner
         title={data.title}
-        gameKeys={data.gameKeys}
         start={() =>
+          // Deferred flow: serve:false so the clock stays stopped during the
+          // pre-flight tutorial (the runner calls `begin` on Start).
           collegeSlug
-            ? api.collegeGames.start(collegeSlug, gameSetId)
-            : api.games.start(gameSetId)
+            ? api.collegeGames.start(collegeSlug, gameSetId, false)
+            : api.games.start(gameSetId, false)
         }
         onExit={() => navigate(exitHref)}
       />

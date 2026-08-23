@@ -4,14 +4,13 @@
  * transitions. It is GAME-AGNOSTIC: the actual puzzle is drawn by the renderer
  * looked up from the registry by the item's gameKey (7a ships only `_probe`).
  */
-import type { GameKey, StartGameSetResponse } from "@codeapt/shared";
+import type { StartGameSetResponse } from "@codeapt/shared";
 import { AlertTriangle, Eye } from "lucide-react";
 
 import { GAME_COPY } from "../../lib/game-copy.js";
 import { ladderMove, type AnswerFeedback } from "../../lib/game-runner.js";
 import { useGameRunner } from "../../lib/use-game-runner.js";
 import { useProctoring } from "../../lib/use-proctoring.js";
-import { useState } from "react";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
@@ -23,25 +22,22 @@ import { getGameRenderer } from "./renderer-registry.js";
 
 export function GameRunner({
   title,
-  gameKeys,
   start,
   onExit,
 }: {
   title: string;
-  gameKeys: GameKey[];
   start: () => Promise<StartGameSetResponse>;
   onExit: () => void;
 }): JSX.Element {
-  const r = useGameRunner({ start, gameKeys });
-  const [warnings, setWarnings] = useState(0);
+  const r = useGameRunner({ start });
 
   // Gaming proctoring = the SAME shared hook, configured for a game: detect
   // tab-switch/blur, block nothing (paste-blocking is irrelevant), guard unload.
-  // Active only while an item is in play. There is NO game warning endpoint
-  // (the GameSetAttempt has capture-only warning fields, no route) — see report.
+  // Active only while an item is in play; warnings are recorded server-side
+  // (Step 7b/A4) and force-finish the attempt past the threshold.
   useProctoring({
     active: r.phase === "playing",
-    onWarning: () => setWarnings((w) => w + 1),
+    onWarning: () => void r.recordWarning(),
     block: {},
     warnOnPaste: false,
     guardUnload: true,
@@ -61,20 +57,25 @@ export function GameRunner({
     );
   }
 
-  if (r.phase === "advancing" || r.phase === "finishing") {
+  if (r.phase === "loading" || r.phase === "advancing" || r.phase === "finishing") {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
         <Spinner size="lg" />
         <p className="text-sm text-ink-muted">
-          {r.phase === "finishing" ? "Tallying your score…" : "Loading the next game…"}
+          {r.phase === "finishing"
+            ? "Tallying your score…"
+            : r.phase === "advancing"
+              ? "Loading the next game…"
+              : "Loading…"}
         </p>
       </div>
     );
   }
 
-  // Pre-flight (game 1) OR the next game's tutorial (after a game completes).
-  if (r.phase === "preflight" || r.phase === "game-complete") {
-    if (!r.tutorialGameKey) {
+  // Pre-flight: game 1 (on mount) OR the next game's tutorial (after a game
+  // completes). Driven by the server's GameInfo — clock stopped, facts real.
+  if (r.phase === "preflight") {
+    if (!r.info) {
       return (
         <div className="flex min-h-[60vh] items-center justify-center">
           <Spinner size="lg" />
@@ -83,10 +84,13 @@ export function GameRunner({
     }
     return (
       <GameTutorial
-        gameKey={r.tutorialGameKey}
-        gameNumber={r.tutorialGameNumber}
+        gameKey={r.info.gameKey}
+        gameNumber={r.info.gameIndex + 1}
         totalGames={r.totalGames}
-        practiceMode={r.item?.instantFeedback ?? false}
+        practiceMode={r.info.instantFeedback}
+        allowSkip={r.info.allowSkip}
+        durationSeconds={r.info.durationSeconds}
+        itemSeconds={r.info.itemSeconds}
         busy={r.busy}
         onStart={() => void r.beginGame()}
       />
@@ -111,7 +115,7 @@ export function GameRunner({
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-subtle bg-surface-raised px-5 py-3">
         <div className="min-w-0">
           <p className="text-xs text-ink-muted">
-            Game {r.gameIndex + 1} of {r.totalGames}
+            Game {item.gameIndex + 1} of {r.totalGames}
           </p>
           <h1 className="truncate font-semibold text-ink">
             {GAME_COPY[item.gameKey]?.name ?? title}
@@ -121,9 +125,9 @@ export function GameRunner({
           </div>
         </div>
         <div className="flex items-center gap-5">
-          {warnings > 0 ? (
+          {r.warnings > 0 ? (
             <Badge variant="warning" title="Focus-loss warnings">
-              {warnings} warning{warnings === 1 ? "" : "s"}
+              {r.warnings} warning{r.warnings === 1 ? "" : "s"}
             </Badge>
           ) : null}
           <GameScore score={r.gameScore} />

@@ -5459,8 +5459,6 @@ export type CloneGameSetRequest = z.infer<typeof cloneGameSetRequestSchema>;
 
 // --- Play ---
 
-export const startGameSetRequestSchema = z.object({}).default({});
-
 /**
  * A game set a STUDENT can play, as the play/discovery surface shows it. Carries
  * only operator-safe fields — title, which games, clock/attempt info — never a
@@ -5468,11 +5466,21 @@ export const startGameSetRequestSchema = z.object({}).default({});
  * (reached through the learn player's topic tree, like exam topics) and null for
  * a college's own tenant-authored sets.
  */
+/** A pre-flight-safe per-game preview (A2): the facts a rules card legitimately
+ * shows — which game, its round clock, and whether skip is offered — never a
+ * seed or per-game internal. */
+export const gamePreviewSchema = z.object({
+  gameKey: gameKeySchema,
+  durationSeconds: z.number().int(),
+  allowSkip: z.boolean(),
+});
+export type GamePreview = z.infer<typeof gamePreviewSchema>;
+
 export const gamePlayListItemSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
-  gameKeys: z.array(gameKeySchema),
+  games: z.array(gamePreviewSchema),
   selectionMode: gameSelectionModeSchema,
   totalGames: z.number().int(),
   perQuestionTimerSeconds: z.number().int(),
@@ -5514,6 +5522,36 @@ export const gameItemViewSchema = z.object({
 });
 export type GameItemView = z.infer<typeof gameItemViewSchema>;
 
+/**
+ * Server-authoritative facts about a game the PRE-FLIGHT needs, WITHOUT serving
+ * its first item (so the round clock stays stopped while the tutorial is up).
+ * `start` returns the first game's info; `advance` returns the next game's; the
+ * clock only begins on the separate `begin` call. (Step 7b/A1.)
+ */
+export const gameInfoSchema = z.object({
+  gameKey: gameKeySchema,
+  gameIndex: z.number().int(),
+  /** Clamped: a game whose mechanics forbid skipping can never be skipped. */
+  allowSkip: z.boolean(),
+  /** The round clock length (seconds) — begins only at `begin`. */
+  durationSeconds: z.number().int(),
+  /** Intrinsic per-item limit, or null. */
+  itemSeconds: z.number().int().nullable(),
+  instantFeedback: z.boolean(),
+  /** 0 = unlimited questions within the round clock. */
+  maxQuestions: z.number().int(),
+});
+export type GameInfo = z.infer<typeof gameInfoSchema>;
+
+/** Start a game-set attempt. `serve:false` (the play UI) returns pre-flight info
+ * WITHOUT serving the first item, so the round clock stays stopped during the
+ * tutorial; `serve:true` (the default, e.g. tests / a quick-start caller) also
+ * serves the first item and starts its clock immediately. */
+export const startGameSetRequestSchema = z
+  .object({ serve: z.boolean().default(true) })
+  .default({ serve: true });
+export type StartGameSetRequest = z.infer<typeof startGameSetRequestSchema>;
+
 export const startGameSetResponseSchema = z.object({
   attemptId: z.string(),
   attemptToken: z.string(),
@@ -5522,18 +5560,31 @@ export const startGameSetResponseSchema = z.object({
   totalGames: z.number().int(),
   /** Attempts still available after this start; null = unlimited. */
   attemptsRemaining: z.number().int().nullable(),
-  item: gameItemViewSchema,
+  /** The first game's pre-flight info (clock NOT running yet). */
+  firstGame: gameInfoSchema,
+  /** The first item when `serve` was true, else null — served + clock started
+   * only by `begin` in the deferred (UI) flow. */
+  item: gameItemViewSchema.nullable(),
 });
 export type StartGameSetResponse = z.infer<typeof startGameSetResponseSchema>;
 
+/** Serves the current game's first item and STARTS its clock (server-set
+ * `expiresAt`). Idempotent: a re-call returns the current item without resetting
+ * the clock, so a client cannot extend time by re-calling. */
+export const beginGameResponseSchema = z.object({
+  item: gameItemViewSchema,
+});
+export type BeginGameResponse = z.infer<typeof beginGameResponseSchema>;
+
 /**
- * Answer or skip the current item. `submission` is the game-specific move
- * payload the server REPLAYS — `unknown` because it varies per game. The server
- * NEVER reads a client-supplied score; any such field is ignored.
+ * Answer / skip / declare-expired for the current item. `submission` is the
+ * game-specific move payload the server REPLAYS — `unknown` because it varies
+ * per game. The server NEVER reads a client-supplied score. `action: "expire"`
+ * asks the server to record `expired` IFF its own clock agrees — see A3.
  */
 export const answerGameItemRequestSchema = z.object({
   itemIndex: z.number().int().min(0),
-  action: z.enum(["answer", "skip"]).default("answer"),
+  action: z.enum(["answer", "skip", "expire"]).default("answer"),
   submission: z.unknown().optional(),
 });
 export type AnswerGameItemRequest = z.infer<typeof answerGameItemRequestSchema>;
@@ -5587,11 +5638,26 @@ export const probeGameItemResponseSchema = z.object({
 export type ProbeGameItemResponse = z.infer<typeof probeGameItemResponseSchema>;
 
 export const advanceGameResponseSchema = z.object({
-  /** The first item of the next game, or null if the whole set is finished. */
+  /** The NEXT game's pre-flight info, or null if the whole set is finished. */
+  nextGame: gameInfoSchema.nullable(),
+  /** The next game's first item when `serve` was true, else null — served (and
+   * its clock started) by the following `begin` in the deferred (UI) flow. */
   item: gameItemViewSchema.nullable(),
   setComplete: z.boolean(),
 });
 export type AdvanceGameResponse = z.infer<typeof advanceGameResponseSchema>;
+
+/** Records one proctoring warning on the attempt (A4), mirroring the exam
+ * warning route. Crossing the malpractice threshold force-finishes the attempt. */
+export const recordGameWarningResponseSchema = z.object({
+  warningsTriggered: z.number().int(),
+  isMalpractice: z.boolean(),
+  /** True when this warning crossed the threshold and the attempt was finished. */
+  autoFinished: z.boolean(),
+});
+export type RecordGameWarningResponse = z.infer<
+  typeof recordGameWarningResponseSchema
+>;
 
 export const gameResultSchema = z.object({
   status: gameSetAttemptStatusSchema,

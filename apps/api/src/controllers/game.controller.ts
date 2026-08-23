@@ -11,6 +11,7 @@ import {
   gameSetUpsertSchema,
   probeGameItemRequestSchema,
   setGameSetPublishSchema,
+  startGameSetRequestSchema,
 } from "@codeapt/shared";
 import type { Request, Response } from "express";
 
@@ -49,9 +50,11 @@ export const listMyGamesController = asyncHandler(
 
 export const startGameSetController = asyncHandler(
   async (req: Request, res: Response) => {
+    const { serve } = startGameSetRequestSchema.parse(req.body ?? {});
     const data = await engine.startGameSetAttempt(
       requireUserId(req),
       req.params.gameSetId ?? "",
+      serve,
     );
     res.status(201).json(data);
   },
@@ -81,11 +84,30 @@ export const probeGameItemController = asyncHandler(
   },
 );
 
+export const beginGameController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const data = await engine.beginGame(req.params.attemptId ?? "", caller(req));
+    res.status(200).json(data);
+  },
+);
+
+export const recordGameWarningController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const data = await engine.recordGameWarning(
+      req.params.attemptId ?? "",
+      caller(req),
+    );
+    res.status(200).json(data);
+  },
+);
+
 export const advanceGameController = asyncHandler(
   async (req: Request, res: Response) => {
+    const { serve } = startGameSetRequestSchema.parse(req.body ?? {});
     const data = await engine.advanceGame(
       req.params.attemptId ?? "",
       caller(req),
+      serve,
     );
     res.status(200).json(data);
   },

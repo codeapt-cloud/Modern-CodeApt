@@ -69,7 +69,11 @@ export function toGamePlayListItem(
     id: gs._id.toString(),
     title: gs.title,
     description: gs.description,
-    gameKeys: gs.games.map((g) => g.gameKey as GameKey),
+    games: gs.games.map((g) => ({
+      gameKey: g.gameKey as GameKey,
+      durationSeconds: g.durationSeconds,
+      allowSkip: g.allowSkip,
+    })),
     selectionMode: gs.selectionMode as GamePlayListItem["selectionMode"],
     totalGames: gs.games.length,
     perQuestionTimerSeconds: gs.perQuestionTimerSeconds,

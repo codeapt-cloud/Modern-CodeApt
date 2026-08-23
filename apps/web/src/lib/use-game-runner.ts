@@ -1,22 +1,22 @@
 /**
- * Game-attempt runner — the gaming analogue of use-exam-runner. Drives the whole
- * play sequence with the SAME timing discipline: a single re-syncable countdown
- * where the SERVER value (remainingSeconds / itemRemainingSeconds) from every
- * response overwrites local ticks; local ticking only smooths between responses.
+ * Game-attempt runner — the gaming analogue of use-exam-runner, on the Step-7b
+ * lazy-clock flow. `start(serve:false)` runs on mount and returns the first
+ * game's pre-flight INFO with NO clock; the tutorial's "Start" calls `begin`,
+ * which serves the first item and starts the server-set clock. Between games,
+ * `advance(serve:false)` returns the next game's info (clock still stopped) and
+ * the next tutorial shows; its "Start" calls `begin` again.
  *
- * Clock/tutorial ordering (see the step report): the server sets `expiresAt` at
- * SERVE time (inside start/advance), so to keep the clock STOPPED while the
- * tutorial is up we defer start/advance to the tutorial's "Start" — `beginGame`
- * serves the first item of a game exactly when the player commits to begin it.
- *
- * Phases: preflight (game-1 tutorial, clock stopped) → playing → feedback (marks
- * + optional practice reveal) → either the next item (no round-trip; `next` came
- * with the answer) or game-complete (the next game's tutorial) → finish → done.
+ * Timing discipline mirrors the exam runner exactly: the server's
+ * remainingSeconds / itemRemainingSeconds from EVERY response overwrite local
+ * ticks; local ticking only smooths between responses. On a client-side clock
+ * expiry the runner sends action "expire" and lets the SERVER decide — a 409
+ * (server clock still live) is ignored so play resumes, never a bogus wrong.
  */
 import {
   type AnswerGameItemResponse,
   type GameDifficulty,
   type GameExplanationResponse,
+  type GameInfo,
   type GameItemView,
   type GameKey,
   type GameResult,
@@ -33,38 +33,35 @@ import {
 } from "./game-runner.js";
 
 export type GamePhase =
+  | "loading"
   | "preflight"
   | "playing"
   | "feedback"
-  | "game-complete"
   | "advancing"
   | "finishing"
   | "done"
   | "error";
 
 export interface UseGameRunnerArgs {
-  /** Serves game 1: the shell passes the correct start (global vs tenant). */
+  /** The deferred start thunk (serve:false), supplied by the shell so it can
+   * choose the global vs tenant start endpoint. */
   start: () => Promise<StartGameSetResponse>;
-  /** The set's game keys — used for the game-1 tutorial before the server
-   * resolves the sequence. Order is authoritative for fixed sets. */
-  gameKeys: GameKey[];
 }
 
 const AUTO_ADVANCE_MS = 1100;
 
-export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
-  const [phase, setPhase] = useState<GamePhase>("preflight");
-  const [started, setStarted] = useState(false);
+export function useGameRunner({ start }: UseGameRunnerArgs) {
+  const [phase, setPhase] = useState<GamePhase>("loading");
+  const [info, setInfo] = useState<GameInfo | null>(null);
   const [item, setItem] = useState<GameItemView | null>(null);
   const [remaining, setRemaining] = useState(0);
   const [itemRemaining, setItemRemaining] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<AnswerFeedback | null>(null);
   const [reveal, setReveal] = useState<GameExplanationResponse | null>(null);
   const [result, setResult] = useState<GameResult | null>(null);
-  const [sequence, setSequence] = useState<GameKey[]>([]);
-  const [gameIndex, setGameIndex] = useState(0);
-  const [totalGames, setTotalGames] = useState(gameKeys.length);
+  const [totalGames, setTotalGames] = useState(0);
   const [gameScore, setGameScore] = useState(0);
+  const [warnings, setWarnings] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -75,6 +72,7 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
   const lastSubmission = useRef<unknown>(undefined);
   const expiredRef = useRef(false);
   const autoTimer = useRef<number | null>(null);
+  const startedRef = useRef(false);
 
   const clearAuto = (): void => {
     if (autoTimer.current) window.clearTimeout(autoTimer.current);
@@ -93,6 +91,26 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
     setPhase("playing");
   }, []);
 
+  // Start on mount (serve:false): pre-flight info only, clock stopped.
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    void (async () => {
+      try {
+        const res = await start();
+        attemptRef.current = res.attemptId;
+        tokenRef.current = res.attemptToken;
+        setTotalGames(res.totalGames);
+        setInfo(res.firstGame);
+        setGameScore(0);
+        setPhase("preflight");
+      } catch (err) {
+        setError(parseApiError(err).message);
+        setPhase("error");
+      }
+    })();
+  }, [start]);
+
   const finish = useCallback(async (): Promise<void> => {
     const attemptId = attemptRef.current;
     if (!attemptId) return;
@@ -107,15 +125,53 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
     }
   }, []);
 
+  /** Tutorial "Start": serve the current game's first item + start its clock. */
+  const beginGame = useCallback(async (): Promise<void> => {
+    const attemptId = attemptRef.current;
+    if (!attemptId) return;
+    setBusy(true);
+    setError(null);
+    setGameScore(0);
+    try {
+      const res = await api.games.begin(attemptId, tokenRef.current);
+      loadItem(res.item);
+    } catch (err) {
+      setError(parseApiError(err).message);
+      setPhase("error");
+    } finally {
+      setBusy(false);
+    }
+  }, [loadItem]);
+
+  // A game finished → get the next game's pre-flight info (serve:false), or
+  // finish the set. Runs automatically after the last item's feedback.
+  const advanceToNext = useCallback(async (): Promise<void> => {
+    const attemptId = attemptRef.current;
+    if (!attemptId) return;
+    setPhase("advancing");
+    try {
+      const res = await api.games.advance(attemptRef.current!, tokenRef.current, false);
+      if (res.setComplete || !res.nextGame) {
+        await finish();
+        return;
+      }
+      setInfo(res.nextGame);
+      setPhase("preflight");
+    } catch (err) {
+      setError(parseApiError(err).message);
+      setPhase("error");
+    }
+  }, [finish]);
+
   const continueAfterFeedback = useCallback((): void => {
     clearAuto();
     if (pendingComplete.current || !pendingNext.current) {
-      setPhase("game-complete");
+      void advanceToNext();
     } else {
       loadItem(pendingNext.current);
       pendingNext.current = null;
     }
-  }, [loadItem]);
+  }, [advanceToNext, loadItem]);
 
   const applyAnswerResponse = useCallback(
     async (res: AnswerGameItemResponse): Promise<void> => {
@@ -123,7 +179,6 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
       setGameScore(res.gameScore);
       pendingNext.current = res.next;
       pendingComplete.current = res.gameComplete;
-      // Practice mode: fetch + show the reveal, and WAIT for the player.
       if (item?.instantFeedback && attemptRef.current) {
         try {
           const ex = await api.games.explain(
@@ -133,12 +188,11 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
           );
           setReveal(ex);
         } catch {
-          /* reveal is best-effort; feedback still shows */
+          /* reveal is best-effort */
         }
       }
       setPhase("feedback");
       if (!item?.instantFeedback) {
-        // Non-practice: brief flash, then auto-continue (a click can skip it).
         autoTimer.current = window.setTimeout(
           continueAfterFeedback,
           AUTO_ADVANCE_MS,
@@ -149,11 +203,14 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
   );
 
   const sendAnswer = useCallback(
-    async (action: "answer" | "skip", submission: unknown): Promise<void> => {
+    async (
+      action: "answer" | "skip" | "expire",
+      submission: unknown,
+    ): Promise<void> => {
       const attemptId = attemptRef.current;
       const current = item;
       if (!attemptId || !current) return;
-      lastSubmission.current = submission;
+      if (action !== "expire") lastSubmission.current = submission;
       setBusy(true);
       setError(null);
       try {
@@ -164,9 +221,16 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
         );
         await applyAnswerResponse(res);
       } catch (err) {
-        // The answer endpoint is idempotent per itemIndex, so retrying the same
-        // item is safe — keep the item playable and surface a retry.
-        setError(parseApiError(err).message);
+        const parsed = parseApiError(err);
+        // A3: the server clock disagreed the item expired — it is still live.
+        // Resume play; the next real expiry (or answer) proceeds normally.
+        if (parsed.code === "GAME_NOT_EXPIRED") {
+          expiredRef.current = false;
+          setPhase("playing");
+          return;
+        }
+        // The answer endpoint is idempotent per item, so a retry is safe.
+        setError(parsed.message);
         setPhase("playing");
       } finally {
         setBusy(false);
@@ -188,48 +252,24 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
     [sendAnswer],
   );
 
-  const beginGame = useCallback(async (): Promise<void> => {
-    setBusy(true);
-    setError(null);
-    try {
-      if (!attemptRef.current) {
-        const res = await start();
-        attemptRef.current = res.attemptId;
-        tokenRef.current = res.attemptToken;
-        setStarted(true);
-        setSequence(res.sequence);
-        setTotalGames(res.totalGames);
-        setGameIndex(0);
-        setGameScore(0);
-        loadItem(res.item);
-      } else {
-        setPhase("advancing");
-        const res = await api.games.advance(attemptRef.current, tokenRef.current);
-        if (res.setComplete || !res.item) {
-          await finish();
-          return;
-        }
-        setGameIndex((g) => g + 1);
-        setGameScore(0);
-        loadItem(res.item);
-      }
-    } catch (err) {
-      setError(parseApiError(err).message);
-      setPhase("error");
-    } finally {
-      setBusy(false);
-    }
-  }, [start, loadItem, finish]);
-
-  // Client clock hits 0 → lock the item (server is authoritative and records
-  // `expired`). Prefer skip when allowed so a not-quite-expired server clock
-  // records `skipped`, never a bogus wrong.
+  // Client clock hit 0 → ask the SERVER to expire it (A3). No bogus wrong.
   const expire = useCallback((): void => {
     if (expiredRef.current) return;
     expiredRef.current = true;
-    if (item?.allowSkip) void sendAnswer("skip", undefined);
-    else void sendAnswer("answer", {});
-  }, [item, sendAnswer]);
+    void sendAnswer("expire", undefined);
+  }, [sendAnswer]);
+
+  const recordWarning = useCallback(async (): Promise<void> => {
+    const attemptId = attemptRef.current;
+    if (!attemptId) return;
+    try {
+      const res = await api.games.warning(attemptId, tokenRef.current);
+      setWarnings(res.warningsTriggered);
+      if (res.autoFinished) void finish();
+    } catch {
+      /* best-effort */
+    }
+  }, [finish]);
 
   // Single countdown interval; server values overwrite it on every loadItem.
   useEffect(() => {
@@ -248,36 +288,28 @@ export function useGameRunner({ start, gameKeys }: UseGameRunnerArgs) {
     }
   }, [remaining, itemRemaining, phase, expire]);
 
-  // The game whose TUTORIAL is showing is always the UPCOMING one: game 1 before
-  // start, else the next in the resolved sequence.
-  const upcomingIndex = started ? gameIndex + 1 : 0;
-  const tutorialGameKey: GameKey | null = started
-    ? (sequence[upcomingIndex] ?? null)
-    : (gameKeys[0] ?? null);
-
   return {
     phase,
+    info,
     item,
     remaining,
     itemRemaining,
     feedback,
     reveal,
     result,
-    sequence,
-    gameIndex,
     totalGames,
     gameScore,
+    warnings,
     error,
     busy,
     difficulty: (item?.difficulty ?? "easy") as GameDifficulty,
-    /** Key + 1-based number of the game whose tutorial is up. */
-    tutorialGameKey,
-    tutorialGameNumber: upcomingIndex + 1,
+    gameKey: (item?.gameKey ?? info?.gameKey ?? null) as GameKey | null,
     beginGame,
     answer,
     skip,
     retry,
     continueAfterFeedback,
     finish,
+    recordWarning,
   };
 }

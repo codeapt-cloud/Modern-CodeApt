@@ -1,18 +1,17 @@
 /**
- * Pre-flight / tutorial shown before EACH game in the sequence — a product
- * requirement (students lose marks to unfamiliar mechanics), not polish.
+ * Pre-flight / tutorial shown before EACH game — a product requirement (students
+ * lose marks to unfamiliar mechanics), not polish.
  *
- * The clock is STOPPED here: the server starts a game's `expiresAt` at serve
- * time (inside start/advance), so the runner defers that call to this screen's
- * "Start". Consequently the server-authoritative skip/clock/per-item values are
- * not yet known here (knowing them means serving, which starts the clock) — they
- * appear in the runner header the instant play begins. This screen shows the
- * game's name + mechanics (static copy) and the set-level facts we DO have.
- * See the step report (c) for the timing note.
+ * Step 7b: the clock is STOPPED here AND the screen now shows the SERVER's own
+ * facts. The runner reaches this screen via start/advance with serve:false (no
+ * clock, no item), so this tutorial can display the authoritative allowSkip,
+ * round-clock length, and per-item limit from GameInfo; the clock only begins
+ * when "Start" calls `begin`.
  */
 import type { GameKey } from "@codeapt/shared";
 
 import { GAME_COPY } from "../../lib/game-copy.js";
+import { formatClock } from "../../lib/game-runner.js";
 import { Reveal } from "../motion/index.js";
 import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
@@ -23,6 +22,9 @@ export function GameTutorial({
   gameNumber,
   totalGames,
   practiceMode,
+  allowSkip,
+  durationSeconds,
+  itemSeconds,
   busy,
   onStart,
 }: {
@@ -30,6 +32,9 @@ export function GameTutorial({
   gameNumber: number;
   totalGames: number;
   practiceMode: boolean;
+  allowSkip: boolean;
+  durationSeconds: number;
+  itemSeconds: number | null;
   busy: boolean;
   onStart: () => void;
 }): JSX.Element {
@@ -43,9 +48,7 @@ export function GameTutorial({
               <Badge variant="neutral">
                 Game {gameNumber} of {totalGames}
               </Badge>
-              {practiceMode ? (
-                <Badge variant="info">Practice mode</Badge>
-              ) : null}
+              {practiceMode ? <Badge variant="info">Practice mode</Badge> : null}
             </div>
 
             <div className="space-y-2">
@@ -58,22 +61,19 @@ export function GameTutorial({
               <p className="text-sm text-ink-muted">{copy.how}</p>
             </div>
 
-            <ul className="space-y-1.5 text-sm text-ink-muted">
-              <li>
-                The countdown, difficulty, and whether you can skip are shown at
-                the top once the round begins.
-              </li>
-              <li>
-                Answer as many questions as you can — correct answers raise the
-                difficulty (and the marks on offer); wrong ones lower it.
-              </li>
-              {practiceMode ? (
-                <li>
-                  In practice mode you’ll see the correct answer after each
-                  question.
-                </li>
-              ) : null}
-            </ul>
+            {/* Server-authoritative facts (Step 7b/A1) — no longer guesses. */}
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <Fact label="Round time" value={formatClock(durationSeconds)} />
+              <Fact
+                label="Per question"
+                value={itemSeconds !== null ? `${itemSeconds}s` : "No limit"}
+              />
+              <Fact label="Skip" value={allowSkip ? "Allowed" : "Not allowed"} />
+              <Fact
+                label="Feedback"
+                value={practiceMode ? "After each answer" : "At the end"}
+              />
+            </dl>
 
             <div className="flex flex-col items-stretch gap-2">
               <Button size="lg" loading={busy} onClick={onStart}>
@@ -86,6 +86,17 @@ export function GameTutorial({
           </CardContent>
         </Card>
       </Reveal>
+    </div>
+  );
+}
+
+function Fact({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div className="rounded-lg border border-subtle bg-surface-base px-3 py-2">
+      <dt className="text-[10px] uppercase tracking-wide text-ink-muted">
+        {label}
+      </dt>
+      <dd className="font-medium text-ink">{value}</dd>
     </div>
   );
 }

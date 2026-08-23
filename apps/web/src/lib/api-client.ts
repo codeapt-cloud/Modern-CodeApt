@@ -206,10 +206,12 @@ import {
   type ExamResult,
   type AdvanceGameResponse,
   type AnswerGameItemResponse,
+  type BeginGameResponse,
   type GameExplanationResponse,
   type GamePlayListResponse,
   type GameResult,
   type ProbeGameItemResponse,
+  type RecordGameWarningResponse,
   type StartGameSetResponse,
   type MockPayRequest,
   type OrderListResponse,
@@ -3406,15 +3408,47 @@ export const api = {
       );
       return data;
     },
-    start: async (gameSetId: string): Promise<StartGameSetResponse> => {
+    start: async (
+      gameSetId: string,
+      serve = true,
+    ): Promise<StartGameSetResponse> => {
       const { data } = await http.post<StartGameSetResponse>(
         `${API_PREFIX}/game-sets/${gameSetId}/attempts`,
+        { serve },
+      );
+      return data;
+    },
+    /** Serve the current game's first item + start its clock (deferred flow). */
+    begin: async (
+      attemptId: string,
+      token?: string,
+    ): Promise<BeginGameResponse> => {
+      const { data } = await http.post<BeginGameResponse>(
+        `${API_PREFIX}/game-attempts/${attemptId}/begin`,
+        undefined,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    /** Record a proctoring warning (may force-finish past the threshold). */
+    warning: async (
+      attemptId: string,
+      token?: string,
+    ): Promise<RecordGameWarningResponse> => {
+      const { data } = await http.post<RecordGameWarningResponse>(
+        `${API_PREFIX}/game-attempts/${attemptId}/warning`,
+        undefined,
+        attemptHeaders(token),
       );
       return data;
     },
     answer: async (
       attemptId: string,
-      body: { itemIndex: number; action: "answer" | "skip"; submission?: unknown },
+      body: {
+        itemIndex: number;
+        action: "answer" | "skip" | "expire";
+        submission?: unknown;
+      },
       token?: string,
     ): Promise<AnswerGameItemResponse> => {
       const { data } = await http.post<AnswerGameItemResponse>(
@@ -3427,10 +3461,11 @@ export const api = {
     advance: async (
       attemptId: string,
       token?: string,
+      serve = true,
     ): Promise<AdvanceGameResponse> => {
       const { data } = await http.post<AdvanceGameResponse>(
         `${API_PREFIX}/game-attempts/${attemptId}/advance`,
-        undefined,
+        { serve },
         attemptHeaders(token),
       );
       return data;
@@ -3482,9 +3517,11 @@ export const api = {
     start: async (
       slug: string,
       gameSetId: string,
+      serve = true,
     ): Promise<StartGameSetResponse> => {
       const { data } = await http.post<StartGameSetResponse>(
         `${API_PREFIX}/c/${slug}/game-sets/${gameSetId}/attempts`,
+        { serve },
       );
       return data;
     },
