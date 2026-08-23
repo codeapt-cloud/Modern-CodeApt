@@ -2,3 +2,9 @@ faster-whisper==1.0.3
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 pydantic==2.8.2
+# faster-whisper imports huggingface_hub at load, which imports `requests` — a
+# transitive dep that resolves in some environments but NOT in python:3.11-slim,
+# where the container crash-looped with ModuleNotFoundError on the first real VPS
+# run. Pinned explicitly here (was hand-patched on the box; this makes the fix
+# survive a git pull).
+requests==2.32.3

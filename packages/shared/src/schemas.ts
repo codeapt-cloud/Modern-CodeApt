@@ -5837,6 +5837,10 @@ export const misspokenWordSchema = z.object({
 export const readAloudScoreSchema = z.object({
   wordAccuracy: z.number(),
   wer: z.number(),
+  /** Operator detail: exactly-matched word count + homophone (phonetic) matches
+   * accepted as correct. The student view collapses these into "correct". */
+  exactMatches: z.number().int().nonnegative(),
+  phoneticMatches: z.array(misspokenWordSchema),
   missedWords: z.array(z.string()),
   missaidWords: z.array(misspokenWordSchema),
   extraWords: z.array(z.string()),

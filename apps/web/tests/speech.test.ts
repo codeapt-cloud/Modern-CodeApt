@@ -141,7 +141,16 @@ describe("scoreReadAloud — composite", () => {
     expect(score.fluency.wordCount).toBe(9);
     // The result carries no pronunciation/clarity field of any kind.
     expect(Object.keys(score).sort()).toEqual(
-      ["extraWords", "fluency", "missaidWords", "missedWords", "wer", "wordAccuracy"].sort(),
+      [
+        "exactMatches",
+        "extraWords",
+        "fluency",
+        "missaidWords",
+        "missedWords",
+        "phoneticMatches",
+        "wer",
+        "wordAccuracy",
+      ].sort(),
     );
   });
 });
@@ -149,3 +158,51 @@ describe("scoreReadAloud — composite", () => {
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+describe("phonetic-tolerant word accuracy — three categories", () => {
+  it("an exact transcript is unchanged: 100%, all exact, no phonetic/errors", () => {
+    const r = wordErrorRate(REF, REF);
+    expect(r.wordAccuracy).toBe(100);
+    expect(r.exactMatches).toBe(9);
+    expect(r.phoneticMatches).toEqual([]);
+    expect(r.substitutions).toBe(0);
+  });
+
+  it("a homophone the ASR spelled differently is CORRECT (not an error)", () => {
+    // reference "... the right ...", transcript wrote the homophone "write".
+    const r = wordErrorRate("turn to the right now", "turn to the write now");
+    expect(r.wordAccuracy).toBe(100); // phonetic match ≠ error
+    expect(r.substitutions).toBe(0);
+    expect(r.missaidWords).toEqual([]);
+    expect(r.phoneticMatches).toEqual([{ expected: "right", heard: "write" }]);
+    expect(r.exactMatches).toBe(4);
+  });
+
+  it("a genuine misreading is an error (missaid), lowering accuracy", () => {
+    const r = wordErrorRate("the red car stopped", "the blue car stopped");
+    expect(r.substitutions).toBe(1);
+    expect(r.missaidWords).toEqual([{ expected: "red", heard: "blue" }]);
+    expect(r.phoneticMatches).toEqual([]);
+    expect(r.wordAccuracy).toBe(75); // 1 of 4 wrong
+  });
+
+  it("mixes all three: exact + phonetic-correct + a real vowel error", () => {
+    // "write"→"right" is phonetic (correct); "ten"→"tin" is a real vowel error.
+    const r = wordErrorRate("I write the ten tests", "I right the tin tests");
+    expect(r.exactMatches).toBe(3); // I, the, tests
+    expect(r.phoneticMatches).toEqual([{ expected: "write", heard: "right" }]);
+    expect(r.missaidWords).toEqual([{ expected: "ten", heard: "tin" }]);
+    expect(r.substitutions).toBe(1);
+    expect(r.wordAccuracy).toBe(80); // 1 of 5 wrong
+  });
+
+  it("scoreReadAloud surfaces the categories alongside fluency", () => {
+    const timings: WordTiming[] = normalizeWords("read the right words").map(
+      (word, i) => ({ word, start: i * 0.5, end: i * 0.5 + 0.4 }),
+    );
+    const s = scoreReadAloud("read the right words", "read the write words", timings);
+    expect(s.wordAccuracy).toBe(100);
+    expect(s.phoneticMatches).toEqual([{ expected: "right", heard: "write" }]);
+    expect(s.exactMatches).toBe(3);
+  });
+});

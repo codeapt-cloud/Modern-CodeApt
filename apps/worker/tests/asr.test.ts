@@ -133,3 +133,75 @@ describe("asrTranscribe — mock", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("ASR contract — request/response field names (drift guard)", () => {
+  // Fixtures derived from apps/asr/main.py's SNAKE_CASE pydantic schema. The
+  // real service rejected a camelCase body with {"loc":["body","audio_url"]} —
+  // a stub that accepts anything hides that, so we pin the EXACT wire shape.
+  const REQUEST_KEYS = ["audio_url", "word_timestamps", "vad_filter"] as const;
+
+  it("serializes EXACTLY main.py's request fields (snake_case, no camelCase)", async () => {
+    env.ASR_URL = "https://asr.test";
+    env.ASR_FALLBACK_URL = undefined;
+    env.ASR_MOCK = false;
+    let sentBody: unknown;
+    let sentUrl = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit) => {
+        sentUrl = url;
+        sentBody = JSON.parse(String(init.body));
+        return okResponse({ transcript: "x", words: [] });
+      }),
+    );
+
+    await asrTranscribe({ audioUrl: "https://cdn/a.webm" });
+
+    expect(sentUrl).toBe("https://asr.test/transcribe");
+    const body = sentBody as Record<string, unknown>;
+    // Exact key set — a missing/renamed/extra field fails here.
+    expect(Object.keys(body).sort()).toEqual([...REQUEST_KEYS].sort());
+    expect(body.audio_url).toBe("https://cdn/a.webm");
+    expect(body.word_timestamps).toBe(true);
+    expect(body.vad_filter).toBe(true);
+    // The exact drift that failed on the VPS must never regress.
+    expect(body).not.toHaveProperty("audioUrl");
+  });
+
+  it("parses EXACTLY main.py's response shape (incl. duration→durationSeconds)", async () => {
+    env.ASR_URL = "https://asr.test";
+    env.ASR_MOCK = false;
+    // Byte-for-byte what main.py returns.
+    const RESPONSE = {
+      transcript: "the quick fox",
+      words: [
+        { word: "the", start: 0.0, end: 0.3 },
+        { word: "quick", start: 0.35, end: 0.7 },
+        { word: "fox", start: 0.75, end: 1.1 },
+      ],
+      language: "en",
+      duration: 1.1,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => okResponse(RESPONSE)));
+
+    const res = await asrTranscribe({ audioUrl: "https://cdn/a.webm" });
+    expect(res.transcript).toBe("the quick fox");
+    expect(res.words).toEqual(RESPONSE.words);
+    expect(res.language).toBe("en");
+    expect(res.durationSeconds).toBe(1.1); // reads `duration`, not `durationSeconds`
+  });
+
+  it("a response missing `transcript` (renamed field) is rejected, not silently blank", async () => {
+    env.ASR_URL = "https://asr.test";
+    env.ASR_FALLBACK_URL = undefined;
+    env.ASR_MOCK = false;
+    // e.g. the service renamed transcript → "text": the client must NOT accept it.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => okResponse({ text: "oops", words: [] })),
+    );
+    await expect(
+      asrTranscribe({ audioUrl: "https://cdn/a.webm" }),
+    ).rejects.toBeInstanceOf(AsrError);
+  });
+});

@@ -57,6 +57,13 @@ def transcribe(req: TranscribeRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"could not fetch audio: {exc}")
 
     try:
+        # DELIBERATELY NO `initial_prompt` / biasing toward any reference text.
+        # Biasing the decoder toward the known read-aloud passage would "fix"
+        # homophone spellings (right/write) — but it would ALSO transcribe a
+        # student who genuinely MISREAD as if they had read correctly, inflating
+        # every score and destroying the measurement. The ASR must stay unbiased;
+        # homophone tolerance is handled downstream in the pure scorer
+        # (packages/shared/src/phonetics.ts), never here. Do not "optimise" this.
         segments, info = model.transcribe(
             path,
             word_timestamps=req.word_timestamps,

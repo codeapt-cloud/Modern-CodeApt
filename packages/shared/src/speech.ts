@@ -14,7 +14,17 @@
  * There is deliberately NO pronunciation or clarity score: Whisper returns
  * words, not phonemes, so a pronunciation number is not honestly derivable from
  * it (see the module docs). accent/clarity is not scored anywhere.
+ *
+ * Word comparison is PHONETIC-TOLERANT (see ./phonetics.ts): a pair counts as
+ * correct if it matches exactly OR phonetically, so the student is NOT penalised
+ * for Whisper writing a homophone ("right"→"write") when their articulation was
+ * correct. This removes false NEGATIVES; it does not invent tolerance for poor
+ * reading — vowel distinctions ("ten"/"tin", "bed"/"bad") and distinct
+ * consonants ("ride"/"right") still score as errors, because a read-aloud test
+ * legitimately checks them. The result reports THREE categories (exact /
+ * phonetic / error) so an operator can see what the tolerance did.
  */
+import { phoneticMatch } from "./phonetics.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,16 +46,29 @@ export interface MisspokenWord {
 export interface WordAccuracyResult {
   readonly referenceWordCount: number;
   readonly hypothesisWordCount: number;
+  /** Reference words transcribed identically. */
+  readonly exactMatches: number;
+  /**
+   * Reference words that were NOT identical but matched PHONETICALLY (Whisper's
+   * homophone spelling — "right" transcribed as "write"). Counted as correct,
+   * NOT as errors. Kept as {expected, heard} pairs so an operator can audit what
+   * the phonetic tolerance did; the student view collapses these into "correct".
+   */
+  readonly phoneticMatches: readonly MisspokenWord[];
+  /** GENUINE substitutions — a real, phonetically-distinct misreading. */
   readonly substitutions: number;
   readonly deletions: number;
   readonly insertions: number;
-  /** Word Error Rate = (S + D + I) / referenceWordCount. Can exceed 1. */
+  /**
+   * Word Error Rate = (genuineSubstitutions + D + I) / referenceWordCount.
+   * Phonetic matches are NOT errors, so they do not raise the WER. Can exceed 1.
+   */
   readonly wer: number;
   /** 0..100 = clamp(1 - WER) * 100. The student-facing "word accuracy". */
   readonly wordAccuracy: number;
   /** Reference words that were not said (deletions). */
   readonly missedWords: readonly string[];
-  /** Reference words transcribed as something else (substitutions). */
+  /** Reference words genuinely mis-read (substitutions; NOT phonetic matches). */
   readonly missaidWords: readonly MisspokenWord[];
   /** Extra words in the transcript with no reference counterpart (insertions). */
   readonly extraWords: readonly string[];
@@ -68,6 +91,10 @@ export interface FluencyResult {
 export interface ReadAloudScore {
   readonly wordAccuracy: number;
   readonly wer: number;
+  /** Count of exactly-matched reference words (operator detail). */
+  readonly exactMatches: number;
+  /** Homophone spellings accepted as correct (operator detail). */
+  readonly phoneticMatches: readonly MisspokenWord[];
   readonly missedWords: readonly string[];
   readonly missaidWords: readonly MisspokenWord[];
   readonly extraWords: readonly string[];
@@ -169,6 +196,8 @@ export function wordErrorRate(
     return {
       referenceWordCount: 0,
       hypothesisWordCount: m,
+      exactMatches: 0,
+      phoneticMatches: [],
       substitutions: 0,
       deletions: 0,
       insertions: m,
@@ -180,6 +209,10 @@ export function wordErrorRate(
     };
   }
 
+  // A pair is "aligned" (edit cost 0) when exact OR phonetically equivalent.
+  const aligned = (a: string, b: string): boolean =>
+    a === b || phoneticMatch(a, b);
+
   // DP edit-distance table (n+1 x m+1). d[i][j] = cost to turn ref[:i] → hyp[:j].
   const d: number[][] = Array.from({ length: n + 1 }, () =>
     new Array<number>(m + 1).fill(0),
@@ -188,11 +221,11 @@ export function wordErrorRate(
   for (let j = 0; j <= m; j++) d[0]![j] = j;
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
-      const cost = ref[i - 1] === hyp[j - 1] ? 0 : 1;
+      const cost = aligned(ref[i - 1]!, hyp[j - 1]!) ? 0 : 1;
       d[i]![j] = Math.min(
         d[i - 1]![j]! + 1, // deletion (ref word not said)
         d[i]![j - 1]! + 1, // insertion (extra hyp word)
-        d[i - 1]![j - 1]! + cost, // match or substitution
+        d[i - 1]![j - 1]! + cost, // (exact/phonetic) match or substitution
       );
     }
   }
@@ -200,20 +233,28 @@ export function wordErrorRate(
   // Backtrace, preferring diagonal on ties so matches/subs are counted first.
   let i = n;
   let j = m;
+  let exactMatches = 0;
   let substitutions = 0;
   let deletions = 0;
   let insertions = 0;
+  const phoneticMatches: MisspokenWord[] = [];
   const missedWords: string[] = [];
   const missaidWords: MisspokenWord[] = [];
   const extraWords: string[] = [];
   while (i > 0 || j > 0) {
     const cur = d[i]![j]!;
     if (i > 0 && j > 0) {
-      const cost = ref[i - 1] === hyp[j - 1] ? 0 : 1;
+      const r = ref[i - 1]!;
+      const h = hyp[j - 1]!;
+      const cost = aligned(r, h) ? 0 : 1;
       if (cur === d[i - 1]![j - 1]! + cost) {
-        if (cost === 1) {
+        if (cost === 0) {
+          // Category split: identical vs a phonetic (homophone) match.
+          if (r === h) exactMatches++;
+          else phoneticMatches.push({ expected: r, heard: h });
+        } else {
           substitutions++;
-          missaidWords.push({ expected: ref[i - 1]!, heard: hyp[j - 1]! });
+          missaidWords.push({ expected: r, heard: h });
         }
         i--;
         j--;
@@ -231,14 +272,18 @@ export function wordErrorRate(
     extraWords.push(hyp[j - 1]!);
     j--;
   }
+  phoneticMatches.reverse();
   missedWords.reverse();
   missaidWords.reverse();
   extraWords.reverse();
 
+  // Phonetic matches are correct → only genuine substitutions count as errors.
   const wer = (substitutions + deletions + insertions) / n;
   return {
     referenceWordCount: n,
     hypothesisWordCount: m,
+    exactMatches,
+    phoneticMatches,
     substitutions,
     deletions,
     insertions,
@@ -329,6 +374,8 @@ export function scoreReadAloud(
   return {
     wordAccuracy: acc.wordAccuracy,
     wer: acc.wer,
+    exactMatches: acc.exactMatches,
+    phoneticMatches: acc.phoneticMatches,
     missedWords: acc.missedWords,
     missaidWords: acc.missaidWords,
     extraWords: acc.extraWords,

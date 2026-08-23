@@ -414,6 +414,14 @@ function SpeakingResults({
                       .join(", ")}
                   </div>
                 )}
+                {it.score.phoneticMatches.length > 0 && (
+                  <div className="text-ink-muted">
+                    Accepted as correct (the transcriber spelled a homophone):{" "}
+                    {it.score.phoneticMatches
+                      .map((m) => `${m.expected}→${m.heard}`)
+                      .join(", ")}
+                  </div>
+                )}
                 <div className="text-xs text-ink-muted">
                   Accent and clarity are not scored.
                 </div>
