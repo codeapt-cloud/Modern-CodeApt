@@ -221,8 +221,10 @@ import {
   type StartGameSetResponse,
   type SpeakingPlayListResponse,
   type StartSpeakingResponse,
+  type SpeakingCurrentResponse,
   type SubmitSpeakingItemResponse,
   type SpeakingAttemptResult,
+  type SpeakingAttemptAdminList,
   type SpeakingAssessmentListResponse,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentUpsert,
@@ -3651,12 +3653,22 @@ export const api = {
       slug: string,
       attemptId: string,
       itemIndex: number,
-      // Spoken items send { audioUrl }; a dictation item sends { text }.
-      payload: { audioUrl?: string; text?: string },
+      // Spoken items send { audioUrl }; dictation sends { text }; a silent/
+      // skipped item sends { silent: true } so the server advances disclosure.
+      payload: { audioUrl?: string; text?: string; silent?: boolean },
     ): Promise<SubmitSpeakingItemResponse> => {
       const { data } = await http.post<SubmitSpeakingItemResponse>(
         `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/items/${itemIndex}`,
         payload,
+      );
+      return data;
+    },
+    current: async (
+      slug: string,
+      attemptId: string,
+    ): Promise<SpeakingCurrentResponse> => {
+      const { data } = await http.get<SpeakingCurrentResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/current`,
       );
       return data;
     },
@@ -3668,6 +3680,24 @@ export const api = {
         `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/result`,
       );
       return data;
+    },
+    listAttempts: async (
+      slug: string,
+      assessmentId: string,
+    ): Promise<SpeakingAttemptAdminList> => {
+      const { data } = await http.get<SpeakingAttemptAdminList>(
+        `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/attempts`,
+      );
+      return data;
+    },
+    clearAttempt: async (
+      slug: string,
+      assessmentId: string,
+      attemptId: string,
+    ): Promise<void> => {
+      await http.delete(
+        `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/attempts/${attemptId}`,
+      );
     },
     // --- Authoring (faculty/college_admin + COMMUNICATION.speaking) ---
     list: async (slug: string): Promise<SpeakingAssessmentListResponse> => {

@@ -6170,25 +6170,44 @@ export const speakingItemViewSchema = z.object({
 });
 export type SpeakingItemView = z.infer<typeof speakingItemViewSchema>;
 
-export const startSpeakingResponseSchema = z.object({
+/**
+ * PROGRESSIVE DISCLOSURE — the in-progress state of an attempt. Returns ONLY the
+ * current item (never the full list), mirroring the exam engine's one-section-
+ * at-a-time redaction, so a student can't see (and prepare from) later prompts.
+ * `item` is null when the attempt is finished (currentIndex ≥ totalItems) OR the
+ * server deadline has passed (`expired` true — the attempt can no longer be
+ * advanced).
+ */
+export const speakingCurrentResponseSchema = z.object({
   attemptId: z.string(),
-  assessmentTitle: z.string(),
   status: speakingAttemptStatusSchema,
-  items: z.array(speakingItemViewSchema),
+  totalItems: z.number().int().nonnegative(),
+  currentIndex: z.number().int().nonnegative(),
+  /** Absolute server deadline (ISO). Stamped at start; enforced on read+write. */
+  expiresAt: z.string(),
+  remainingSeconds: z.number().int().nonnegative(),
+  expired: z.boolean(),
+  item: speakingItemViewSchema.nullable(),
+});
+export type SpeakingCurrentResponse = z.infer<
+  typeof speakingCurrentResponseSchema
+>;
+
+export const startSpeakingResponseSchema = speakingCurrentResponseSchema.extend({
+  assessmentTitle: z.string(),
 });
 export type StartSpeakingResponse = z.infer<typeof startSpeakingResponseSchema>;
 
-export const submitSpeakingItemRequestSchema = z
-  .object({
-    /** Cloudinary URL of the recorded audio (spoken items; only the URL reaches
-     *  the API). Absent for dictation. */
-    audioUrl: z.string().min(1).optional(),
-    /** The TYPED sentence for a dictation item — scored inline, no ASR. */
-    text: z.string().optional(),
-  })
-  .refine((b) => Boolean(b.audioUrl) || typeof b.text === "string", {
-    message: "provide audioUrl (spoken items) or text (dictation)",
-  });
+export const submitSpeakingItemRequestSchema = z.object({
+  /** Cloudinary URL of the recorded audio (spoken items; only the URL reaches
+   *  the API). Absent for dictation and for a silent/skipped item. */
+  audioUrl: z.string().min(1).optional(),
+  /** The TYPED sentence for a dictation item — scored inline, no ASR. */
+  text: z.string().optional(),
+  /** No audio was captured (a silent take) — advance without scoring. Every item
+   *  transition goes through submit so the server's current index stays in sync. */
+  silent: z.boolean().optional(),
+});
 export type SubmitSpeakingItemRequest = z.infer<
   typeof submitSpeakingItemRequestSchema
 >;
@@ -6219,9 +6238,38 @@ export type SpeakingAttemptResult = z.infer<
 >;
 
 export const submitSpeakingItemResponseSchema = z.object({
+  /** The item just submitted + its job status (queued for audio, completed for
+   *  dictation/silent). */
   index: z.number().int().nonnegative(),
   status: speechJobStatusSchema,
+  /** The advanced attempt state — the NEXT item to disclose, or item:null when
+   *  the attempt is finished. Progressive disclosure: the client learns the next
+   *  prompt only after submitting the current one. */
+  current: speakingCurrentResponseSchema,
 });
 export type SubmitSpeakingItemResponse = z.infer<
   typeof submitSpeakingItemResponseSchema
+>;
+
+/** Admin/operator row for one attempt on an assessment — status incl. expired,
+ *  so stale attempts are visible and clearable, not stuck in_progress. */
+export const speakingAttemptAdminRowSchema = z.object({
+  attemptId: z.string(),
+  userId: z.string(),
+  userName: z.string(),
+  status: speakingAttemptStatusSchema,
+  currentIndex: z.number().int().nonnegative(),
+  totalItems: z.number().int().nonnegative(),
+  startedAt: z.string(),
+  expiresAt: z.string().nullable(),
+  expired: z.boolean(),
+});
+export type SpeakingAttemptAdminRow = z.infer<
+  typeof speakingAttemptAdminRowSchema
+>;
+export const speakingAttemptAdminListSchema = z.object({
+  items: z.array(speakingAttemptAdminRowSchema),
+});
+export type SpeakingAttemptAdminList = z.infer<
+  typeof speakingAttemptAdminListSchema
 >;

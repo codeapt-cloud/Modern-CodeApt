@@ -29,6 +29,10 @@ import {
   essayGradingProcessor,
 } from "./essay-grading.processor.js";
 import { pacedAiProcessor } from "./paced-ai.processor.js";
+import {
+  ATTEMPT_REAPER_JOB_NAME,
+  attemptReaperProcessor,
+} from "./reaper.processor.js";
 import { speechProcessor } from "./speech.processor.js";
 
 /** Logging no-op fallback for unrecognized `default`-queue jobs. */
@@ -51,6 +55,9 @@ const defaultProcessor: Processor = async (job: Job) => {
   }
   if (job.name === CODING_REFRESH_SWEEP_JOB_NAME) {
     return codingRefreshSweepProcessor(job);
+  }
+  if (job.name === ATTEMPT_REAPER_JOB_NAME) {
+    return attemptReaperProcessor(job);
   }
   return noop(job);
 };

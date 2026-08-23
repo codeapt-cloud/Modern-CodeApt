@@ -76,6 +76,19 @@ export const submitSpeakingItemController = asyncHandler(
   },
 );
 
+export const speakingCurrentController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await speaking.getCurrentSpeakingItem(
+          userId(req),
+          req.params.attemptId ?? "",
+        ),
+      );
+  },
+);
+
 export const speakingResultController = asyncHandler(
   async (req: Request, res: Response) => {
     res
@@ -154,6 +167,32 @@ export const deleteCollegeSpeakingController = asyncHandler(
     await speaking.deleteCollegeSpeaking(
       tenantId(req),
       req.params.assessmentId ?? "",
+    );
+    res.status(204).send();
+  },
+);
+
+// --- Operator attempt management --------------------------------------------
+
+export const listSpeakingAttemptsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await speaking.listSpeakingAttempts(
+          tenantId(req),
+          req.params.assessmentId ?? "",
+        ),
+      );
+  },
+);
+
+export const clearSpeakingAttemptController = asyncHandler(
+  async (req: Request, res: Response) => {
+    await speaking.clearSpeakingAttempt(
+      tenantId(req),
+      req.params.assessmentId ?? "",
+      req.params.attemptId ?? "",
     );
     res.status(204).send();
   },

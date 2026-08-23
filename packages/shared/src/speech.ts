@@ -115,6 +115,28 @@ export interface ReadAloudScore {
 /** A silence longer than this (seconds) between two words counts as a pause. */
 export const PAUSE_THRESHOLD_SECONDS = 0.5;
 
+/** Slack added per item to the attempt's server deadline for upload + the gap
+ *  between items. Generous — the deadline is an abandonment backstop, not a
+ *  tight per-item clock (the recorder already auto-stops each window). */
+export const SPEAKING_ITEM_BUFFER_SECONDS = 20;
+
+/**
+ * Total server-side budget (seconds) for a speaking attempt = the sum of every
+ * item's prep + recording window + a per-item buffer. Stamped once at start as
+ * an absolute `expiresAt`; a read/write past it is refused and the reaper sweeps
+ * it. Pure so it unit-tests without a DB.
+ */
+export function speakingAttemptBudgetSeconds(
+  items: readonly { prepSeconds: number; responseWindowSeconds: number }[],
+  perItemBufferSeconds: number = SPEAKING_ITEM_BUFFER_SECONDS,
+): number {
+  return items.reduce(
+    (total, it) =>
+      total + it.prepSeconds + it.responseWindowSeconds + perItemBufferSeconds,
+    0,
+  );
+}
+
 /**
  * Canned transcript + word timings for ASR_MOCK (offline demo only — the worker
  * returns this when no ASR container is reachable, so the whole speech pipeline

@@ -131,6 +131,12 @@ const speakingAttemptSchema = new Schema(
       default: SpeakingAttemptStatus.IN_PROGRESS,
     },
     items: { type: [speakingAttemptItemSchema], default: [] },
+    // Progressive disclosure: the item currently disclosed to the student. The
+    // in-progress read returns only this item, never the whole list.
+    currentIndex: { type: Number, default: 0, min: 0 },
+    // Server-authoritative deadline stamped at start (= start + summed item
+    // budgets). Reads/writes past it are refused; the reaper sweeps it.
+    expiresAt: { type: Date, default: null },
     startedAt: { type: Date },
     submittedAt: { type: Date },
     scoredAt: { type: Date },
@@ -138,6 +144,8 @@ const speakingAttemptSchema = new Schema(
   { timestamps: true },
 );
 speakingAttemptSchema.index({ user: 1, assessment: 1 });
+// Reaper scan: stale in-progress attempts by deadline.
+speakingAttemptSchema.index({ status: 1, expiresAt: 1 });
 export type SpeakingAttempt = InferSchemaType<typeof speakingAttemptSchema>;
 export const SpeakingAttemptModel = model(
   "SpeakingAttempt",

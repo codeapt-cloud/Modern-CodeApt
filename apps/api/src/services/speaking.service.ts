@@ -27,13 +27,18 @@ import {
   isCourseGranted,
   isPlatformAdmin,
   scoreDictation,
+  speakingAttemptBudgetSeconds,
+  SPEAKING_SUBMIT_GRACE_MS,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentListResponse,
   type SpeakingAssessmentUpsert,
+  type SpeakingAttemptAdminList,
   type SpeakingAttemptResult,
+  type SpeakingCurrentResponse,
   type SpeakingItemResult,
   type SpeakingItemScoreDto,
   type SpeakingItemType as SpeakingItemTypeName,
+  type SpeakingItemView,
   type SpeakingPlayListResponse,
   type StartSpeakingResponse,
   type SubmitSpeakingItemRequest,
@@ -144,14 +149,15 @@ export async function assertCanTakeSpeakingAssessment(
 // Consumption lifecycle
 // ---------------------------------------------------------------------------
 
-function itemViews(a: AssessmentDoc): StartSpeakingResponse["items"] {
-  return a.items.map((it, index) => ({
+/** ONE item's student view — reference/answer material withheld (only read_aloud
+ *  shows its text; answerSet/keyFacts/missingWord are never viewed). */
+function singleItemView(
+  it: AssessmentDoc["items"][number],
+  index: number,
+): SpeakingItemView {
+  return {
     index,
     itemType: it.itemType,
-    // referenceText is the TASK only for read_aloud (the text on screen). For
-    // every other reference type the student hears it and reproduces it, so
-    // showing the text would defeat the item — withhold it. answerSet / keyFacts
-    // / missingWord are never exposed to the student view at all.
     referenceText:
       it.itemType === SpeakingItemType.READ_ALOUD ? it.referenceText : "",
     promptText: it.promptText ?? "",
@@ -161,7 +167,55 @@ function itemViews(a: AssessmentDoc): StartSpeakingResponse["items"] {
     section: it.section ?? "",
     prepSeconds: it.prepSeconds ?? 0,
     responseWindowSeconds: it.responseWindowSeconds ?? 60,
-  }));
+  };
+}
+
+function remainingSeconds(
+  expiresAt: Date | null | undefined,
+  now: Date,
+): number {
+  if (!expiresAt) return 0;
+  return Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
+}
+
+/** An attempt is EXPIRED when it still has an undisclosed item AND its server
+ *  deadline has passed. Once every item is answered the deadline no longer
+ *  matters (only async SCORING remains, which the deadline must not block). */
+function attemptExpired(attempt: AttemptDoc, now: Date): boolean {
+  return (
+    attempt.currentIndex < attempt.items.length &&
+    attempt.status !== SpeakingAttemptStatus.SCORED &&
+    attempt.status !== SpeakingAttemptStatus.EXPIRED &&
+    !!attempt.expiresAt &&
+    now.getTime() > attempt.expiresAt.getTime()
+  );
+}
+
+/** PROGRESSIVE DISCLOSURE: the in-progress state = ONLY the current item. */
+function buildCurrent(
+  attempt: AttemptDoc,
+  assessment: AssessmentDoc | null,
+  now: Date,
+): SpeakingCurrentResponse {
+  const total = assessment ? assessment.items.length : attempt.items.length;
+  const expired =
+    attempt.status === SpeakingAttemptStatus.EXPIRED ||
+    attemptExpired(attempt, now);
+  const idx = attempt.currentIndex;
+  const done = idx >= total;
+  const authored = assessment?.items[idx];
+  const item =
+    !expired && !done && authored ? singleItemView(authored, idx) : null;
+  return {
+    attemptId: attempt._id.toString(),
+    status: attempt.status as SpeakingAttemptStatus,
+    totalItems: total,
+    currentIndex: Math.min(idx, total),
+    expiresAt: attempt.expiresAt ? attempt.expiresAt.toISOString() : "",
+    remainingSeconds: remainingSeconds(attempt.expiresAt, now),
+    expired,
+    item,
+  };
 }
 
 async function loadAssessmentOr404(assessmentId: string): Promise<AssessmentDoc> {
@@ -179,11 +233,13 @@ export async function startSpeakingAttempt(
   await assertCanTakeSpeakingAssessment(userId, assessment);
   if (assessment.items.length === 0) throw NOT_FOUND();
 
-  // Attempt cap (0 = unlimited).
+  // Attempt cap (0 = unlimited). EXPIRED attempts do NOT count — an abandoned
+  // attempt that timed out must not permanently burn the student's slot.
   if (assessment.maxAttempts > 0) {
     const used = await SpeakingAttemptModel.countDocuments({
       user: userId,
       assessment: assessment._id,
+      status: { $ne: SpeakingAttemptStatus.EXPIRED },
     });
     if (used >= assessment.maxAttempts) {
       throw new AppError(
@@ -194,13 +250,24 @@ export async function startSpeakingAttempt(
     }
   }
 
+  // Server-authoritative deadline stamped once at start.
+  const now = new Date();
+  const budgetSeconds = speakingAttemptBudgetSeconds(
+    assessment.items.map((it) => ({
+      prepSeconds: it.prepSeconds ?? 0,
+      responseWindowSeconds: it.responseWindowSeconds ?? 60,
+    })),
+  );
+  const expiresAt = new Date(now.getTime() + budgetSeconds * 1000);
+
   const attempt = await SpeakingAttemptModel.create({
     user: new Types.ObjectId(userId),
     assessment: assessment._id,
     college: assessment.college ?? null,
     status: SpeakingAttemptStatus.IN_PROGRESS,
-    startedAt: new Date(),
-    // One placeholder per authored item; audioUrl fills in on submit.
+    currentIndex: 0,
+    expiresAt,
+    startedAt: now,
     items: assessment.items.map((_, index) => ({
       itemIndex: index,
       audioUrl: "",
@@ -214,10 +281,8 @@ export async function startSpeakingAttempt(
   });
 
   return {
-    attemptId: attempt._id.toString(),
+    ...buildCurrent(attempt, assessment, now),
     assessmentTitle: assessment.title,
-    status: SpeakingAttemptStatus.IN_PROGRESS,
-    items: itemViews(assessment),
   };
 }
 
@@ -238,13 +303,43 @@ async function loadOwnedAttempt(
   return attempt;
 }
 
+/** Lazily finalize an attempt whose deadline passed (so an expired attempt can't
+ *  be resumed even before the reaper runs). Mutates the in-memory doc's status. */
+async function finalizeIfExpired(attempt: AttemptDoc, now: Date): Promise<void> {
+  if (attemptExpired(attempt, now)) {
+    await SpeakingAttemptModel.updateOne(
+      {
+        _id: attempt._id,
+        status: {
+          $nin: [SpeakingAttemptStatus.SCORED, SpeakingAttemptStatus.EXPIRED],
+        },
+      },
+      { $set: { status: SpeakingAttemptStatus.EXPIRED, scoredAt: now } },
+    );
+    attempt.status = SpeakingAttemptStatus.EXPIRED;
+  }
+}
+
+/** READ the attempt's current item — progressive disclosure + resume. Enforces
+ *  the deadline on read: an expired attempt returns item:null + expired:true. */
+export async function getCurrentSpeakingItem(
+  userId: string,
+  attemptId: string,
+): Promise<SpeakingCurrentResponse> {
+  const attempt = await loadOwnedAttempt(userId, attemptId);
+  const assessment = await SpeakingAssessmentModel.findById(attempt.assessment);
+  const now = new Date();
+  await finalizeIfExpired(attempt, now);
+  return buildCurrent(attempt, assessment, now);
+}
+
 /**
- * Submit one item's response. For SPOKEN items this stores the recorded audio
- * URL, creates the ExecutionJob and enqueues a transcription on the `speech`
- * queue (the score arrives asynchronously). For DICTATION — which is TYPED, with
- * NO ASR — the typed text is scored INLINE here (string comparison, phonetics
- * off) and the item is finalized COMPLETED in the same request; nothing is
- * queued. No re-record either way: an already-submitted item is refused.
+ * Submit the CURRENT item's response and advance disclosure. Enforces the
+ * deadline on WRITE (an expired attempt is refused + finalized) and progressive
+ * disclosure (only the current index may be submitted — this also replaces the
+ * old "already submitted" guard). Audio → enqueue async scoring; dictation →
+ * scored inline; silent/skip → finalized as unanswered. Returns the advanced
+ * state (the next item, or item:null when finished).
  */
 export async function submitSpeakingItem(
   userId: string,
@@ -253,95 +348,134 @@ export async function submitSpeakingItem(
   body: SubmitSpeakingItemRequest,
 ): Promise<SubmitSpeakingItemResponse> {
   const attempt = await loadOwnedAttempt(userId, attemptId);
-  const attemptItem = attempt.items[itemIndex];
-  if (!attemptItem) {
-    throw new AppError("Item not found", 404, SpeakingErrorCode.ITEM_NOT_FOUND);
-  }
-  // One response per item: refuse if already recorded (spoken) or finalized
-  // (dictation completes inline, so its status flips to COMPLETED on submit).
-  if (
-    (attemptItem.audioUrl && attemptItem.audioUrl.length > 0) ||
-    attemptItem.jobStatus === SpeechJobStatus.COMPLETED
-  ) {
-    throw new AppError(
-      "This item was already submitted",
-      409,
-      SpeakingErrorCode.ITEM_ALREADY_SUBMITTED,
-    );
-  }
+  const now = new Date();
 
-  // The authored item carries the type + reference; the attempt item does not.
-  const assessment = await SpeakingAssessmentModel.findById(attempt.assessment);
-  const authored = assessment?.items[itemIndex];
-  if (!authored) {
-    throw new AppError("Item not found", 404, SpeakingErrorCode.ITEM_NOT_FOUND);
-  }
-
-  // --- DICTATION: typed, scored inline, no ASR / no queue. ---
-  if (authored.itemType === SpeakingItemType.DICTATION) {
-    if (typeof body.text !== "string") {
-      throw new AppError(
-        "Dictation requires typed text",
-        400,
-        SpeakingErrorCode.ITEM_NOT_FOUND,
+  // Deadline on WRITE — a BOUNDED grace so a small network overrun never costs a
+  // student their recording, while granting zero extra playing time:
+  //   - BEYOND the grace (expiresAt + SPEAKING_SUBMIT_GRACE_MS): the answer is
+  //     too late to tie to this attempt → refuse + finalize EXPIRED.
+  //   - WITHIN the grace but PAST the deadline: ACCEPT the in-flight answer for
+  //     the item that was served before the deadline (the current, unanswered
+  //     item), store it, and close the attempt EXPIRED WITHOUT advancing to a new
+  //     item — so no further prompt is ever disclosed. A second/other-index
+  //     submit is then refused (already-answered / not-current).
+  const deadlineMs = attempt.expiresAt ? attempt.expiresAt.getTime() : null;
+  const pastDeadline = deadlineMs !== null && now.getTime() > deadlineMs;
+  const beyondGrace =
+    deadlineMs !== null && now.getTime() > deadlineMs + SPEAKING_SUBMIT_GRACE_MS;
+  if (beyondGrace) {
+    await finalizeIfExpired(attempt, now);
+    if (attempt.status !== SpeakingAttemptStatus.EXPIRED) {
+      await SpeakingAttemptModel.updateOne(
+        { _id: attempt._id, status: { $ne: SpeakingAttemptStatus.SCORED } },
+        { $set: { status: SpeakingAttemptStatus.EXPIRED, scoredAt: now } },
       );
     }
-    const score = scoreDictation(authored.referenceText, body.text);
-    await SpeakingAttemptModel.updateOne(
-      { _id: attempt._id },
-      {
-        $set: {
-          [`items.${itemIndex}.transcript`]: body.text,
-          [`items.${itemIndex}.subScores`]: score,
-          [`items.${itemIndex}.jobStatus`]: SpeechJobStatus.COMPLETED,
-          status: SpeakingAttemptStatus.SUBMITTED,
-          submittedAt: new Date(),
-        },
-      },
-    );
-    return { index: itemIndex, status: SpeechJobStatus.COMPLETED };
-  }
-
-  // --- SPOKEN items: enqueue a transcription job. ---
-  const audioUrl = body.audioUrl;
-  if (!audioUrl) {
     throw new AppError(
-      "This item requires a recorded audio URL",
-      400,
-      SpeakingErrorCode.ITEM_NOT_FOUND,
+      "This attempt's time has expired",
+      409,
+      SpeakingErrorCode.ATTEMPT_EXPIRED,
     );
   }
-  const jobId = randomUUID();
-  await ExecutionJobModel.create({
-    jobId,
-    user: new Types.ObjectId(userId),
-    submissionRef: `${attemptId}:${itemIndex}`,
-    queue: QueueName.SPEECH,
-    status: JobStatus.QUEUED,
-  });
-  await SpeakingAttemptModel.updateOne(
-    { _id: attempt._id },
-    {
-      $set: {
-        [`items.${itemIndex}.audioUrl`]: audioUrl,
-        [`items.${itemIndex}.jobId`]: jobId,
-        [`items.${itemIndex}.jobStatus`]: SpeechJobStatus.QUEUED,
-        status: SpeakingAttemptStatus.SUBMITTED,
-        submittedAt: new Date(),
-      },
-    },
-  );
 
-  await enqueueSpeechJob({
-    jobId,
-    attemptId,
-    itemIndex,
-    audioUrl,
-    collegeId: attempt.college ? attempt.college.toString() : undefined,
-    userId,
-  });
+  // Progressive disclosure: only the current item may be submitted (and this
+  // subsumes the no-re-record rule — a past index is no longer current).
+  if (itemIndex !== attempt.currentIndex) {
+    throw new AppError(
+      "That is not the current item",
+      409,
+      SpeakingErrorCode.NOT_CURRENT_ITEM,
+    );
+  }
 
-  return { index: itemIndex, status: SpeechJobStatus.QUEUED };
+  // Within-grace past the deadline: the served item may land exactly once — a
+  // repeat submit of an already-answered item is refused (no second bite, and no
+  // blind answering of items that were never disclosed).
+  const currentItem = attempt.items[itemIndex];
+  if (
+    pastDeadline &&
+    currentItem &&
+    ((currentItem.audioUrl && currentItem.audioUrl.length > 0) ||
+      currentItem.jobStatus !== SpeechJobStatus.QUEUED)
+  ) {
+    throw new AppError(
+      "This attempt's time has expired",
+      409,
+      SpeakingErrorCode.ATTEMPT_EXPIRED,
+    );
+  }
+
+  const assessment = await SpeakingAssessmentModel.findById(attempt.assessment);
+  const authored = assessment?.items[itemIndex];
+  if (!authored || !attempt.items[itemIndex]) {
+    throw new AppError("Item not found", 404, SpeakingErrorCode.ITEM_NOT_FOUND);
+  }
+
+  const set: Record<string, unknown> = {};
+  let itemStatus: SpeechJobStatus;
+  const isDictation = authored.itemType === SpeakingItemType.DICTATION;
+  const answeredDictation = isDictation && typeof body.text === "string" && !body.silent;
+  const answeredSpoken = !isDictation && !body.silent && Boolean(body.audioUrl);
+
+  if (answeredDictation) {
+    // Typed, scored inline (no ASR / no queue).
+    const score = scoreDictation(authored.referenceText, body.text ?? "");
+    set[`items.${itemIndex}.transcript`] = body.text ?? "";
+    set[`items.${itemIndex}.subScores`] = score;
+    set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.COMPLETED;
+    itemStatus = SpeechJobStatus.COMPLETED;
+  } else if (answeredSpoken) {
+    // Spoken → enqueue an async transcription job.
+    const jobId = randomUUID();
+    await ExecutionJobModel.create({
+      jobId,
+      user: new Types.ObjectId(userId),
+      submissionRef: `${attemptId}:${itemIndex}`,
+      queue: QueueName.SPEECH,
+      status: JobStatus.QUEUED,
+    });
+    set[`items.${itemIndex}.audioUrl`] = body.audioUrl;
+    set[`items.${itemIndex}.jobId`] = jobId;
+    set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.QUEUED;
+    itemStatus = SpeechJobStatus.QUEUED;
+    await enqueueSpeechJob({
+      jobId,
+      attemptId,
+      itemIndex,
+      audioUrl: body.audioUrl!,
+      collegeId: attempt.college ? attempt.college.toString() : undefined,
+      userId,
+    });
+  } else {
+    // Silent / skipped — no answer. Finalize the item so it stops blocking and
+    // the attempt can reach a terminal state. Every item goes through submit so
+    // the server's current index stays authoritative.
+    set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.FAILED;
+    set[`items.${itemIndex}.error`] = "No answer recorded.";
+    itemStatus = SpeechJobStatus.FAILED;
+  }
+
+  // A normal (pre-deadline) submit advances to disclose the next item. A within-
+  // grace submit keeps the recording (scored above) but does NOT advance —
+  // currentIndex stays put so no new prompt is ever disclosed — and closes the
+  // attempt EXPIRED.
+  const nextIndex = pastDeadline ? itemIndex : itemIndex + 1;
+  const finalStatus = pastDeadline
+    ? SpeakingAttemptStatus.EXPIRED
+    : SpeakingAttemptStatus.SUBMITTED;
+  set.currentIndex = nextIndex;
+  set.status = finalStatus;
+  set.submittedAt = now;
+  if (pastDeadline) set.scoredAt = now;
+  await SpeakingAttemptModel.updateOne({ _id: attempt._id }, { $set: set });
+
+  attempt.currentIndex = nextIndex;
+  attempt.status = finalStatus;
+  return {
+    index: itemIndex,
+    status: itemStatus,
+    current: buildCurrent(attempt, assessment, now),
+  };
 }
 
 function toItemResult(
@@ -574,8 +708,12 @@ export async function deleteCollegeSpeaking(
       SpeakingErrorCode.NOT_DELETABLE,
     );
   }
+  // EXPIRED (reaped/abandoned) attempts no longer block deletion — the operator
+  // can clear them, and they shouldn't pin an assessment open forever. Only
+  // live/graded attempts count.
   const attempts = await SpeakingAttemptModel.countDocuments({
     assessment: doc._id,
+    status: { $ne: SpeakingAttemptStatus.EXPIRED },
   });
   if (attempts > 0) {
     throw new AppError(
@@ -584,7 +722,57 @@ export async function deleteCollegeSpeaking(
       SpeakingErrorCode.NOT_DELETABLE,
     );
   }
+  await SpeakingAttemptModel.deleteMany({ assessment: doc._id });
   await SpeakingAssessmentModel.deleteOne({ _id: doc._id });
+}
+
+// ---------------------------------------------------------------------------
+// Operator attempt management (visible + clearable — no more stuck rows)
+// ---------------------------------------------------------------------------
+
+/** List every attempt on an assessment with its status (incl. expired), so a
+ *  faculty operator can SEE stale attempts rather than only a blocked delete. */
+export async function listSpeakingAttempts(
+  collegeId: string,
+  assessmentId: string,
+): Promise<SpeakingAttemptAdminList> {
+  const doc = await loadTenant(collegeId, assessmentId);
+  const attempts = await SpeakingAttemptModel.find({ assessment: doc._id }).sort({
+    createdAt: -1,
+  });
+  const now = new Date();
+  const users = await UserModel.find({
+    _id: { $in: attempts.map((a) => a.user) },
+  }).select("username");
+  const nameById = new Map(users.map((u) => [u._id.toString(), u.username]));
+  return {
+    items: attempts.map((a) => ({
+      attemptId: a._id.toString(),
+      userId: a.user.toString(),
+      userName: nameById.get(a.user.toString()) ?? "unknown",
+      status: a.status as SpeakingAttemptStatus,
+      currentIndex: a.currentIndex ?? 0,
+      totalItems: a.items.length,
+      startedAt: a.startedAt ? a.startedAt.toISOString() : a.createdAt.toISOString(),
+      expiresAt: a.expiresAt ? a.expiresAt.toISOString() : null,
+      expired: attemptExpired(a, now) || a.status === SpeakingAttemptStatus.EXPIRED,
+    })),
+  };
+}
+
+/** Clear one attempt (frees the student's slot; removes the audio references). */
+export async function clearSpeakingAttempt(
+  collegeId: string,
+  assessmentId: string,
+  attemptId: string,
+): Promise<void> {
+  const doc = await loadTenant(collegeId, assessmentId);
+  if (!Types.ObjectId.isValid(attemptId)) throw ATTEMPT_NOT_FOUND();
+  const res = await SpeakingAttemptModel.deleteOne({
+    _id: new Types.ObjectId(attemptId),
+    assessment: doc._id,
+  });
+  if (res.deletedCount === 0) throw ATTEMPT_NOT_FOUND();
 }
 
 /** Published tenant assessments the student's cohort can take. */

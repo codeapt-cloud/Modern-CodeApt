@@ -10,12 +10,15 @@ import { CollegeFeature } from "@codeapt/shared";
 import { Router } from "express";
 
 import {
+  clearSpeakingAttemptController,
   createCollegeSpeakingController,
   deleteCollegeSpeakingController,
   getCollegeSpeakingController,
   listAvailableSpeakingController,
   listCollegeSpeakingController,
+  listSpeakingAttemptsController,
   setCollegeSpeakingPublishController,
+  speakingCurrentController,
   speakingResultController,
   startSpeakingController,
   submitSpeakingItemController,
@@ -56,6 +59,11 @@ collegeSpeakingRouter.post(
   startAttemptRateLimiter,
   startSpeakingController,
 );
+collegeSpeakingRouter.get(
+  "/c/:collegeSlug/speaking/attempts/:attemptId/current",
+  ...member,
+  speakingCurrentController,
+);
 collegeSpeakingRouter.post(
   "/c/:collegeSlug/speaking/attempts/:attemptId/items/:itemIndex",
   ...member,
@@ -77,6 +85,17 @@ collegeSpeakingRouter.post(
   "/c/:collegeSlug/speaking",
   ...author,
   createCollegeSpeakingController,
+);
+// Operator attempt management (before the bare "/:assessmentId" GET).
+collegeSpeakingRouter.get(
+  "/c/:collegeSlug/speaking/:assessmentId/attempts",
+  ...author,
+  listSpeakingAttemptsController,
+);
+collegeSpeakingRouter.delete(
+  "/c/:collegeSlug/speaking/:assessmentId/attempts/:attemptId",
+  ...author,
+  clearSpeakingAttemptController,
 );
 collegeSpeakingRouter.get(
   "/c/:collegeSlug/speaking/:assessmentId",

@@ -445,10 +445,13 @@ export type GameSelectionMode =
   (typeof GameSelectionMode)[keyof typeof GameSelectionMode];
 export const GAME_SELECTION_MODE_VALUES = Object.values(GameSelectionMode);
 
-/** Parent GameSetAttempt lifecycle: in_progress → graded (terminal). */
+/** Parent GameSetAttempt lifecycle: in_progress → graded (terminal), or
+ *  → abandoned (terminal) when the shared reaper sweeps a stale in-progress
+ *  attempt whose game clocks all expired without a finish. */
 export const GameSetAttemptStatus = {
   IN_PROGRESS: "in_progress",
   GRADED: "graded",
+  ABANDONED: "abandoned",
 } as const;
 export type GameSetAttemptStatus =
   (typeof GameSetAttemptStatus)[keyof typeof GameSetAttemptStatus];
@@ -589,11 +592,14 @@ export type SpeechJobStatus =
   (typeof SpeechJobStatus)[keyof typeof SpeechJobStatus];
 export const SPEECH_JOB_STATUS_VALUES = Object.values(SpeechJobStatus);
 
-/** A speaking attempt's overall lifecycle. */
+/** A speaking attempt's overall lifecycle. `expired` is terminal — a stale
+ *  in-progress attempt whose server deadline passed (set by the shared reaper,
+ *  or reached lazily when a read/write finds it past deadline). */
 export const SpeakingAttemptStatus = {
   IN_PROGRESS: "in_progress",
   SUBMITTED: "submitted",
   SCORED: "scored",
+  EXPIRED: "expired",
 } as const;
 export type SpeakingAttemptStatus =
   (typeof SpeakingAttemptStatus)[keyof typeof SpeakingAttemptStatus];

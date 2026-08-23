@@ -100,6 +100,8 @@ const speakingAttemptSchema = new Schema(
       default: SpeakingAttemptStatus.IN_PROGRESS,
     },
     items: { type: [speakingAttemptItemSchema], default: [] },
+    currentIndex: { type: Number, default: 0 },
+    expiresAt: { type: Date, default: null },
     startedAt: { type: Date },
     submittedAt: { type: Date },
     scoredAt: { type: Date },

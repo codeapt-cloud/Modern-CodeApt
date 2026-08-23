@@ -62,6 +62,15 @@ export function SpeakingRunner({
     r.notePromptPlayed();
   }, [r]);
 
+  if (r.expired) {
+    return (
+      <Alert variant="warning">
+        This attempt&apos;s time has expired, so no more answers can be recorded.
+        Your result for the items you completed will appear shortly.
+      </Alert>
+    );
+  }
+
   if (!item) {
     return (
       <div className="flex items-center gap-2 text-ink-muted">

@@ -9,6 +9,7 @@
  */
 import {
   Role,
+  SPEAKING_SUBMIT_GRACE_MS,
   UserType,
   scoreReadAloud,
 } from "@codeapt/shared";
@@ -178,7 +179,11 @@ describe("speaking lifecycle — available → start → submit → poll", () =>
       .set(auth(student.token));
     expect(start.status).toBe(201);
     const attemptId = start.body.attemptId as string;
-    expect(start.body.items[0].referenceText).toBe(REFERENCE);
+    // Progressive disclosure: start returns ONLY the current item, not a list.
+    expect(start.body.items).toBeUndefined();
+    expect(start.body.item.referenceText).toBe(REFERENCE);
+    expect(start.body.totalItems).toBe(1);
+    expect(typeof start.body.expiresAt).toBe("string");
 
     // Submit the recorded audio URL → queued (async), enqueue called.
     const submit = await request(app)
@@ -228,8 +233,10 @@ describe("speaking lifecycle — available → start → submit → poll", () =>
       .post(`/api/c/sp-rerec/speaking/attempts/${attemptId}/items/0`)
       .set(auth(student.token))
       .send({ audioUrl: url });
+    // Item 0 is no longer the current item (disclosure advanced past it), so a
+    // re-submit is refused — the no-re-record rule now rides progressive disclosure.
     expect(again.status).toBe(409);
-    expect(again.body.error.code).toBe("ITEM_ALREADY_SUBMITTED");
+    expect(again.body.error.code).toBe("NOT_CURRENT_ITEM");
   });
 });
 
@@ -353,5 +360,136 @@ describe("authoring — gated on the speaking sub-capability", () => {
       .send({ isPublished: true });
     expect(pub.status).toBe(200);
     expect(pub.body.isPublished).toBe(true);
+  });
+});
+
+describe("server-side deadline + bounded submit grace (Step 14 integrity)", () => {
+  it("BEYOND the grace: reads and writes are refused, and the slot is freed", async () => {
+    const { collegeId, adminToken } = await setupCollege("sp-exp", {
+      speaking: true,
+    });
+    const student = await addStudent("sp-exp", adminToken, "spexp@x.com");
+    // maxAttempts 1 — proves an expired attempt does NOT burn the slot.
+    const assessmentId = await makeAssessment(collegeId, { maxAttempts: 1 });
+
+    const start = await request(app)
+      .post(`/api/c/sp-exp/speaking/${assessmentId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+    expect(start.body.item).not.toBeNull();
+
+    // Deadline is past even the submit grace — genuinely too late.
+    await SpeakingAttemptModel.updateOne(
+      { _id: attemptId },
+      { $set: { expiresAt: new Date(Date.now() - SPEAKING_SUBMIT_GRACE_MS - 5000) } },
+    );
+
+    // READ: current returns expired + no item, and finalizes EXPIRED.
+    const current = await request(app)
+      .get(`/api/c/sp-exp/speaking/attempts/${attemptId}/current`)
+      .set(auth(student.token));
+    expect(current.status).toBe(200);
+    expect(current.body.expired).toBe(true);
+    expect(current.body.item).toBeNull();
+    expect(current.body.status).toBe("expired");
+
+    // WRITE: a submit beyond the grace is refused, and the recording is NOT stored.
+    const submit = await request(app)
+      .post(`/api/c/sp-exp/speaking/attempts/${attemptId}/items/0`)
+      .set(auth(student.token))
+      .send({ audioUrl: "https://res.cloudinary.com/demo/video/upload/a.webm" });
+    expect(submit.status).toBe(409);
+    expect(submit.body.error.code).toBe("ATTEMPT_EXPIRED");
+    const rejected = await SpeakingAttemptModel.findById(attemptId);
+    expect(rejected?.items[0]?.audioUrl ?? "").toBe(""); // not stored
+
+    // The expired attempt did NOT consume the cap — a fresh attempt starts.
+    const restart = await request(app)
+      .post(`/api/c/sp-exp/speaking/${assessmentId}/attempts`)
+      .set(auth(student.token));
+    expect(restart.status).toBe(201);
+  });
+
+  it("WITHIN the grace: no new item is served, but the in-flight answer is kept", async () => {
+    const { collegeId, adminToken } = await setupCollege("sp-late", {
+      speaking: true,
+    });
+    const student = await addStudent("sp-late", adminToken, "splate@x.com");
+    const assessmentId = await makeAssessment(collegeId);
+    const start = await request(app)
+      .post(`/api/c/sp-late/speaking/${assessmentId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+
+    // Deadline just passed but well within the grace — the student finished
+    // speaking in time and the upload+POST is only now landing.
+    await SpeakingAttemptModel.updateOne(
+      { _id: attemptId },
+      { $set: { expiresAt: new Date(Date.now() - 30_000) } },
+    );
+
+    // A READ still grants NO new playing time — it discloses no item.
+    const read = await request(app)
+      .get(`/api/c/sp-late/speaking/attempts/${attemptId}/current`)
+      .set(auth(student.token));
+    expect(read.body.expired).toBe(true);
+    expect(read.body.item).toBeNull();
+
+    // But the in-flight answer for the item served before the deadline is KEPT.
+    const url = "https://res.cloudinary.com/demo/video/upload/late.webm";
+    const submit = await request(app)
+      .post(`/api/c/sp-late/speaking/attempts/${attemptId}/items/0`)
+      .set(auth(student.token))
+      .send({ audioUrl: url });
+    expect(submit.status).toBe(202);
+    expect(submit.body.status).toBe("queued");
+    expect(submit.body.current.expired).toBe(true);
+    expect(submit.body.current.item).toBeNull(); // still no new prompt
+    expect(vi.mocked(enqueueSpeechJob)).toHaveBeenCalled();
+
+    const attempt = await SpeakingAttemptModel.findById(attemptId);
+    expect(attempt?.items[0]?.audioUrl).toBe(url); // recording kept
+    expect(attempt?.status).toBe("expired");
+
+    // A SECOND grace submit gets no second bite (item already answered).
+    const again = await request(app)
+      .post(`/api/c/sp-late/speaking/attempts/${attemptId}/items/0`)
+      .set(auth(student.token))
+      .send({ audioUrl: "https://res.cloudinary.com/demo/video/upload/late2.webm" });
+    expect(again.status).toBe(409);
+  });
+});
+
+describe("operator attempt management (Step 14 integrity)", () => {
+  it("lists attempts with status and clears a stuck one", async () => {
+    const { collegeId, adminToken } = await setupCollege("sp-ops", {
+      speaking: true,
+    });
+    const student = await addStudent("sp-ops", adminToken, "spops@x.com");
+    const assessmentId = await makeAssessment(collegeId);
+    const start = await request(app)
+      .post(`/api/c/sp-ops/speaking/${assessmentId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+
+    // Operator sees the in-progress attempt.
+    const list = await request(app)
+      .get(`/api/c/sp-ops/speaking/${assessmentId}/attempts`)
+      .set(auth(adminToken));
+    expect(list.status).toBe(200);
+    expect(list.body.items).toHaveLength(1);
+    expect(list.body.items[0].status).toBe("in_progress");
+    expect(list.body.items[0].attemptId).toBe(attemptId);
+
+    // Operator clears it (visible + clearable, not a permanent stuck row).
+    const clear = await request(app)
+      .delete(`/api/c/sp-ops/speaking/${assessmentId}/attempts/${attemptId}`)
+      .set(auth(adminToken));
+    expect(clear.status).toBe(204);
+
+    const after = await request(app)
+      .get(`/api/c/sp-ops/speaking/${assessmentId}/attempts`)
+      .set(auth(adminToken));
+    expect(after.body.items).toHaveLength(0);
   });
 });

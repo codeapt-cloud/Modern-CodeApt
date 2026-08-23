@@ -164,55 +164,61 @@ describe("multi-type speaking paper — full lifecycle with stubbed ASR", () => 
     const student = await addStudent("pp-cts", adminToken, "ppcts@x.com");
     const assessmentId = await authorAndPublish("pp-cts", adminToken);
 
-    // Start — the item views must WITHHOLD the reference for every type except
-    // read_aloud (showing it would defeat repeat/dictation/etc.).
+    // Start — PROGRESSIVE DISCLOSURE returns ONLY the current item (index 0),
+    // never the whole list. The reference is shown only for read_aloud.
     const start = await request(app)
       .post(`/api/c/pp-cts/speaking/${assessmentId}/attempts`)
       .set(auth(student.token));
     expect(start.status).toBe(201);
     const attemptId = start.body.attemptId as string;
-    const views = start.body.items as Array<{
-      index: number;
-      itemType: string;
-      referenceText: string;
-      section: string;
-    }>;
-    expect(views).toHaveLength(5);
-    expect(views[0].itemType).toBe("read_aloud");
-    expect(views[0].referenceText).toBe(READ_REF); // shown — it's the task
-    // dictation reference is HIDDEN (student types what they hear).
-    expect(views[2].itemType).toBe("dictation");
-    expect(views[2].referenceText).toBe("");
-    // answerSet / keyFacts / missingWord are not even FIELDS on the view — the
-    // scoring internals never reach the student. (The prompt may legitimately
-    // mention e.g. "a bottle"; the ANSWER SET must not, so check the key +
-    // a key-fact substring that appears in no prompt.)
-    for (const v of views) {
+    expect(start.body.items).toBeUndefined(); // no full list
+    expect(start.body.totalItems).toBe(5);
+    expect(start.body.item.index).toBe(0);
+    expect(start.body.item.itemType).toBe("read_aloud");
+    expect(start.body.item.referenceText).toBe(READ_REF);
+
+    // Walk the paper IN ORDER; the next prompt is disclosed only after
+    // submitting the current one. Collect every disclosed item to prove nothing
+    // leaks (no answer keys, no key facts).
+    const disclosed: Array<Record<string, unknown>> = [start.body.item];
+    const submit = async (
+      index: number,
+      body: Record<string, unknown>,
+    ): Promise<{ status: string; next: Record<string, unknown> | null }> => {
+      const res = await request(app)
+        .post(`/api/c/pp-cts/speaking/attempts/${attemptId}/items/${index}`)
+        .set(auth(student.token))
+        .send(body);
+      expect(res.status).toBe(202);
+      if (res.body.current.item) disclosed.push(res.body.current.item);
+      return { status: res.body.status, next: res.body.current.item };
+    };
+
+    const s0 = await submit(0, { audioUrl: "https://cdn/a0.webm" });
+    expect(s0.status).toBe("queued");
+    expect(s0.next?.itemType).toBe("short_answer");
+    expect(s0.next?.referenceText).toBe(""); // withheld
+    const s1 = await submit(1, { audioUrl: "https://cdn/a1.webm" });
+    expect(s1.next?.itemType).toBe("dictation");
+    expect(s1.next?.referenceText).toBe(""); // dictation reference hidden
+    // DICTATION — scored INLINE (completed synchronously, no queue).
+    const s2 = await submit(2, { text: DICT_REF });
+    expect(s2.status).toBe("completed");
+    expect(s2.next?.itemType).toBe("story_retell");
+    const s3 = await submit(3, { audioUrl: "https://cdn/a3.webm" });
+    expect(s3.next?.itemType).toBe("open_topic");
+    expect(s3.next?.section).toBe("Section B");
+    const s4 = await submit(4, { audioUrl: "https://cdn/a4.webm" });
+    expect(s4.next).toBeNull(); // finished — no more items disclosed
+
+    // Nothing disclosed to the student ever carried an answer key or key fact.
+    for (const v of disclosed) {
       expect(v).not.toHaveProperty("answerSet");
       expect(v).not.toHaveProperty("keyFacts");
       expect(v).not.toHaveProperty("missingWord");
     }
-    expect(JSON.stringify(views)).not.toContain("24.5"); // a key fact, withheld
-    expect(views[4].section).toBe("Section B");
-
-    // DICTATION — scored INLINE, no ASR, no queue. Submit the typed text.
-    const dict = await request(app)
-      .post(`/api/c/pp-cts/speaking/attempts/${attemptId}/items/2`)
-      .set(auth(student.token))
-      .send({ text: DICT_REF });
-    expect(dict.status).toBe(202);
-    expect(dict.body.status).toBe("completed"); // finalized synchronously
-
-    // The four SPOKEN items enqueue transcription jobs.
-    for (const index of [0, 1, 3, 4]) {
-      const res = await request(app)
-        .post(`/api/c/pp-cts/speaking/attempts/${attemptId}/items/${index}`)
-        .set(auth(student.token))
-        .send({ audioUrl: `https://res.cloudinary.com/demo/video/upload/a${index}.webm` });
-      expect(res.status).toBe(202);
-      expect(res.body.status).toBe("queued");
-    }
-    // Dictation did NOT enqueue — only the four spoken items did.
+    expect(JSON.stringify(disclosed)).not.toContain("24.5");
+    // Only the four spoken items enqueued; dictation did not.
     expect(vi.mocked(enqueueSpeechJob)).toHaveBeenCalledTimes(4);
 
     // Simulate the worker scoring each spoken item with the real shared scorers.

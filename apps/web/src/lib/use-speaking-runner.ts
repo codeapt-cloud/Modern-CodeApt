@@ -1,15 +1,21 @@
 /**
- * The Speaking runner orchestration hook — the I/O + clock layer the pure
- * speaking-runner.ts decisions sit under (mirrors use-game-runner over
- * game-runner). Owns: the per-item phase walk (prompt → prep → responding →
- * submitted), the audio recorder (window countdown + auto-stop + upload +
- * submit), the prep countdown, prompt-audio play-limit accounting, the dictation
- * text-submit path, and auto-advance. NO re-record, NO going back — advancing is
- * the only motion, exactly like the existing read_aloud runner.
+ * The Speaking runner orchestration hook. PROGRESSIVE DISCLOSURE: the server
+ * returns only the current item, so this hook holds one `current` state
+ * (SpeakingCurrentResponse) and learns the next item only from each submit's
+ * `current` — it never has the full list. Owns the per-item phase walk (prompt →
+ * prep → responding → submitted), the recorder (window countdown + auto-stop +
+ * upload + submit), the prep countdown, prompt-audio play accounting, the
+ * dictation text path, and the silent/skip path. Every item transition goes
+ * through a submit so the server's current index stays authoritative. NO
+ * re-record, NO going back.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { SpeakingItemType, type StartSpeakingResponse } from "@codeapt/shared";
+import {
+  SpeakingItemType,
+  type SpeakingCurrentResponse,
+  type StartSpeakingResponse,
+} from "@codeapt/shared";
 
 import { api } from "./api-client.js";
 import { uploadAudioToCloudinary } from "./audio-upload.js";
@@ -19,21 +25,16 @@ import { useAudioRecorder, type UseAudioRecorder } from "./use-audio-recorder.js
 export interface UseSpeakingRunner {
   index: number;
   total: number;
-  item: StartSpeakingResponse["items"][number] | undefined;
+  item: SpeakingCurrentResponse["item"];
   phase: ItemPhase;
   recorder: UseAudioRecorder;
-  /** Prep countdown (seconds) while phase === "prep". */
   prepRemaining: number;
-  /** How many times the prompt/stimulus audio has been played this item. */
   promptPlaysUsed: number;
-  /** Whether another prompt play is allowed (respecting stimulusPlayLimit). */
   canPlayPrompt: boolean;
   notePromptPlayed: () => void;
-  /** prompt → (prep | responding). Starts the recorder immediately for a
-   *  no-prep audio item. */
   beginResponse: () => void;
-  /** dictation: submit typed text (no audio); finalizes the item inline. */
   submitText: (text: string) => void;
+  expired: boolean;
   error: string | null;
   finished: boolean;
 }
@@ -44,67 +45,99 @@ export function useSpeakingRunner(opts: {
   onFinished: () => void;
 }): UseSpeakingRunner {
   const { slug, attempt, onFinished } = opts;
-  const [index, setIndex] = useState(0);
+  const [current, setCurrent] = useState<SpeakingCurrentResponse>(attempt);
   const [phase, setPhase] = useState<ItemPhase>(INITIAL_ITEM_PHASE);
   const [prepRemaining, setPrepRemaining] = useState(0);
   const [promptPlaysUsed, setPromptPlaysUsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [finished, setFinished] = useState(false);
 
-  const item = attempt.items[index];
-
-  // Upload closure — bound to the CURRENT index so a late upload can't submit to
-  // the wrong item. Spoken items only; dictation uses submitText.
-  const onUpload = useCallback(
-    async (blob: Blob) => {
-      const url = await uploadAudioToCloudinary(slug, blob);
-      await api.collegeSpeaking.submitItem(slug, attempt.attemptId, index, {
-        audioUrl: url,
-      });
-    },
-    [slug, attempt.attemptId, index],
-  );
+  const item = current.item;
+  const indexRef = useRef(current.currentIndex);
+  indexRef.current = current.currentIndex;
+  // Guards one advance per item (an audible upload OR a silent submit, never both).
+  const advancingRef = useRef(false);
+  const pendingRef = useRef<SpeakingCurrentResponse | null>(null);
 
   const recorder = useAudioRecorder({
     windowSeconds: item?.responseWindowSeconds ?? 30,
-    onUpload,
+    onUpload: useCallback(
+      async (blob: Blob) => {
+        advancingRef.current = true;
+        const url = await uploadAudioToCloudinary(slug, blob);
+        const res = await api.collegeSpeaking.submitItem(
+          slug,
+          attempt.attemptId,
+          indexRef.current,
+          { audioUrl: url },
+        );
+        pendingRef.current = res.current;
+      },
+      [slug, attempt.attemptId],
+    ),
   });
 
-  // Reset per-item UI state and re-request the mic when the item changes.
+  // Request the mic once for the whole runner; per-item we only reset() back to
+  // ready (the stream persists), so there's no per-item permission re-prompt.
   useEffect(() => {
-    setPhase(INITIAL_ITEM_PHASE);
-    setPrepRemaining(0);
-    setPromptPlaysUsed(0);
-    setError(null);
     void recorder.requestMic();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index]);
+  }, []);
 
-  const advance = useCallback(() => {
-    if (index + 1 < attempt.items.length) {
-      setIndex((i) => i + 1);
-    } else {
-      setFinished(true);
-      onFinished();
+  const applyCurrent = useCallback(
+    (next: SpeakingCurrentResponse) => {
+      advancingRef.current = false;
+      pendingRef.current = null;
+      setPhase(INITIAL_ITEM_PHASE);
+      setPrepRemaining(0);
+      setPromptPlaysUsed(0);
+      setError(null);
+      recorder.reset();
+      setCurrent(next);
+      if (!next.item || next.expired) {
+        setFinished(true);
+        onFinished();
+      }
+    },
+    [recorder, onFinished],
+  );
+
+  const advanceSilent = useCallback(async () => {
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+    try {
+      const res = await api.collegeSpeaking.submitItem(
+        slug,
+        attempt.attemptId,
+        indexRef.current,
+        { silent: true },
+      );
+      applyCurrent(res.current);
+    } catch {
+      setError("Could not record that answer. Please try the next item.");
+      advancingRef.current = false;
     }
-  }, [index, attempt.items.length, onFinished]);
+  }, [slug, attempt.attemptId, applyCurrent]);
 
-  // Auto-advance once a spoken item is uploaded (or was silent — a silent take
-  // is still an attempt; no re-record). Surface an upload failure calmly.
+  // React to terminal recorder states: an audible take already submitted inside
+  // onUpload (advance with its `current`); a silent take submits a skip here.
   useEffect(() => {
-    if (recorder.state === "uploaded" || recorder.state === "silent") {
-      const t = setTimeout(advance, 1200);
-      return () => clearTimeout(t);
+    if (recorder.state === "uploaded") {
+      if (pendingRef.current) applyCurrent(pendingRef.current);
+      return;
+    }
+    if (recorder.state === "silent") {
+      void advanceSilent();
+      return;
     }
     if (recorder.state === "upload_failed") {
       setError("That answer could not be uploaded. Moving on.");
-      const t = setTimeout(advance, 1600);
-      return () => clearTimeout(t);
+      void advanceSilent();
     }
-    return undefined;
-  }, [recorder.state, advance]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recorder.state]);
 
-  // Prep countdown: tick down to zero, then open the recording window.
+  // Prep countdown → open the recording window when it reaches zero.
   useEffect(() => {
     if (phase !== "prep") return undefined;
     if (prepRemaining <= 0) {
@@ -115,11 +148,10 @@ export function useSpeakingRunner(opts: {
     return () => window.clearInterval(id);
   }, [phase, prepRemaining]);
 
-  // When the recording window opens for an AUDIO item, start recording as soon
-  // as the mic is ready (after prep, or immediately for a no-prep item).
+  // Auto-start recording for an AUDIO item as soon as the window opens + mic ready.
   useEffect(() => {
     if (phase !== "responding") return;
-    if (item?.itemType === SpeakingItemType.DICTATION) return; // typed, no mic
+    if (item?.itemType === SpeakingItemType.DICTATION) return;
     if (recorder.state === "ready") recorder.start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, recorder.state, item?.itemType]);
@@ -131,30 +163,30 @@ export function useSpeakingRunner(opts: {
     setPhase(next);
   }, [item]);
 
-  const notePromptPlayed = useCallback(() => {
-    setPromptPlaysUsed((n) => n + 1);
-  }, []);
+  const notePromptPlayed = useCallback(() => setPromptPlaysUsed((n) => n + 1), []);
 
   const submitText = useCallback(
     (text: string) => {
+      if (advancingRef.current) return;
+      advancingRef.current = true;
       setPhase("submitted");
       void api.collegeSpeaking
-        .submitItem(slug, attempt.attemptId, index, { text })
-        .then(advance)
+        .submitItem(slug, attempt.attemptId, indexRef.current, { text })
+        .then((res) => applyCurrent(res.current))
         .catch(() => {
           setError("That answer could not be submitted. Moving on.");
-          setTimeout(advance, 1600);
+          void advanceSilent();
         });
     },
-    [slug, attempt.attemptId, index, advance],
+    [slug, attempt.attemptId, applyCurrent, advanceSilent],
   );
 
   const limit = item?.stimulusPlayLimit ?? 0;
   const canPlayPrompt = limit === 0 || promptPlaysUsed < limit;
 
   return {
-    index,
-    total: attempt.items.length,
+    index: current.currentIndex,
+    total: current.totalItems,
     item,
     phase,
     recorder,
@@ -164,6 +196,7 @@ export function useSpeakingRunner(opts: {
     notePromptPlayed,
     beginResponse,
     submitText,
+    expired: current.expired,
     error,
     finished,
   };

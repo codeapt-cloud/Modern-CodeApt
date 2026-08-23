@@ -21,6 +21,7 @@ import { connectDb, disconnectDb } from "./lib/db.js";
 import { registerCodingRefreshSchedule } from "./lib/coding-refresh/schedule.js";
 import { registerDailyChallengeSchedule } from "./lib/daily-challenge/schedule.js";
 import type { ScheduleHandle } from "./lib/daily-challenge/schedule.js";
+import { registerAttemptReaperSchedule } from "./lib/reaper/schedule.js";
 import { installLlmGateway } from "./lib/llm-gateway/index.js";
 import { createRedisConnection } from "./lib/redis.js";
 import { logger } from "./lib/logger.js";
@@ -35,6 +36,8 @@ import "./models/coding-profile.model.js";
 import "./models/student-ai-credit.model.js";
 // Register the speaking models (read + written by the speech processor).
 import "./models/speaking.model.js";
+// Register the game attempt model (swept by the shared attempt reaper).
+import "./models/game.model.js";
 
 /** Per-queue BullMQ rate limiter (paced drains); other queues run unlimited. */
 function limiterFor(queue: QueueName): { max: number; duration: number } | null {
@@ -134,7 +137,22 @@ async function bootstrap(): Promise<void> {
     );
   }
 
-  setupGracefulShutdown(workers, connection, [schedule, codingSchedule]);
+  // Shared attempt reaper (speaking + games) — AUXILIARY, independently guarded.
+  let reaperSchedule: ScheduleHandle | null = null;
+  try {
+    reaperSchedule = await registerAttemptReaperSchedule();
+  } catch (err) {
+    logger.error(
+      { err },
+      "attempt-reaper scheduler failed to register — grading continues without it",
+    );
+  }
+
+  setupGracefulShutdown(workers, connection, [
+    schedule,
+    codingSchedule,
+    reaperSchedule,
+  ]);
 }
 
 function setupGracefulShutdown(

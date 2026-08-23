@@ -88,6 +88,37 @@ export const CODING_REFRESH_CRON = "10 2 * * *";
 export const CODING_REFRESH_CRON_TZ = "Asia/Kolkata";
 
 /**
+ * The shared ATTEMPT REAPER — sweeps stale in-progress attempts (SpeakingAttempt
+ * + GameSetAttempt) whose server deadline / game clocks have long passed, moving
+ * them to a terminal state (expired / abandoned) so they stop consuming an
+ * attempt slot and stop blocking assessment deletion. Rides the `default` queue
+ * (name-dispatched) like the other cron jobs. Every 15 minutes; the sweep is
+ * idempotent (only IN_PROGRESS/SUBMITTED-incomplete rows past deadline match).
+ */
+export const ATTEMPT_REAPER_JOB_NAME = "attempt-reaper";
+export const ATTEMPT_REAPER_CRON = "*/15 * * * *";
+export const ATTEMPT_REAPER_CRON_TZ = "Asia/Kolkata";
+/** Grace after a game's last clock before its parent attempt is abandonable. */
+export const GAME_ATTEMPT_ABANDON_GRACE_MS = 30 * 60 * 1000; // 30 min
+
+/**
+ * Bounded submit grace past a speaking attempt's deadline. A student who finishes
+ * speaking INSIDE the window but whose upload + submit lands a few seconds late
+ * must not lose their recording — the audio is already in Cloudinary; only the
+ * POST is late. Within this grace the server ACCEPTS and stores the in-flight
+ * answer for the item that was served before the deadline, then closes the
+ * attempt EXPIRED. It grants NO extra playing time: no new item is served, no
+ * prep window, no advance — only the one in-flight answer may land.
+ *
+ * 90s (not 60, not 120): comfortably covers a worst-case mobile upload of a
+ * short clip (a ~1-2 MB webm on slow 3G at ~50-100 KB/s is ~10-30s) plus the API
+ * round trip and a retry, with margin — while keeping the "blind submit" window
+ * (a scripted client POSTing past the deadline) as small as is safe. 60s risks
+ * truncating a slow large upload; 120s widens that window for no real benefit.
+ */
+export const SPEAKING_SUBMIT_GRACE_MS = 90 * 1000;
+
+/**
  * Per-queue configuration. `timeoutSeconds` mirrors the django-rq job timeouts;
  * `priority` marks the assessment queue as the high-priority one (grading a
  * live, timed exam must not sit behind practice runs).
@@ -663,6 +694,10 @@ export const SpeakingErrorCode = {
   ITEM_NOT_FOUND: "ITEM_NOT_FOUND",
   /** That item was already submitted (no re-record — one recording per item). */
   ITEM_ALREADY_SUBMITTED: "ITEM_ALREADY_SUBMITTED",
+  /** The attempt's server deadline passed — it cannot be read or written. */
+  ATTEMPT_EXPIRED: "ATTEMPT_EXPIRED",
+  /** Submit/read for an item other than the attempt's current index. */
+  NOT_CURRENT_ITEM: "NOT_CURRENT_ITEM",
   /** A referenced target org-unit is unknown in this college / out of scope. */
   ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
   /** Publishing refused (e.g. no items). */
