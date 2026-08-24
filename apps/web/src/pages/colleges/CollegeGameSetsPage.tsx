@@ -19,6 +19,7 @@ export function CollegeGameSetsPage() {
       authApi={authApi}
       onNew={() => navigate(`/c/${slug}/gaming/new`)}
       onEdit={(id) => navigate(`/c/${slug}/gaming/${id}`)}
+      onResults={(id) => navigate(`/c/${slug}/gaming/${id}/cohort`)}
     />
   );
 }

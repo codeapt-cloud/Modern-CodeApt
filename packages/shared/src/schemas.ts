@@ -5805,6 +5805,101 @@ export const gameResultSchema = z.object({
 });
 export type GameResult = z.infer<typeof gameResultSchema>;
 
+// ---------------------------------------------------------------------------
+// Gaming READ surface (Step 24) — student result history + operator visibility.
+// All READ-ONLY over GameSetAttempt / GameAttempt. Shapes mirror the
+// communication composite's cohort surfaces (do NOT invent a third pattern).
+// ---------------------------------------------------------------------------
+
+/** One of a student's OWN attempts on a set (history). `compositeScore` is null
+ *  unless the attempt is GRADED — an in-progress or abandoned attempt has no
+ *  final score (never a fabricated 0). `resumable` is true only for an
+ *  IN_PROGRESS attempt (resumed via the Step 22 resume path, not a new flow). */
+export const gameAttemptHistoryItemSchema = z.object({
+  attemptId: z.string(),
+  status: gameSetAttemptStatusSchema,
+  compositeScore: z.number().int().nullable(),
+  totalGames: z.number().int(),
+  startedAt: z.string(),
+  completedAt: z.string().nullable(),
+  resumable: z.boolean(),
+});
+export type GameAttemptHistoryItem = z.infer<
+  typeof gameAttemptHistoryItemSchema
+>;
+export const gameAttemptHistoryResponseSchema = z.object({
+  gameSetId: z.string(),
+  items: z.array(gameAttemptHistoryItemSchema),
+});
+export type GameAttemptHistoryResponse = z.infer<
+  typeof gameAttemptHistoryResponseSchema
+>;
+
+/** Operator ATTEMPT LIST row — every attempt on a set (mirror of the speaking
+ *  attempt admin list), including ABANDONED (Step 22) shown distinctly. */
+export const gameAttemptAdminItemSchema = z.object({
+  attemptId: z.string(),
+  userId: z.string(),
+  userName: z.string(),
+  rollNumber: z.string(),
+  status: gameSetAttemptStatusSchema,
+  /** Null unless GRADED — an in-progress/abandoned attempt has no final score. */
+  compositeScore: z.number().int().nullable(),
+  warningsTriggered: z.number().int(),
+  isMalpractice: z.boolean(),
+  startedAt: z.string(),
+  completedAt: z.string().nullable(),
+});
+export type GameAttemptAdminItem = z.infer<typeof gameAttemptAdminItemSchema>;
+export const gameAttemptAdminListSchema = z.object({
+  items: z.array(gameAttemptAdminItemSchema),
+});
+export type GameAttemptAdminList = z.infer<typeof gameAttemptAdminListSchema>;
+
+/** A per-game column of the cohort report — one per AUTHORED game in the set (so
+ *  random_n_of_pool sets still have stable columns; a game a given attempt did
+ *  not include reads "—"). */
+export const gameCohortColumnSchema = z.object({
+  gameIndex: z.number().int(),
+  gameKey: gameKeySchema,
+});
+export type GameCohortColumn = z.infer<typeof gameCohortColumnSchema>;
+
+/** One per-game cell. `rawScore` is the TRUE per-game score UNCLAMPED — it can be
+ *  NEGATIVE (grid_challenge +3/-1); a -4 (guessed wildly) and a 0 (attempted
+ *  nothing) are different students and the operator must see the difference
+ *  (Step 18). null + played:false = this game was not part of that attempt. */
+export const gameCohortCellSchema = z.object({
+  gameIndex: z.number().int(),
+  rawScore: z.number().int().nullable(),
+  played: z.boolean(),
+});
+export type GameCohortCell = z.infer<typeof gameCohortCellSchema>;
+
+/** One row per cohort student. `status` is null when the student never attempted
+ *  (cells "—", composite null — never a 0). Otherwise it reflects the BEST GRADED
+ *  attempt if any (compositeScore + per-game cells from that attempt), else the
+ *  in-progress / abandoned state. `attemptCount` = attempts actually begun
+ *  (Step 23 retake policy: best composite, attempt count visible). */
+export const gameCohortRowSchema = z.object({
+  userId: z.string(),
+  userName: z.string(),
+  rollNumber: z.string(),
+  status: gameSetAttemptStatusSchema.nullable(),
+  compositeScore: z.number().int().nullable(),
+  attemptCount: z.number().int().nonnegative(),
+  cells: z.array(gameCohortCellSchema),
+});
+export type GameCohortRow = z.infer<typeof gameCohortRowSchema>;
+
+export const gameCohortReportSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  games: z.array(gameCohortColumnSchema),
+  rows: z.array(gameCohortRowSchema),
+});
+export type GameCohortReport = z.infer<typeof gameCohortReportSchema>;
+
 /** Practice-mode reveal request (post-answer, instantFeedback only). */
 export const explainGameItemRequestSchema = z.object({
   itemIndex: z.number().int().min(0),

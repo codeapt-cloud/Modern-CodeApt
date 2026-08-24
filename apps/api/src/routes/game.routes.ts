@@ -21,6 +21,8 @@ import {
   currentGameController,
   explainGameItemController,
   finishGameSetController,
+  gameSetResultController,
+  listMyGameSetAttemptsController,
   listMyGamesController,
   probeGameItemController,
   recordGameWarningController,
@@ -53,6 +55,13 @@ gameRouter.post(
   startAttemptRateLimiter,
   startGameSetController,
 );
+// --- Student history: the caller's OWN attempts on a set (G3). Keyed on the
+//     session user + set, so it serves both college and course-attached sets. ---
+gameRouter.get(
+  "/game-sets/:gameSetId/attempts",
+  ...authed,
+  listMyGameSetAttemptsController,
+);
 
 // --- Attempt engine (owner session OR attempt token) ---
 // Begin the current game: serves its first item + starts the (server-set) clock.
@@ -60,6 +69,9 @@ gameRouter.post("/game-attempts/:attemptId/begin", ...engine, beginGameControlle
 // Read-only CURRENT state (resume after a reconnect) — never starts a clock.
 // Mirrors /c/:slug/speaking/attempts/:attemptId/current (Step 14).
 gameRouter.get("/game-attempts/:attemptId/current", ...engine, currentGameController);
+// Read-only RESULT of a finished attempt (G3) — mirrors speaking's
+// /attempts/:attemptId/result; owner session OR attempt token, never mutates.
+gameRouter.get("/game-attempts/:attemptId/result", ...engine, gameSetResultController);
 gameRouter.post(
   "/game-attempts/:attemptId/answer",
   ...engine,

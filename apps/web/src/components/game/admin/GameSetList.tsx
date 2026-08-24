@@ -24,10 +24,13 @@ export function GameSetList({
   authApi,
   onNew,
   onEdit,
+  onResults,
 }: {
   authApi: GameAuthoringApi;
   onNew: () => void;
   onEdit: (id: string) => void;
+  /** Optional (college surface): open the cohort results/attempts for a set. */
+  onResults?: (id: string) => void;
 }): JSX.Element {
   const { data, loading, error, refetch } = useQuery(() => authApi.list(), [authApi]);
   const templates = useQuery(
@@ -142,6 +145,15 @@ export function GameSetList({
                     <Button size="sm" variant="outline" onClick={() => onEdit(s.id)}>
                       Edit
                     </Button>
+                    {onResults ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onResults(s.id)}
+                      >
+                        Results
+                      </Button>
+                    ) : null}
                     <Button
                       size="sm"
                       variant={s.isPublished ? "ghost" : "primary"}

@@ -209,6 +209,9 @@ import {
   type AiBuildGameSetResponse,
   type AnswerGameItemResponse,
   type BeginGameResponse,
+  type GameAttemptAdminList,
+  type GameAttemptHistoryResponse,
+  type GameCohortReport,
   type GameExplanationResponse,
   type GamePlayListResponse,
   type GameResult,
@@ -3515,6 +3518,23 @@ export const api = {
       );
       return data;
     },
+    /** G3: re-read a finished attempt's result (composite + per-game breakdown). */
+    result: async (attemptId: string, token?: string): Promise<GameResult> => {
+      const { data } = await http.get<GameResult>(
+        `${API_PREFIX}/game-attempts/${attemptId}/result`,
+        attemptHeaders(token),
+      );
+      return data;
+    },
+    /** G3: the caller's OWN attempt history on a set (date, composite, status). */
+    myAttempts: async (
+      gameSetId: string,
+    ): Promise<GameAttemptHistoryResponse> => {
+      const { data } = await http.get<GameAttemptHistoryResponse>(
+        `${API_PREFIX}/game-sets/${gameSetId}/attempts`,
+      );
+      return data;
+    },
     explain: async (
       attemptId: string,
       itemIndex: number,
@@ -3633,6 +3653,37 @@ export const api = {
         body,
       );
       return data;
+    },
+    // --- Operator visibility (Step 24 G2): attempt list + cohort + export ---
+    attempts: async (
+      slug: string,
+      id: string,
+    ): Promise<GameAttemptAdminList> => {
+      const { data } = await http.get<GameAttemptAdminList>(
+        `${API_PREFIX}/c/${slug}/game-sets/${id}/attempts`,
+      );
+      return data;
+    },
+    cohort: async (slug: string, id: string): Promise<GameCohortReport> => {
+      const { data } = await http.get<GameCohortReport>(
+        `${API_PREFIX}/c/${slug}/game-sets/${id}/cohort`,
+      );
+      return data;
+    },
+    exportCohort: async (
+      slug: string,
+      id: string,
+    ): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(
+        `${API_PREFIX}/c/${slug}/game-sets/${id}/cohort/export`,
+        { responseType: "blob" },
+      );
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? `gaming-${id}.xlsx`,
+      };
     },
   },
 

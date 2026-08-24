@@ -149,6 +149,29 @@ export const explainGameItemController = asyncHandler(
   },
 );
 
+/** G3 — read a finished attempt's result (composite + per-game breakdown). Owner
+ *  session OR attempt token, exactly like the rest of the engine. */
+export const gameSetResultController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const data = await engine.getGameSetAttemptResult(
+      req.params.attemptId ?? "",
+      caller(req),
+    );
+    res.status(200).json(data);
+  },
+);
+
+/** G3 — the caller's OWN attempt history on a set (date, composite, status). */
+export const listMyGameSetAttemptsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const data = await engine.listMyGameSetAttempts(
+      requireUserId(req),
+      req.params.gameSetId ?? "",
+    );
+    res.status(200).json(data);
+  },
+);
+
 // --- Platform-admin authoring ---
 
 export const adminListGameSetsController = asyncHandler(

@@ -321,6 +321,10 @@ const CollegeGameSetEditorPage = named(
   () => import("./pages/colleges/CollegeGameSetEditorPage.js"),
   "CollegeGameSetEditorPage",
 );
+const CollegeGameCohortPage = named(
+  () => import("./pages/colleges/CollegeGameCohortPage.js"),
+  "CollegeGameCohortPage",
+);
 const CollegeExamEditorPage = named(
   () => import("./pages/colleges/CollegeExamEditorPage.js"),
   "CollegeExamEditorPage",
@@ -692,6 +696,10 @@ export function App() {
                 element={<CollegeExamAnalysisPage />}
               />
               <Route path="gaming" element={<CollegeGamingRoute />} />
+              <Route
+                path="gaming/:gameSetId/cohort"
+                element={<CollegeGameCohortPage />}
+              />
               <Route
                 path="gaming/:gameSetId"
                 element={<CollegeGameSetEditorPage />}

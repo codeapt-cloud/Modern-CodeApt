@@ -8,8 +8,16 @@
 import {
   GameErrorCode,
   GameSelectionMode,
+  GameSetAttemptStatus,
+  Role,
+  UserType,
   collectDescendantUnitIds,
   type CloneGameSetRequest,
+  type GameAttemptAdminList,
+  type GameCohortCell,
+  type GameCohortReport,
+  type GameCohortRow,
+  type GameKey,
   type GamePlayListItem,
   type GamePlayListResponse,
   type GameSetDetail,
@@ -22,9 +30,15 @@ import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
 import { createTenantScope, type TenantScope } from "../lib/tenant-scope.js";
-import { GameSetModel, type GameSet } from "../models/game.model.js";
+import {
+  GameAttemptModel,
+  GameSetAttemptModel,
+  GameSetModel,
+  type GameSet,
+  type GameSetAttempt,
+} from "../models/game.model.js";
 import { OrgUnitModel } from "../models/org-unit.model.js";
-import { UserModel } from "../models/user.model.js";
+import { ProfileModel, UserModel } from "../models/user.model.js";
 import { countUsedAttempts } from "./game.service.js";
 import {
   assertDeletable,
@@ -324,4 +338,237 @@ export async function listPlayableCollegeGameSets(
     items.push(toGamePlayListItem(s, used));
   }
   return { items };
+}
+
+// ---------------------------------------------------------------------------
+// Operator READ surface (Step 24 G2) — attempt list + cohort report. Gated at
+// the route by the SAME guard as the rest of gaming authoring: faculty + the
+// GAMING feature (see college-game.routes `author`). Gaming has no separate
+// `authoring` sub-capability in force — every authoring route gates on the
+// feature itself — so requiring one only here would 403 operators who can
+// already author sets (the Step 23 entitlement-wall trap). Read-only over the
+// attempts; no scoring/ladder/play-path change.
+// ---------------------------------------------------------------------------
+
+type AttemptDoc = HydratedDocument<GameSetAttempt>;
+
+/** Operator ATTEMPT LIST for a set — every BEGUN attempt with its status
+ *  (ABANDONED distinguished), composite (only when GRADED), and integrity flags.
+ *  Mirror of listSpeakingAttempts. */
+export async function listGameSetAttemptsForOperator(
+  collegeId: string,
+  actor: GameActor,
+  gameSetId: string,
+): Promise<GameAttemptAdminList> {
+  const scope = createTenantScope(collegeId);
+  const actorScope = await resolveActorScope(scope, actor);
+  const gs = await requireTenantGameSet(scope, gameSetId);
+  assertManageable(gs, actorScope);
+
+  // Only attempts that actually began (a pre-flight-only parent isn't an attempt).
+  const attempts = await GameSetAttemptModel.find({
+    gameSet: gs._id,
+    begunAt: { $ne: null },
+  }).sort({ createdAt: -1 });
+
+  const userIds = attempts.map((a) => a.user).filter(Boolean);
+  const users = await UserModel.find({ _id: { $in: userIds } }).select(
+    "username rollNumber",
+  );
+  const userById = new Map(users.map((u) => [u._id.toString(), u]));
+  const profiles = await ProfileModel.find({ user: { $in: userIds } }).select(
+    "user fullName rollNumber",
+  );
+  const profileByUser = new Map(profiles.map((p) => [p.user.toString(), p]));
+
+  return {
+    items: attempts.map((a) => {
+      const uid = a.user!.toString();
+      const profile = profileByUser.get(uid);
+      const user = userById.get(uid);
+      return {
+        attemptId: a._id.toString(),
+        userId: uid,
+        userName: profile?.fullName ?? user?.username ?? "unknown",
+        rollNumber: profile?.rollNumber ?? user?.rollNumber ?? "",
+        status: a.status as GameSetAttemptStatus,
+        compositeScore:
+          a.status === GameSetAttemptStatus.GRADED ? a.compositeScore : null,
+        warningsTriggered: a.warningsTriggered,
+        isMalpractice: a.isMalpractice,
+        startedAt: (a.startedAt ?? a.createdAt).toISOString(),
+        completedAt: a.completedAt ? a.completedAt.toISOString() : null,
+      };
+    }),
+  };
+}
+
+/** Pick the row's representative attempt for a student, applying Step 23's retake
+ *  policy: the BEST GRADED attempt (max composite) if any; otherwise expose the
+ *  in-progress / abandoned state so the operator sees churn without a fake score. */
+function pickCohortAttempt(list: AttemptDoc[]): {
+  status: GameSetAttemptStatus | null;
+  best: AttemptDoc | null;
+} {
+  if (list.length === 0) return { status: null, best: null };
+  const graded = list.filter(
+    (a) => a.status === GameSetAttemptStatus.GRADED,
+  );
+  if (graded.length > 0) {
+    const best = graded.reduce((b, a) =>
+      a.compositeScore > b.compositeScore ? a : b,
+    );
+    return { status: GameSetAttemptStatus.GRADED, best };
+  }
+  if (list.some((a) => a.status === GameSetAttemptStatus.IN_PROGRESS)) {
+    return { status: GameSetAttemptStatus.IN_PROGRESS, best: null };
+  }
+  return { status: GameSetAttemptStatus.ABANDONED, best: null };
+}
+
+/**
+ * Cohort report: one row per student in the set's cohort (targeted org-units, or
+ * the whole college when untargeted — mirror of getCommunicationCohortReport),
+ * with PER-GAME columns (the authored games) plus the composite and attempt
+ * count. Honesty: a never-attempted student shows null composite + "—" per game
+ * (never 0); an in-progress-only student reads in-progress; an abandoned-only one
+ * reads abandoned; per-game rawScore is the TRUE unclamped value (may be
+ * negative). The row's per-game cells come from the BEST GRADED attempt, mapped
+ * back to the authored games via that attempt's pickedIndices (so random_n_of_pool
+ * sets map correctly and a game not in that attempt reads "—").
+ */
+export async function getGameSetCohortReport(
+  collegeId: string,
+  actor: GameActor,
+  gameSetId: string,
+): Promise<GameCohortReport> {
+  const scope = createTenantScope(collegeId);
+  const actorScope = await resolveActorScope(scope, actor);
+  const gs = await requireTenantGameSet(scope, gameSetId);
+  assertManageable(gs, actorScope);
+
+  const columns = gs.games.map((g, i) => ({
+    gameIndex: i,
+    gameKey: g.gameKey as GameKey,
+  }));
+
+  // Cohort students (mirror communication): college students in the targeted
+  // org-units (whole college when untargeted).
+  const college = new Types.ObjectId(collegeId);
+  const targets = (gs.orgUnits ?? []).map((u) => u.toString());
+  const studentFilter: Record<string, unknown> = {
+    college,
+    role: Role.STUDENT,
+    userType: UserType.COLLEGE,
+  };
+  if (targets.length > 0) {
+    const units = await OrgUnitModel.find({ college }).select("_id parent");
+    const refs = units.map((u) => ({
+      id: u._id.toString(),
+      parentId: u.parent ? u.parent.toString() : null,
+    }));
+    const allowed = collectDescendantUnitIds(refs, targets).map(
+      (id) => new Types.ObjectId(id),
+    );
+    studentFilter.orgUnit = { $in: allowed };
+  }
+  const students = await UserModel.find(studentFilter).select(
+    "username rollNumber",
+  );
+  const profiles = await ProfileModel.find({
+    user: { $in: students.map((s) => s._id) },
+  }).select("user fullName rollNumber");
+  const profileByUser = new Map(profiles.map((p) => [p.user.toString(), p]));
+
+  // All begun attempts for these students on this set, grouped by user.
+  const attempts = await GameSetAttemptModel.find({
+    gameSet: gs._id,
+    user: { $in: students.map((s) => s._id) },
+    begunAt: { $ne: null },
+  });
+  const attemptsByUser = new Map<string, AttemptDoc[]>();
+  for (const a of attempts) {
+    const k = a.user!.toString();
+    const arr = attemptsByUser.get(k);
+    if (arr) arr.push(a);
+    else attemptsByUser.set(k, [a]);
+  }
+
+  // Per-game raw scores of every BEST attempt, in one query.
+  const bestByUser = new Map<string, AttemptDoc>();
+  for (const [uid, list] of attemptsByUser) {
+    const { best } = pickCohortAttempt(list);
+    if (best) bestByUser.set(uid, best);
+  }
+  const bestIds = [...bestByUser.values()].map((a) => a._id);
+  const children = await GameAttemptModel.find({
+    parent: { $in: bestIds },
+  }).select("parent gameIndex score");
+  const childrenByParent = new Map<string, typeof children>();
+  for (const c of children) {
+    const k = c.parent.toString();
+    const arr = childrenByParent.get(k);
+    if (arr) arr.push(c);
+    else childrenByParent.set(k, [c]);
+  }
+
+  const emptyCells = (): GameCohortCell[] =>
+    columns.map((col) => ({
+      gameIndex: col.gameIndex,
+      rawScore: null,
+      played: false,
+    }));
+
+  const rows: GameCohortRow[] = students.map((student) => {
+    const uid = student._id.toString();
+    const profile = profileByUser.get(uid);
+    const list = attemptsByUser.get(uid) ?? [];
+    const { status, best } = pickCohortAttempt(list);
+
+    let cells: GameCohortCell[];
+    let compositeScore: number | null = null;
+    if (best) {
+      compositeScore = best.compositeScore;
+      // Map this attempt's children back to AUTHORED game columns via the
+      // frozen pickedIndices — a game not in the attempt stays "—".
+      const scoreByAuthored = new Map<number, number>();
+      for (const c of childrenByParent.get(best._id.toString()) ?? []) {
+        const authoredIndex = best.pickedIndices[c.gameIndex];
+        if (authoredIndex != null) scoreByAuthored.set(authoredIndex, c.score);
+      }
+      cells = columns.map((col) => ({
+        gameIndex: col.gameIndex,
+        rawScore: scoreByAuthored.has(col.gameIndex)
+          ? scoreByAuthored.get(col.gameIndex)!
+          : null,
+        played: scoreByAuthored.has(col.gameIndex),
+      }));
+    } else {
+      cells = emptyCells();
+    }
+
+    return {
+      userId: uid,
+      userName: profile?.fullName ?? student.username,
+      rollNumber: profile?.rollNumber ?? student.rollNumber ?? "",
+      status,
+      compositeScore,
+      attemptCount: list.length,
+      cells,
+    };
+  });
+
+  // Stable ordering (roll then name) for a deterministic export.
+  rows.sort(
+    (a, b) =>
+      a.rollNumber.localeCompare(b.rollNumber) ||
+      a.userName.localeCompare(b.userName),
+  );
+
+  return {
+    id: gs._id.toString(),
+    title: gs.title,
+    games: columns,
+    rows,
+  };
 }

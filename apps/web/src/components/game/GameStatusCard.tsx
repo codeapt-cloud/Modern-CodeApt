@@ -5,9 +5,12 @@
  */
 import type { GamePlayListItem } from "@codeapt/shared";
 import { Gamepad2 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { api } from "../../lib/api-client.js";
 import { attemptsLeft, canStartSet } from "../../lib/game-runner.js";
+import { useQuery } from "../../lib/use-query.js";
 import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
 import { Card, CardContent } from "../ui/card.js";
@@ -21,6 +24,17 @@ export function GameStatusCard({
 }): JSX.Element {
   const left = attemptsLeft(item);
   const canStart = canStartSet(item);
+  // Past attempts (G3) — lazy-loaded on expand so the list view stays cheap. The
+  // student sees what they scored on a finished set; an in-progress attempt is
+  // resumed via the SAME play link (Step 22 resume-or-start), not a new flow.
+  const [showHistory, setShowHistory] = useState(false);
+  const history = useQuery(
+    () =>
+      showHistory
+        ? api.games.myAttempts(item.id)
+        : Promise.resolve({ gameSetId: item.id, items: [] }),
+    [showHistory, item.id],
+  );
   return (
     <Card>
       <CardContent className="flex h-full flex-col gap-4 p-5">
@@ -67,6 +81,51 @@ export function GameStatusCard({
             </Button>
           )}
         </div>
+
+        {item.attemptsUsed > 0 ? (
+          <div className="border-t border-subtle pt-2">
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              className="text-xs text-ink-muted hover:text-ink"
+            >
+              {showHistory ? "Hide past attempts" : "View past attempts"}
+            </button>
+            {showHistory ? (
+              history.loading ? (
+                <p className="mt-2 text-xs text-ink-muted">Loading…</p>
+              ) : history.error ? (
+                <p className="mt-2 text-xs text-red-600">{history.error}</p>
+              ) : (history.data?.items.length ?? 0) === 0 ? (
+                <p className="mt-2 text-xs text-ink-muted">No past attempts.</p>
+              ) : (
+                <ul className="mt-2 space-y-1">
+                  {history.data!.items.map((a) => (
+                    <li
+                      key={a.attemptId}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="text-ink-muted">
+                        {new Date(a.startedAt).toLocaleDateString()}
+                      </span>
+                      {a.status === "graded" ? (
+                        <span className="font-medium text-ink">
+                          Score {a.compositeScore}
+                        </span>
+                      ) : a.status === "in_progress" ? (
+                        <Link to={href} className="text-primary hover:underline">
+                          Resume
+                        </Link>
+                      ) : (
+                        <span className="text-ink-muted">Abandoned</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

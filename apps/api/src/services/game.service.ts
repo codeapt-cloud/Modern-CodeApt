@@ -35,6 +35,7 @@ import {
   type AnswerGameItemResponse,
   type AnyGameModule,
   type BeginGameResponse,
+  type GameAttemptHistoryResponse,
   type GameDifficulty as GameDifficultyT,
   type GameInfo,
   type GameItemView,
@@ -1123,6 +1124,70 @@ export async function finishGameSet(
       questionsServed: g.questionsServed,
       questionsAttempted: g.questionsAttempted,
       questionsCorrect: g.questionsCorrect,
+    })),
+  };
+}
+
+/**
+ * G3 — READ a finished (or any authorized) attempt's result WITHOUT mutating it.
+ * `finishGameSet` returned the result once in the finish response; closing the tab
+ * lost it. This re-reads the SAME shape from the persisted attempt: the stored
+ * (floored) compositeScore and the per-game raw scores off each GameAttempt — so
+ * a student can see yesterday's score, and it never re-runs scoring or flips
+ * status. Authorized exactly like the rest of the engine (owner session OR the
+ * attempt token, via loadAndAuthorize).
+ */
+export async function getGameSetAttemptResult(
+  attemptId: string,
+  caller: Caller,
+): Promise<GameResult> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  const games = await GameAttemptModel.find({ parent: parent._id }).sort({
+    gameIndex: 1,
+  });
+  return {
+    status: parent.status as GameResult["status"],
+    // Stored (floored) composite — authoritative once GRADED; 0 while unfinished.
+    compositeScore: parent.compositeScore,
+    games: games.map((g) => ({
+      gameKey: g.gameKey as GameKey,
+      gameIndex: g.gameIndex,
+      score: g.score, // RAW, unclamped (can be negative for grid_challenge)
+      questionsServed: g.questionsServed,
+      questionsAttempted: g.questionsAttempted,
+      questionsCorrect: g.questionsCorrect,
+    })),
+  };
+}
+
+/**
+ * G3 — a student's OWN attempt history on one set: date, composite, status. The
+ * IN_PROGRESS row is `resumable` and re-enters via the SAME resume-or-start path
+ * (Step 22) — NOT a second entry point. Only attempts that actually BEGAN
+ * (begunAt set) appear, so reaching the pre-flight tutorial and leaving doesn't
+ * litter the history. `compositeScore` is null unless GRADED (never a fake 0).
+ */
+export async function listMyGameSetAttempts(
+  userId: string,
+  gameSetId: string,
+): Promise<GameAttemptHistoryResponse> {
+  if (!Types.ObjectId.isValid(gameSetId)) throw NOT_FOUND();
+  const attempts = await GameSetAttemptModel.find({
+    user: new Types.ObjectId(userId),
+    gameSet: new Types.ObjectId(gameSetId),
+    begunAt: { $ne: null },
+  }).sort({ createdAt: -1 });
+  return {
+    gameSetId,
+    items: attempts.map((a) => ({
+      attemptId: a._id.toString(),
+      status: a.status as GameSetAttemptStatus,
+      compositeScore:
+        a.status === GameSetAttemptStatus.GRADED ? a.compositeScore : null,
+      totalGames: a.sequence.length,
+      startedAt: (a.startedAt ?? a.createdAt).toISOString(),
+      completedAt: a.completedAt ? a.completedAt.toISOString() : null,
+      resumable: a.status === GameSetAttemptStatus.IN_PROGRESS,
     })),
   };
 }

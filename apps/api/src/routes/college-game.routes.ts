@@ -13,9 +13,12 @@ import {
   cloneCollegeGameSetController,
   createCollegeGameSetController,
   deleteCollegeGameSetController,
+  exportGameSetCohortController,
   getCollegeGameSetController,
+  getGameSetCohortController,
   listAvailableCollegeGameSetsController,
   listCollegeGameSetsController,
+  listGameSetAttemptsController,
   listGameSetTemplatesController,
   setCollegeGameSetPublishController,
   updateCollegeGameSetController,
@@ -78,6 +81,25 @@ collegeGameRouter.post(
   "/c/:collegeSlug/game-sets/:sourceId/clone",
   ...author,
   cloneCollegeGameSetController,
+);
+
+// --- Operator visibility (G2): attempt list + cohort report + export. Deeper
+//     than "/:gameSetId" so never captured as an id; author-gated (faculty +
+//     GAMING feature — the SAME guard as every other gaming authoring route). ---
+collegeGameRouter.get(
+  "/c/:collegeSlug/game-sets/:gameSetId/attempts",
+  ...author,
+  listGameSetAttemptsController,
+);
+collegeGameRouter.get(
+  "/c/:collegeSlug/game-sets/:gameSetId/cohort",
+  ...author,
+  getGameSetCohortController,
+);
+collegeGameRouter.get(
+  "/c/:collegeSlug/game-sets/:gameSetId/cohort/export",
+  ...author,
+  exportGameSetCohortController,
 );
 
 // --- Authoring: list / create / get / update / publish ---

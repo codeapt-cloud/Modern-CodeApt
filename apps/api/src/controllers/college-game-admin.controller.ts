@@ -15,6 +15,7 @@ import type { Request, Response } from "express";
 
 import { AppError } from "../errors/app-error.js";
 import { asyncHandler } from "../lib/async-handler.js";
+import { buildGameCohortWorkbook } from "../lib/game-cohort-excel.js";
 import * as gameSets from "../services/college-game.service.js";
 import type { GameActor } from "../services/college-game.service.js";
 import { buildAiGameSetDraft } from "../services/game-ai.service.js";
@@ -164,5 +165,53 @@ export const listAvailableCollegeGameSetsController = asyncHandler(
           actor(req).userId,
         ),
       );
+  },
+);
+
+// --- Operator visibility (Step 24 G2): attempt list + cohort report + export ---
+
+export const listGameSetAttemptsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await gameSets.listGameSetAttemptsForOperator(
+          tenantId(req),
+          actor(req),
+          req.params.gameSetId ?? "",
+        ),
+      );
+  },
+);
+
+export const getGameSetCohortController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await gameSets.getGameSetCohortReport(
+          tenantId(req),
+          actor(req),
+          req.params.gameSetId ?? "",
+        ),
+      );
+  },
+);
+
+export const exportGameSetCohortController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const report = await gameSets.getGameSetCohortReport(
+      tenantId(req),
+      actor(req),
+      req.params.gameSetId ?? "",
+    );
+    const buffer = await buildGameCohortWorkbook(report);
+    const filename = `gaming-${report.id}.xlsx`;
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.status(200).send(buffer);
   },
 );
