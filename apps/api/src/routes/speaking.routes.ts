@@ -20,12 +20,16 @@ import {
   setCollegeSpeakingPublishController,
   speakingCurrentController,
   speakingResultController,
+  speakingTtsController,
   startSpeakingController,
   submitSpeakingItemController,
   updateCollegeSpeakingController,
 } from "../controllers/speaking.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
-import { startAttemptRateLimiter } from "../middleware/rate-limit.js";
+import {
+  startAttemptRateLimiter,
+  uploadSignatureRateLimiter,
+} from "../middleware/rate-limit.js";
 import { requireAuth } from "../middleware/require-auth.js";
 import { requireFeature } from "../middleware/require-entitlement.js";
 import { requireFaculty } from "../middleware/require-role.js";
@@ -85,6 +89,14 @@ collegeSpeakingRouter.post(
   "/c/:collegeSlug/speaking",
   ...author,
   createCollegeSpeakingController,
+);
+// Authoring-time TTS — literal, BEFORE "/:assessmentId". Rate-limited (per user)
+// because each call runs server-side Piper + a Cloudinary upload.
+collegeSpeakingRouter.post(
+  "/c/:collegeSlug/speaking/tts",
+  ...author,
+  uploadSignatureRateLimiter,
+  speakingTtsController,
 );
 // Operator attempt management (before the bare "/:assessmentId" GET).
 collegeSpeakingRouter.get(

@@ -75,6 +75,19 @@ const envSchema = z.object({
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
 
+  // --- ASR/TTS service (Step 19: authoring-time TTS synthesis) ---
+  // The API calls the SAME faster-whisper container's /synthesize (Piper) at
+  // AUTHORING time. Optional until configured; the endpoint 503s clearly if unset.
+  ASR_URL: z.string().url().optional(),
+  ASR_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  // Demo/offline only: skip the real Piper call + Cloudinary upload and return a
+  // tiny canned WAV data URL, so the authoring flow is exercisable with no
+  // container. NEVER enable in prod.
+  TTS_MOCK: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+
   // --- Payments gateway ---
   // Which adapter handles orders. `mock` (default) is deterministic + offline,
   // gated exactly like PISTON_MOCK — there is no live PhonePe merchant here.

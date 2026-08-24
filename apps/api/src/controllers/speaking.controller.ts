@@ -9,6 +9,7 @@ import { AuthErrorCode, TenantErrorCode } from "@codeapt/shared";
 import {
   setSpeakingPublishSchema,
   speakingAssessmentUpsertSchema,
+  speakingTtsRequestSchema,
   submitSpeakingItemRequestSchema,
 } from "@codeapt/shared";
 import type { Request, Response } from "express";
@@ -116,6 +117,15 @@ export const createCollegeSpeakingController = asyncHandler(
     res
       .status(201)
       .json(await speaking.createCollegeSpeaking(tenantId(req), input));
+  },
+);
+
+export const speakingTtsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { text } = speakingTtsRequestSchema.parse(req.body);
+    res
+      .status(200)
+      .json(await speaking.generateSpeakingPromptAudio(tenantId(req), text));
   },
 );
 

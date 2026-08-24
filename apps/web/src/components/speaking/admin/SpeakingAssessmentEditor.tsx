@@ -17,6 +17,7 @@ import {
   type Role,
   type SpeakingItemType as SpeakingItemTypeName,
   type SpeakingItemUpsert,
+  type SpeakingTtsResponse,
 } from "@codeapt/shared";
 import { useEffect, useState } from "react";
 
@@ -42,6 +43,8 @@ function blankItem(): SpeakingItemUpsert {
     referenceText: "",
     promptText: "",
     promptAudioUrl: "",
+    promptAudioVoiceId: "",
+    promptAudioVoiceVersion: "",
     stimulusAudioUrl: "",
     stimulusPlayLimit: 0,
     answerSet: [],
@@ -287,6 +290,7 @@ export function SpeakingAssessmentEditor({
             index={i}
             item={it}
             uploadPromptAudio={authApi.uploadPromptAudio}
+            generatePromptAudio={authApi.generatePromptAudio}
             onChange={(patch) => patchItem(i, patch)}
             onRemove={() =>
               setDraft((d) => ({
@@ -325,6 +329,7 @@ function ItemForm({
   index,
   item,
   uploadPromptAudio,
+  generatePromptAudio,
   onChange,
   onRemove,
   onMove,
@@ -332,11 +337,14 @@ function ItemForm({
   index: number;
   item: SpeakingItemUpsert;
   uploadPromptAudio: (file: File) => Promise<string>;
+  generatePromptAudio: (text: string) => Promise<SpeakingTtsResponse>;
   onChange: (patch: Partial<SpeakingItemUpsert>) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
 }): JSX.Element {
   const [uploading, setUploading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [ttsError, setTtsError] = useState<string | null>(null);
   const needsReference = REFERENCE_TYPES.includes(item.itemType);
   const needsAnswerSet = ANSWER_TYPES.includes(item.itemType);
   const isDictation = item.itemType === SpeakingItemType.DICTATION;
@@ -346,9 +354,30 @@ function ItemForm({
     setUploading(true);
     try {
       const url = await uploadPromptAudio(file);
-      onChange({ promptAudioUrl: url });
+      // A manual upload has no voice on record (provenance is TTS-only).
+      onChange({ promptAudioUrl: url, promptAudioVoiceId: "", promptAudioVoiceVersion: "" });
     } finally {
       setUploading(false);
+    }
+  };
+
+  // The spoken prompt IS the reference sentence for listen-based items (repeat /
+  // dictation / etc.); fall back to the instruction text otherwise.
+  const ttsText = (item.referenceText.trim() || item.promptText.trim());
+  const onGenerate = async (): Promise<void> => {
+    setTtsError(null);
+    setGenerating(true);
+    try {
+      const res = await generatePromptAudio(ttsText);
+      onChange({
+        promptAudioUrl: res.audioUrl,
+        promptAudioVoiceId: res.voiceId,
+        promptAudioVoiceVersion: res.voiceVersion,
+      });
+    } catch (err) {
+      setTtsError(parseApiError(err).message);
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -485,17 +514,46 @@ function ItemForm({
             />
           </div>
           <div className="space-y-1">
-            <Label>Prompt audio (upload a clip)</Label>
-            <input
-              type="file"
-              accept="audio/*"
-              className="text-sm text-ink-muted"
-              onChange={(e) => void onPickAudio(e.target.files?.[0])}
-            />
+            <Label>Prompt audio</Label>
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Generate with server-side Piper (fixed voice) OR upload a clip.
+                  Both set promptAudioUrl; playback below can't tell them apart. */}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={generating || uploading || ttsText.length === 0}
+                onClick={() => void onGenerate()}
+              >
+                {generating ? "Generating…" : "Generate audio"}
+              </Button>
+              <label className="text-sm text-ink-muted">
+                or upload:{" "}
+                <input
+                  type="file"
+                  accept="audio/*"
+                  className="text-sm text-ink-muted"
+                  onChange={(e) => void onPickAudio(e.target.files?.[0])}
+                />
+              </label>
+            </div>
             {uploading ? (
               <span className="text-xs text-ink-muted">Uploading…</span>
-            ) : item.promptAudioUrl ? (
-              <span className="text-xs text-success-fg">Prompt audio attached ✓</span>
+            ) : null}
+            {ttsError ? (
+              <span className="text-xs text-error-fg">{ttsError}</span>
+            ) : null}
+            {item.promptAudioUrl ? (
+              <div className="space-y-1">
+                {/* Hear it before saving — same control regardless of source. */}
+                <audio controls src={item.promptAudioUrl} className="h-8 w-full max-w-sm" />
+                <span className="block text-xs text-success-fg">
+                  Prompt audio attached ✓
+                  {item.promptAudioVoiceId
+                    ? ` — voice ${item.promptAudioVoiceId} (${item.promptAudioVoiceVersion})`
+                    : " — uploaded"}
+                </span>
+              </div>
             ) : null}
           </div>
         </div>

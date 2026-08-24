@@ -40,6 +40,11 @@ const speakingItemSchema = new Schema(
     promptText: { type: String, default: "" },
     // TTS-generated spoken prompt (Cloudinary URL), produced at authoring time.
     promptAudioUrl: { type: String, default: "" },
+    // TTS provenance — the fixed Piper voice + version that produced promptAudioUrl,
+    // pinned so a regenerate can't silently change the sound. Empty for a manually
+    // uploaded clip (playback uses promptAudioUrl alone — no downstream difference).
+    promptAudioVoiceId: { type: String, default: "" },
+    promptAudioVoiceVersion: { type: String, default: "" },
     // Listening stimulus audio (conversation / passage_question / story_retell).
     stimulusAudioUrl: { type: String, default: "" },
     stimulusPlayLimit: { type: Number, default: 0, min: 0 },

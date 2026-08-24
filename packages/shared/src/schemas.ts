@@ -6008,6 +6008,13 @@ export const speakingItemUpsertSchema = z
     promptText: z.string().default(""),
     /** TTS-generated spoken prompt (Cloudinary URL; authoring-time). */
     promptAudioUrl: z.string().default(""),
+    /** TTS PROVENANCE — the fixed Piper voice + version that produced
+     *  promptAudioUrl, PINNED so a later regenerate can't silently change how the
+     *  item sounds mid-cohort. Empty when the clip was uploaded manually (a
+     *  manual clip has no voice on record — that's the only downstream difference;
+     *  playback uses promptAudioUrl alone). */
+    promptAudioVoiceId: z.string().default(""),
+    promptAudioVoiceVersion: z.string().default(""),
     /** Listening stimulus audio (conversation / passage_question / story_retell). */
     stimulusAudioUrl: z.string().default(""),
     /** How many times the stimulus may be played; 0 = unlimited (Step-9 precedent). */
@@ -6114,6 +6121,8 @@ export const speakingAssessmentItemDetailSchema = z.object({
   referenceText: z.string(),
   promptText: z.string(),
   promptAudioUrl: z.string(),
+  promptAudioVoiceId: z.string(),
+  promptAudioVoiceVersion: z.string(),
   stimulusAudioUrl: z.string(),
   stimulusPlayLimit: z.number().int().nonnegative(),
   answerSet: z.array(z.string()),
@@ -6176,6 +6185,21 @@ export const speakingItemViewSchema = z.object({
   responseWindowSeconds: z.number().int().positive(),
 });
 export type SpeakingItemView = z.infer<typeof speakingItemViewSchema>;
+
+/** Authoring-time TTS: render prompt TEXT to a fixed-voice hosted clip. */
+export const speakingTtsRequestSchema = z.object({
+  text: z.string().trim().min(1).max(600),
+});
+export type SpeakingTtsRequest = z.infer<typeof speakingTtsRequestSchema>;
+export const speakingTtsResponseSchema = z.object({
+  /** The hosted clip — stored on the item's promptAudioUrl, exactly like an
+   *  uploaded one (playback can't tell the difference). */
+  audioUrl: z.string(),
+  /** The fixed voice + version to PIN on the item (provenance). */
+  voiceId: z.string(),
+  voiceVersion: z.string(),
+});
+export type SpeakingTtsResponse = z.infer<typeof speakingTtsResponseSchema>;
 
 /**
  * PROGRESSIVE DISCLOSURE — the in-progress state of an attempt. Returns ONLY the

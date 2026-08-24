@@ -8,3 +8,6 @@ pydantic==2.8.2
 # run. Pinned explicitly here (was hand-patched on the box; this makes the fix
 # survive a git pull).
 requests==2.32.3
+# TTS (Step 19): self-hosted Piper for authoring-time prompt audio. Installs the
+# `piper` CLI used by /synthesize (same invocation as tts/generate-prompt.sh).
+piper-tts==1.2.0

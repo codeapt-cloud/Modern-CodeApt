@@ -27,6 +27,7 @@ import { CollegeModel } from "../models/college.model.js";
 import { SpeakingAssessmentModel } from "../models/speaking.model.js";
 import { ProfileModel, UserModel } from "../models/user.model.js";
 import { setEntitlements } from "../services/college.service.js";
+import { generateSpeakingPromptAudio } from "../services/speaking.service.js";
 
 const SLUG = "comm-demo";
 const DEMO_STUDENT_EMAIL = "comm.student@comm-demo.test";
@@ -86,6 +87,53 @@ async function seedSpeaking(): Promise<void> {
         },
       },
       { upsert: true, new: true },
+    );
+
+    // 3b. Generate prompt AUDIO for the listen-based items via the Step-19 TTS
+    // pipeline (server-side Piper → Cloudinary), pinning the fixed voice on each
+    // item. This is also the proof that Part A works at realistic volume. It is
+    // BEST-EFFORT: when the ASR/TTS container or Cloudinary is not configured
+    // (e.g. an offline content-only seed), each item logs a skip and keeps its
+    // text — the paper is still fully seeded. read_aloud / open_topic show their
+    // text on screen, so they need no spoken prompt.
+    const HEARD = new Set([
+      "repeat",
+      "dictation",
+      "sentence_build",
+      "error_correct",
+      "fill_missing_word",
+      "short_answer",
+      "conversation",
+      "passage_question",
+    ]);
+    let generated = 0;
+    let skipped = 0;
+    for (let i = 0; i < doc.items.length; i += 1) {
+      const it = doc.items[i]!;
+      if (!HEARD.has(it.itemType) || it.promptAudioUrl) continue;
+      const text = (it.referenceText || it.promptText || "").trim();
+      if (!text) continue;
+      try {
+        const tts = await generateSpeakingPromptAudio(collegeId, text);
+        it.promptAudioUrl = tts.audioUrl;
+        it.promptAudioVoiceId = tts.voiceId;
+        it.promptAudioVoiceVersion = tts.voiceVersion;
+        generated += 1;
+      } catch (err) {
+        skipped += 1;
+        logger.warn(
+          { itemType: it.itemType, err: (err as Error).message },
+          "seed:speaking — prompt audio skipped (TTS/Cloudinary unavailable); text kept",
+        );
+      }
+    }
+    if (generated > 0) {
+      doc.markModified("items");
+      await doc.save();
+    }
+    logger.info(
+      { generated, skipped },
+      "seed:speaking — prompt audio generation pass complete",
     );
 
     // 4. Upsert a demo STUDENT in the college so the paper is reachable.

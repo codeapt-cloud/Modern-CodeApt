@@ -228,6 +228,7 @@ import {
   type SpeakingAssessmentListResponse,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentUpsert,
+  type SpeakingTtsResponse,
   type MockPayRequest,
   type OrderListResponse,
   type OrderStatusResponse,
@@ -3749,6 +3750,17 @@ export const api = {
     },
     remove: async (slug: string, id: string): Promise<void> => {
       await http.delete(`${API_PREFIX}/c/${slug}/speaking/${id}`);
+    },
+    /** Authoring-time TTS: render prompt TEXT to a hosted, fixed-voice clip. */
+    generateTts: async (
+      slug: string,
+      text: string,
+    ): Promise<SpeakingTtsResponse> => {
+      const { data } = await http.post<SpeakingTtsResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/tts`,
+        { text },
+      );
+      return data;
     },
   },
 

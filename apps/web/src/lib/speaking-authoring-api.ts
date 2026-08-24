@@ -12,6 +12,7 @@ import type {
   SpeakingAssessmentDetail,
   SpeakingAssessmentListResponse,
   SpeakingAssessmentUpsert,
+  SpeakingTtsResponse,
 } from "@codeapt/shared";
 
 export interface SpeakingAuthoringApi {
@@ -21,9 +22,11 @@ export interface SpeakingAuthoringApi {
   update(id: string, body: SpeakingAssessmentUpsert): Promise<SpeakingAssessmentDetail>;
   setPublished(id: string, isPublished: boolean): Promise<SpeakingAssessmentDetail>;
   remove(id: string): Promise<void>;
-  /** Authoring-time prompt-audio upload → returns the hosted URL. TTS is not
-   *  API-callable (see the report), so authors upload a clip here. */
+  /** Authoring-time prompt-audio upload → returns the hosted URL. */
   uploadPromptAudio(file: File): Promise<string>;
+  /** Authoring-time TTS: render prompt TEXT to a hosted, fixed-voice clip +
+   *  its pinned voice id/version (server-side Piper; never browser speech). */
+  generatePromptAudio(text: string): Promise<SpeakingTtsResponse>;
 }
 
 /** College surface: bind the tenant slug onto every call. */
@@ -39,5 +42,6 @@ export function collegeSpeakingAuthoringApi(
     setPublished: (id, isPublished) => group.setPublished(slug, id, isPublished),
     remove: (id) => group.remove(slug, id),
     uploadPromptAudio: (file) => uploadAudioToCloudinary(slug, file),
+    generatePromptAudio: (text) => group.generateTts(slug, text),
   };
 }

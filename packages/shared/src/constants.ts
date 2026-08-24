@@ -726,6 +726,9 @@ export const SpeakingErrorCode = {
   NOT_PUBLISHABLE: "NOT_PUBLISHABLE",
   /** Delete refused (published, or has attempts). */
   NOT_DELETABLE: "NOT_DELETABLE",
+  /** Authoring-time TTS could not synthesize/host the clip (service unconfigured
+   *  or a Piper/Cloudinary failure). */
+  TTS_UNAVAILABLE: "TTS_UNAVAILABLE",
 } as const;
 export type SpeakingErrorCode =
   (typeof SpeakingErrorCode)[keyof typeof SpeakingErrorCode];

@@ -23,12 +23,14 @@ import {
   SpeakingItemType,
   SpeechJobStatus,
   SpeakingErrorCode,
+  CLOUDINARY_UPLOAD_FOLDER,
   collectDescendantUnitIds,
   isCourseGranted,
   isPlatformAdmin,
   scoreDictation,
   speakingAttemptBudgetSeconds,
   SPEAKING_SUBMIT_GRACE_MS,
+  type SpeakingTtsResponse,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentListResponse,
   type SpeakingAssessmentUpsert,
@@ -47,6 +49,8 @@ import {
 import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
+import { synthesizePrompt, TtsError } from "../lib/asr-tts.js";
+import { uploadBufferToCloudinary } from "../lib/cloudinary.js";
 import { enqueueSpeechJob } from "../lib/execution-queue.js";
 import { createTenantScope } from "../lib/tenant-scope.js";
 import { CollegeModel } from "../models/college.model.js";
@@ -523,6 +527,44 @@ export async function getSpeakingAttemptResult(
 // College authoring (tenant-scoped)
 // ---------------------------------------------------------------------------
 
+/**
+ * AUTHORING-time TTS: render prompt TEXT to a FIXED-voice clip and host it,
+ * returning the URL + the pinned voice id/version. Runs SERVER-SIDE (Piper in the
+ * ASR container) — never browser SpeechSynthesis, whose voice differs per device.
+ * The stored URL is used downstream exactly like a manual upload (playback reads
+ * promptAudioUrl alone; the voice fields are provenance-only). Gated upstream by
+ * the `author` stack (faculty + COMMUNICATION + speaking sub-capability).
+ */
+export async function generateSpeakingPromptAudio(
+  collegeId: string,
+  text: string,
+): Promise<SpeakingTtsResponse> {
+  let synth: Awaited<ReturnType<typeof synthesizePrompt>>;
+  try {
+    synth = await synthesizePrompt(text);
+  } catch (err) {
+    if (err instanceof TtsError) {
+      throw new AppError(err.message, 503, SpeakingErrorCode.TTS_UNAVAILABLE);
+    }
+    throw err;
+  }
+  let audioUrl: string;
+  try {
+    audioUrl = await uploadBufferToCloudinary(synth.bytes, {
+      folder: `${CLOUDINARY_UPLOAD_FOLDER}/speaking-tts/${collegeId}`,
+      filename: "prompt.wav",
+      resourceType: "video",
+    });
+  } catch (err) {
+    throw new AppError(
+      err instanceof Error ? err.message : "Could not host the generated audio.",
+      503,
+      SpeakingErrorCode.TTS_UNAVAILABLE,
+    );
+  }
+  return { audioUrl, voiceId: synth.voiceId, voiceVersion: synth.voiceVersion };
+}
+
 function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
   return {
     id: a._id.toString(),
@@ -536,6 +578,8 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
       referenceText: it.referenceText,
       promptText: it.promptText ?? "",
       promptAudioUrl: it.promptAudioUrl ?? "",
+      promptAudioVoiceId: it.promptAudioVoiceId ?? "",
+      promptAudioVoiceVersion: it.promptAudioVoiceVersion ?? "",
       stimulusAudioUrl: it.stimulusAudioUrl ?? "",
       stimulusPlayLimit: it.stimulusPlayLimit ?? 0,
       answerSet: it.answerSet ?? [],
@@ -574,6 +618,8 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
   referenceText: string;
   promptText: string;
   promptAudioUrl: string;
+  promptAudioVoiceId: string;
+  promptAudioVoiceVersion: string;
   stimulusAudioUrl: string;
   stimulusPlayLimit: number;
   answerSet: string[];
@@ -589,6 +635,8 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
     referenceText: it.referenceText,
     promptText: it.promptText,
     promptAudioUrl: it.promptAudioUrl,
+    promptAudioVoiceId: it.promptAudioVoiceId,
+    promptAudioVoiceVersion: it.promptAudioVoiceVersion,
     stimulusAudioUrl: it.stimulusAudioUrl,
     stimulusPlayLimit: it.stimulusPlayLimit,
     answerSet: it.answerSet,

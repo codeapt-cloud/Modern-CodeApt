@@ -52,3 +52,58 @@ export function signUploadParams(
     .update(toSign + apiSecret)
     .digest("hex");
 }
+
+/**
+ * SERVER-SIDE signed upload (Step 19). Unlike the browser flow — where we only
+ * MINT a signature and the file goes browser → Cloudinary — a TTS clip is
+ * generated on the server (Piper), so the server must upload it itself. Same
+ * signed-params algorithm; the file is POSTed as multipart with fetch, so no SDK
+ * is added. Returns the hosted secure_url. Throws if Cloudinary is unconfigured
+ * or the upload fails. `resourceType` is "video" for audio (matches the browser
+ * path — Cloudinary handles audio under the video resource type).
+ */
+export async function uploadBufferToCloudinary(
+  bytes: Uint8Array,
+  opts: { folder: string; filename?: string; resourceType?: "video" | "raw" },
+): Promise<string> {
+  const config = getCloudinaryConfig();
+  if (!config) {
+    throw new Error("Cloudinary is not configured (CLOUDINARY_* unset).");
+  }
+  const resourceType = opts.resourceType ?? "video";
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = signUploadParams(
+    { folder: opts.folder, timestamp },
+    config.apiSecret,
+  );
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([bytes], { type: "audio/wav" }),
+    opts.filename ?? "prompt.wav",
+  );
+  form.append("api_key", config.apiKey);
+  form.append("timestamp", String(timestamp));
+  form.append("folder", opts.folder);
+  form.append("signature", signature);
+
+  const res = await fetch(
+    `https://api.cloudinary.com/v1_1/${config.cloudName}/${resourceType}/upload`,
+    { method: "POST", body: form },
+  );
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { error?: { message?: string } };
+      if (j.error?.message) detail = j.error.message;
+    } catch {
+      /* keep the status */
+    }
+    throw new Error(`Cloudinary upload failed: ${detail}`);
+  }
+  const json = (await res.json()) as { secure_url?: string };
+  if (!json.secure_url) {
+    throw new Error("Cloudinary upload returned no secure_url.");
+  }
+  return json.secure_url;
+}
