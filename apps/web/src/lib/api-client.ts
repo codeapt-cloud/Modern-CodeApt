@@ -3648,6 +3648,14 @@ export const api = {
       );
       return data;
     },
+    /** Member-scoped Cloudinary signature for a student's recorded audio — the
+     *  generic /uploads/signature route is faculty-only, so students 403 there. */
+    uploadSignature: async (slug: string): Promise<UploadSignatureResponse> => {
+      const { data } = await http.post<UploadSignatureResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/uploads/signature`,
+      );
+      return data;
+    },
     start: async (
       slug: string,
       assessmentId: string,

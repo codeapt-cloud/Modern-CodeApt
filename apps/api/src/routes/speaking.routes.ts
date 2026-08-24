@@ -25,6 +25,7 @@ import {
   submitSpeakingItemController,
   updateCollegeSpeakingController,
 } from "../controllers/speaking.controller.js";
+import { collegeCreateUploadSignatureController } from "../controllers/upload-college.controller.js";
 import { enforcePasswordChange } from "../middleware/enforce-password-change.js";
 import {
   startAttemptRateLimiter,
@@ -56,6 +57,17 @@ collegeSpeakingRouter.get(
   "/c/:collegeSlug/speaking/available",
   ...member,
   listAvailableSpeakingController,
+);
+// Signed Cloudinary upload for a student's RECORDED audio. The generic
+// /c/:slug/uploads/signature route is faculty-gated (authoring), so a student
+// 403s there and could never upload a take. This member-scoped route (behind the
+// COMMUNICATION feature) issues the SAME tenant-agnostic signature, mirroring the
+// attendance module's own feature-scoped signature route. Rate-limited per user.
+collegeSpeakingRouter.post(
+  "/c/:collegeSlug/speaking/uploads/signature",
+  ...member,
+  uploadSignatureRateLimiter,
+  collegeCreateUploadSignatureController,
 );
 collegeSpeakingRouter.post(
   "/c/:collegeSlug/speaking/:assessmentId/attempts",

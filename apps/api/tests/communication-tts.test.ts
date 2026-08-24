@@ -288,3 +288,25 @@ describe("speaking TTS — voice pinned + indistinguishable downstream", () => {
     expect("stimulusAudioVoiceId" in item).toBe(false);
   });
 });
+
+describe("speaking audio upload signature — a STUDENT must be able to upload a take", () => {
+  it("authorizes a student on the speaking signature route, but the generic route stays faculty-only", async () => {
+    const sc = await setupCollege("sig-demo");
+    const student = await addStudent("sig-demo", sc.adminToken, "sig@s.test");
+
+    // The COMMUNICATION-scoped speaking signature route admits a student (member).
+    // Cloudinary is unconfigured in tests, so the service returns 503
+    // UPLOAD_NOT_CONFIGURED — crucially NOT 403: the student passed the guard.
+    const speaking = await request(app)
+      .post(`/api/c/sig-demo/speaking/uploads/signature`)
+      .set(auth(student.token));
+    expect(speaking.status).not.toBe(403);
+    expect([200, 503]).toContain(speaking.status);
+
+    // The generic authoring signature route is still faculty-only — a student 403s.
+    const generic = await request(app)
+      .post(`/api/c/sig-demo/uploads/signature`)
+      .set(auth(student.token));
+    expect(generic.status).toBe(403);
+  });
+});

@@ -1,9 +1,11 @@
 /**
- * Direct signed upload of a recorded audio blob to Cloudinary. Reuses the
- * existing tenant signature route (resource_type is never signed, so audio uses
- * the SAME signature) and POSTs to the `video/upload` endpoint, which handles
- * audio. Only the resulting URL ever reaches our API — the audio bytes go
- * straight from the browser to Cloudinary.
+ * Direct signed upload of a recorded audio blob to Cloudinary. Uses the
+ * COMMUNICATION-scoped speaking signature route (resource_type is never signed,
+ * so audio uses the SAME signature) and POSTs to the `video/upload` endpoint,
+ * which handles audio. This route admits any college member (a STUDENT recording
+ * a take AND faculty generating prompt audio) — unlike the generic /uploads
+ * signature route, which is faculty-only and 403s a student. Only the resulting
+ * URL ever reaches our API — the audio bytes go straight to Cloudinary.
  */
 import { api } from "./api-client.js";
 
@@ -11,7 +13,7 @@ export async function uploadAudioToCloudinary(
   slug: string,
   blob: Blob,
 ): Promise<string> {
-  const sig = await api.uploads.collegeSignature(slug);
+  const sig = await api.collegeSpeaking.uploadSignature(slug);
   const form = new FormData();
   const file = new File([blob], "recording.webm", {
     type: blob.type || "audio/webm",
