@@ -537,6 +537,128 @@ describe("public link (anonymous)", () => {
     expect(submit.body.score).toBe(5); // only the single MCQ answered
   });
 
+  // Step 15 audit: the exam engine already serves ONE section at a time (there is
+  // no getExamForStudent; buildSectionView, on every path, returns the current
+  // section only). This locks that property on the ANONYMOUS token path — which
+  // has no session and relies entirely on the attempt token — and proves a
+  // multi-section attempt runs end to end: start, answer, advance, answer, submit,
+  // results. A regression that re-widened the projection (or reintroduced a
+  // whole-paper fetch) would break this. MCQ-only both sections so grading is
+  // synchronous and the final score is deterministic.
+  it("[step 15] anonymous multi-section: only the current section is disclosed, and the token path completes end to end", async () => {
+    const subject = await SubjectModel.create({
+      name: "Mock",
+      slug: `mock-s15-${counter}-${Math.random().toString(36).slice(2, 8)}`,
+      price: 0,
+    });
+    const mod = await ModuleModel.create({
+      subject: subject._id,
+      name: "M",
+      order: 1,
+    });
+    const topic = await TopicModel.create({
+      module: mod._id,
+      name: "Exam Topic",
+      topicType: TopicType.EXAM,
+      order: 1,
+    });
+    const exam = await ExamModel.create({
+      topic: topic._id,
+      title: "S15",
+      passPercentage: 40,
+      totalMarks: 20,
+    });
+    const s1 = await ExamSectionModel.create({
+      exam: exam._id,
+      name: "Sec A",
+      order: 0,
+      durationMinutes: 30,
+    });
+    const s2 = await ExamSectionModel.create({
+      exam: exam._id,
+      name: "Sec B",
+      order: 1,
+      durationMinutes: 30,
+    });
+    const qA = await ExamQuestionModel.create({
+      exam: exam._id,
+      section: s1._id,
+      questionType: ExamQuestionType.MCQ_SINGLE,
+      text: "A?",
+      order: 0,
+      marks: 10,
+      options: ["x", "y"],
+      correctOptions: [0],
+    });
+    const qB = await ExamQuestionModel.create({
+      exam: exam._id,
+      section: s2._id,
+      questionType: ExamQuestionType.MCQ_SINGLE,
+      text: "B?",
+      order: 0,
+      marks: 10,
+      options: ["p", "q"],
+      correctOptions: [1],
+    });
+    const link = await PublicExamLinkModel.create({
+      exam: exam._id,
+      accessToken: `tok-s15-${counter}`,
+      isActive: true,
+    });
+
+    // Start anonymously — the start payload discloses section A's question ONLY;
+    // section B is absent even though the attempt spans two sections.
+    const start = await request(app)
+      .post(`/api/public/exams/${link.accessToken}/attempts`)
+      .send({
+        fullName: "Anon",
+        gender: "male",
+        rollNumber: "R-S15",
+        collegeName: "Acme",
+      });
+    expect(start.status).toBe(201);
+    const attemptId = start.body.attemptId as string;
+    const token = start.body.attemptToken as string;
+    expect(start.body.sectionIndex).toBe(0);
+    expect(start.body.totalSections).toBe(2);
+    const startIds = (start.body.questions as { id: string }[]).map((q) => q.id);
+    expect(startIds).toContain(qA._id.toString());
+    expect(startIds).not.toContain(qB._id.toString());
+
+    // Answer section A over the token.
+    await request(app)
+      .post(`/api/attempts/${attemptId}/section/answers`)
+      .set("X-Attempt-Token", token)
+      .send({
+        answers: [{ questionId: qA._id.toString(), selectedOptions: [0] }],
+      });
+
+    // Advance — the SAME response carries the next section and only it (no extra
+    // fetch, no whole-paper leak): section B present, section A gone.
+    const adv = await request(app)
+      .post(`/api/attempts/${attemptId}/advance`)
+      .set("X-Attempt-Token", token);
+    expect(adv.body.sectionIndex).toBe(1);
+    const advIds = (adv.body.questions as { id: string }[]).map((q) => q.id);
+    expect(advIds).toContain(qB._id.toString());
+    expect(advIds).not.toContain(qA._id.toString());
+
+    // Second answer phase, then submit → graded results, both MCQ correct.
+    await request(app)
+      .post(`/api/attempts/${attemptId}/section/answers`)
+      .set("X-Attempt-Token", token)
+      .send({
+        answers: [{ questionId: qB._id.toString(), selectedOptions: [1] }],
+      });
+    const submit = await request(app)
+      .post(`/api/attempts/${attemptId}/submit`)
+      .set("X-Attempt-Token", token)
+      .send({});
+    expect(submit.body.status).toBe("graded");
+    expect(submit.body.score).toBe(20);
+    expect(submit.body.totalMarks).toBe(20);
+  });
+
   it("gates an anonymous start behind the link's access code", async () => {
     const { userId } = await registerAndLogin();
     const { exam } = await makeExam({ enroll: userId });
