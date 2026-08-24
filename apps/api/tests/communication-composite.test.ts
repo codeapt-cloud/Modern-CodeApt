@@ -624,6 +624,39 @@ describe("communication composite — retake policy (best of, never erased)", ()
     expect(res.body.composite.partial).toBe(false);
   });
 
+  it("the cohort report + export show the BEST score PLUS the attempt count", async () => {
+    const sc = await setupCollege("cc-cohort-retake");
+    const exam = await makeExam(sc.collegeId, 100);
+    const student = await addStudent("cc-cohort-retake", sc.adminToken, "s@cr.test");
+    const id = await compose("cc-cohort-retake", sc.adminToken, [
+      { partType: "exam", ref: exam, label: "Grammar" },
+    ]);
+    expect(await publish("cc-cohort-retake", sc.adminToken, id)).toBe(200);
+
+    await submitExamAttempt(exam, student.id, 82); // first: 82%
+    await submitExamAttempt(exam, student.id, 40); // retake: worse
+
+    const report = await request(app)
+      .get(`${base("cc-cohort-retake")}/${id}/cohort`)
+      .set(auth(sc.adminToken));
+    expect(report.status).toBe(200);
+    const row = report.body.rows.find(
+      (r: { userId: string }) => r.userId === student.id,
+    );
+    // The operator sees the BEST score (82, not the worse 40 retake)…
+    expect(row.cells[0].percent).toBe(82);
+    // …and the attempt count, so a retake having happened is visible.
+    expect(row.cells[0].attemptCount).toBe(2);
+    expect(row.composite.compositePercent).toBe(82);
+
+    // The .xlsx export renders (annotates the best-of-N score in the cell).
+    const xlsx = await request(app)
+      .get(`${base("cc-cohort-retake")}/${id}/cohort/export`)
+      .set(auth(sc.adminToken));
+    expect(xlsx.status).toBe(200);
+    expect(Number(xlsx.headers["content-length"])).toBeGreaterThan(0);
+  });
+
   it("an in-progress retake on a gated part does NOT re-lock the part behind it", async () => {
     const sc = await setupCollege("cc-regate");
     const exam = await makeExam(sc.collegeId, 100);
@@ -648,5 +681,36 @@ describe("communication composite — retake policy (best of, never erased)", ()
       .post(`${base("cc-regate")}/${id}/parts/1/launch`)
       .set(auth(student.token));
     expect(launch.status).toBe(200);
+  });
+});
+
+describe("communication composite — speaking part is entitlement-independent (C1)", () => {
+  it("a composite with a speaking part resolves its title (for the editor) and publishes, without the speaking picker", async () => {
+    // A college with `communication.authoring` but NOT `communication.speaking`.
+    // The composite authoring path never touches the gated speaking LIST route —
+    // it resolves refs directly against the model (resolvePartRefInTenant).
+    const sc = await setupCollege("cc-spk-independent", {
+      communication: true,
+      authoring: true,
+    });
+    const speaking = await makeSpeaking(sc.collegeId);
+    const id = await compose("cc-spk-independent", sc.adminToken, [
+      { partType: "speaking", ref: speaking, label: "Speaking" },
+    ]);
+
+    // The authoring GET resolves the speaking title directly — so the editor has
+    // a real title to render for an existing speaking part even when its picker
+    // list is unavailable (it renders that title, not a blank/dropped part).
+    const detail = await request(app)
+      .get(`${base("cc-spk-independent")}/${id}`)
+      .set(auth(sc.adminToken));
+    expect(detail.status).toBe(200);
+    expect(detail.body.parts[0].partType).toBe("speaking");
+    expect(detail.body.parts[0].refTitle).not.toBe("");
+    expect(detail.body.parts[0].valid).toBe(true);
+
+    // Publish resolves the speaking part the same way — no speaking entitlement
+    // required; the guard only needs the ref to resolve in-tenant + be published.
+    expect(await publish("cc-spk-independent", sc.adminToken, id)).toBe(200);
   });
 });

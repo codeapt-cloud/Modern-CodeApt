@@ -35,6 +35,13 @@ const PART_TYPE_LABEL: Record<CommunicationPartType, string> = {
 interface PartForm {
   partType: CommunicationPartType;
   ref: string;
+  /** The referenced artifact's title, as resolved server-side when the composite
+   *  was loaded (CommunicationPartDetail.refTitle — resolved directly against the
+   *  engine model, so it is present even when that type's PICKER list failed to
+   *  load, e.g. speaking under an authoring-only entitlement). Lets an existing
+   *  part render its real title instead of a blank dropdown that would look like
+   *  "nothing selected" and risk being dropped on save. */
+  refTitle: string;
   label: string;
   weight: number;
   requiresPrevious: boolean;
@@ -122,6 +129,7 @@ export function CollegeCommunicationEditorPage() {
           d.parts.map((p) => ({
             partType: p.partType,
             ref: p.ref,
+            refTitle: p.refTitle,
             label: p.label,
             weight: p.weight,
             requiresPrevious: p.requiresPrevious,
@@ -150,7 +158,15 @@ export function CollegeCommunicationEditorPage() {
   const addPart = (): void =>
     setParts((ps) => [
       ...ps,
-      { partType: "exam", ref: "", label: "", weight: 1, requiresPrevious: ps.length > 0, availableFrom: "" },
+      {
+        partType: "exam",
+        ref: "",
+        refTitle: "",
+        label: "",
+        weight: 1,
+        requiresPrevious: ps.length > 0,
+        availableFrom: "",
+      },
     ]);
   const removePart = (i: number): void =>
     setParts((ps) => ps.filter((_, j) => j !== i));
@@ -334,6 +350,7 @@ export function CollegeCommunicationEditorPage() {
                       setPart(i, {
                         partType: e.target.value as CommunicationPartType,
                         ref: "",
+                        refTitle: "",
                       })
                     }
                   >
@@ -352,6 +369,16 @@ export function CollegeCommunicationEditorPage() {
                         ? `— ${p.partType} unavailable —`
                         : `— choose ${p.partType} —`}
                     </option>
+                    {/* An already-referenced artifact the picker list didn't
+                        return (list failed, or it's unpublished/archived) still
+                        renders — by its resolved title — so the value is visible
+                        and PRESERVED on save, never silently dropped. */}
+                    {p.ref && !opts.some((o) => o.id === p.ref) && (
+                      <option value={p.ref}>
+                        {p.refTitle || "Current selection"}
+                        {pickerErrors[p.partType] ? " (kept — list unavailable)" : ""}
+                      </option>
+                    )}
                     {opts.map((o) => (
                       <option key={o.id} value={o.id}>
                         {o.title}
@@ -373,8 +400,10 @@ export function CollegeCommunicationEditorPage() {
                 </div>
                 {pickerErrors[p.partType] && (
                   <p className="text-xs text-amber-600">
-                    The {p.partType} list couldn’t be loaded ({pickerErrors[p.partType]}).
-                    Switch this part to another type, or retry above.
+                    The {p.partType} list couldn’t be loaded ({pickerErrors[p.partType]}).{" "}
+                    {p.ref
+                      ? `This part keeps its current selection${p.refTitle ? ` (${p.refTitle})` : ""} and is saved unchanged; retry above to pick a different one.`
+                      : "Switch this part to another type, or retry above."}
                   </p>
                 )}
                 <div className="flex flex-wrap items-end gap-4">

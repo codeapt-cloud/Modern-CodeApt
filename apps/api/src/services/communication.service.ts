@@ -940,6 +940,7 @@ export async function getCommunicationCohortReport(
           status: p.status,
           percent: p.percent,
           band: p.band,
+          attemptCount: p.attemptCount,
         })),
         composite,
       };

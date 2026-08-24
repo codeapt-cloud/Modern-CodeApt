@@ -6543,8 +6543,13 @@ export type CommunicationLaunchResponse = z.infer<
 export const communicationCohortPartCellSchema = z.object({
   order: z.number().int().nonnegative(),
   status: communicationPartStatusSchema,
+  /** BEST scored attempt (Step 23 C2) — a retake never lowers this. */
   percent: z.number().nullable(),
   band: communicationBandSchema.nullable(),
+  /** How many attempts the student made on this part. > 1 tells the operator a
+   *  retake happened (and, since `percent` is the best, that a later attempt may
+   *  have scored lower) without surfacing a misleadingly-low number. */
+  attemptCount: z.number().int().nonnegative(),
 });
 export type CommunicationCohortPartCell = z.infer<
   typeof communicationCohortPartCellSchema

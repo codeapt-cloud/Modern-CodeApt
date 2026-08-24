@@ -117,6 +117,11 @@ export function CollegeCommunicationCohortPage() {
                               ({c.band})
                             </span>
                           )}
+                          {c && c.percent !== null && c.attemptCount > 1 && (
+                            <span className="ml-1 text-xs text-ink-muted">
+                              best of {c.attemptCount}
+                            </span>
+                          )}
                         </td>
                       );
                     })}

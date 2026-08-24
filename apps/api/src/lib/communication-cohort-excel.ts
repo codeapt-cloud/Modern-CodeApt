@@ -44,7 +44,15 @@ export async function buildCommunicationCohortWorkbook(
       if (!c) {
         cells.push("—", "—");
       } else {
-        cells.push(pct(c.percent), band(c.band));
+        // Show the BEST score, but annotate when more than one attempt was made
+        // so the operator sees a retake happened (a later attempt may have been
+        // worse). Numeric when there's nothing to annotate — keeps the column
+        // sortable — matching the "(partial)" composite annotation below.
+        const scoreCell =
+          c.percent !== null && c.attemptCount > 1
+            ? `${c.percent} (best of ${c.attemptCount})`
+            : pct(c.percent);
+        cells.push(scoreCell, band(c.band));
       }
     }
     const comp = row.composite;
