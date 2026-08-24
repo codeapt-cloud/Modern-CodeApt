@@ -13,6 +13,7 @@ import {
   type CommunicationStudentPart,
 } from "@codeapt/shared";
 import { ArrowRight, Lock, CircleAlert, CheckCircle2 } from "lucide-react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { Alert } from "../../components/ui/alert.js";
@@ -20,7 +21,7 @@ import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent } from "../../components/ui/card.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
-import { api } from "../../lib/api-client.js";
+import { api, parseApiError } from "../../lib/api-client.js";
 import { useQuery } from "../../lib/use-query.js";
 import { useCollege } from "./college-context.js";
 
@@ -68,14 +69,26 @@ export function CollegeCommunicationRunnerPage() {
     [slug, assessmentId, entitled],
   );
 
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
   const launch = async (part: CommunicationStudentPart): Promise<void> => {
-    // Re-check the gate server-side, then route into the engine runner.
-    const res = await api.collegeCommunication.launchPart(
-      slug,
-      assessmentId,
-      part.order,
-    );
-    navigate(runnerPath(slug, res.partType, res.ref));
+    setLaunchError(null);
+    try {
+      // Re-check the gate server-side, then route into the engine runner. The
+      // card the student clicked may be stale (a date gate that just closed, a
+      // predecessor unpublished) — a 403 PART_LOCKED must show the server's
+      // reason, not vanish into an unhandled rejection.
+      const res = await api.collegeCommunication.launchPart(
+        slug,
+        assessmentId,
+        part.order,
+      );
+      navigate(runnerPath(slug, res.partType, res.ref));
+    } catch (err) {
+      setLaunchError(parseApiError(err).message);
+      // Re-derive the parts so the stale card corrects itself immediately.
+      view.refetch();
+    }
   };
 
   if (!entitled) {
@@ -106,6 +119,8 @@ export function CollegeCommunicationRunnerPage() {
           <p className="text-sm text-ink-muted">{v.description}</p>
         )}
       </div>
+
+      {launchError && <Alert variant="error">{launchError}</Alert>}
 
       {/* Composite score — a running subtotal while parts remain. */}
       <Card>
@@ -185,6 +200,11 @@ export function CollegeCommunicationRunnerPage() {
                       <p className="mt-1 text-sm text-ink">
                         Score: {p.percent}%
                         {p.band ? ` (${p.band})` : ""}
+                        {p.attemptCount > 1 && (
+                          <span className="ml-2 text-xs text-ink-muted">
+                            best of {p.attemptCount} attempts
+                          </span>
+                        )}
                         {p.approximate && (
                           <span className="ml-2 text-xs text-amber-600">
                             AI-assisted — approximate
@@ -195,6 +215,12 @@ export function CollegeCommunicationRunnerPage() {
                             scored on the deterministic floor (not marked down)
                           </span>
                         )}
+                      </p>
+                    )}
+                    {p.retakeInProgress && (
+                      <p className="mt-1 text-xs text-amber-600">
+                        A retake is in progress — your score above stands until
+                        the retake is scored.
                       </p>
                     )}
                   </div>

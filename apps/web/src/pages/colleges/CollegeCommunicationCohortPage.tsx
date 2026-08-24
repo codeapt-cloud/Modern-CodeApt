@@ -13,7 +13,7 @@ import { Alert } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent } from "../../components/ui/card.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
-import { api } from "../../lib/api-client.js";
+import { api, parseApiError } from "../../lib/api-client.js";
 import { triggerBlobDownload } from "../../lib/download.js";
 import { useQuery } from "../../lib/use-query.js";
 import { useCollege } from "./college-context.js";
@@ -25,6 +25,7 @@ export function CollegeCommunicationCohortPage() {
   const { assessmentId = "" } = useParams();
   const navigate = useNavigate();
   const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const canAuthor = checkEntitlement(
     context.entitlements,
     CollegeFeature.COMMUNICATION,
@@ -41,10 +42,13 @@ export function CollegeCommunicationCohortPage() {
 
   const download = async (): Promise<void> => {
     setDownloading(true);
+    setDownloadError(null);
     try {
       triggerBlobDownload(
         await api.collegeCommunication.exportCohort(slug, assessmentId),
       );
+    } catch (err) {
+      setDownloadError(parseApiError(err).message);
     } finally {
       setDownloading(false);
     }
@@ -77,6 +81,10 @@ export function CollegeCommunicationCohortPage() {
           {downloading ? "Preparing…" : "Export .xlsx"}
         </Button>
       </div>
+
+      {downloadError && (
+        <Alert variant="error">Couldn’t export: {downloadError}</Alert>
+      )}
 
       <Card>
         <CardContent className="overflow-x-auto p-0">

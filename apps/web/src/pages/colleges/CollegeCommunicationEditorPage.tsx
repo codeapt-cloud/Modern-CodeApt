@@ -13,7 +13,7 @@ import {
   type CommunicationPartType,
 } from "@codeapt/shared";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Alert } from "../../components/ui/alert.js";
@@ -22,8 +22,15 @@ import { Card, CardContent } from "../../components/ui/card.js";
 import { Input } from "../../components/ui/input.js";
 import { Label } from "../../components/ui/label.js";
 import { Textarea } from "../../components/ui/textarea.js";
-import { api } from "../../lib/api-client.js";
+import { api, parseApiError } from "../../lib/api-client.js";
+import { settleArtifactLists } from "../../lib/communication-editor.js";
 import { useCollege } from "./college-context.js";
+
+const PART_TYPE_LABEL: Record<CommunicationPartType, string> = {
+  exam: "exam",
+  essay: "essay",
+  speaking: "speaking",
+};
 
 interface PartForm {
   partType: CommunicationPartType;
@@ -73,19 +80,39 @@ export function CollegeCommunicationEditorPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  // A HARD failure (couldn't load the assessment being edited) blocks the whole
+  // editor and offers a retry. A picker failure DEGRADES — that one type's list
+  // is unavailable (with a reason) while the rest of the editor keeps working.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pickerErrors, setPickerErrors] = useState<
+    Record<CommunicationPartType, string | null>
+  >({ exam: null, essay: null, speaking: null });
 
-  useEffect(() => {
-    if (!canAuthor) return;
-    void (async () => {
-      const [ex, es, sp] = await Promise.all([
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setLoadError(null);
+    setPickerErrors({ exam: null, essay: null, speaking: null });
+    try {
+      // Settle each list INDEPENDENTLY — one failing picker (e.g. a college with
+      // `communication.authoring` but not `communication.speaking`, so the
+      // speaking list 403s) must never blank the whole editor. The entitlement
+      // meaning stays intact: `speaking` = may author speaking content; an
+      // authoring-only college can still compose exam + essay parts, and the
+      // speaking picker shows WHY it's unavailable rather than hanging.
+      const results = await Promise.allSettled([
         api.collegeExams.list(slug),
         api.collegeEssayTopics.list(slug),
         api.collegeSpeaking.list(slug),
       ]);
-      setExams(ex.items.map((x) => ({ id: x.id, title: x.title, isPublished: x.isPublished })));
-      setEssays(es.items.map((x) => ({ id: x.id, title: x.title, isPublished: x.isPublished })));
-      setSpeaking(sp.items.map((x) => ({ id: x.id, title: x.title, isPublished: x.isPublished })));
+      const settled = settleArtifactLists(results, (r) => parseApiError(r).message);
+      setExams(settled.exams);
+      setEssays(settled.essays);
+      setSpeaking(settled.speaking);
+      setPickerErrors(settled.pickerErrors);
+
       if (editingId) {
+        // The assessment under edit is REQUIRED — if it won't load, block with a
+        // retry rather than silently rendering an empty form over the real one.
         const d = await api.collegeCommunication.get(slug, editingId);
         setTitle(d.title);
         setDescription(d.description);
@@ -102,9 +129,18 @@ export function CollegeCommunicationEditorPage() {
           })),
         );
       }
+    } catch (err) {
+      setLoadError(parseApiError(err).message);
+    } finally {
+      // ALWAYS clears the spinner — success or failure (the Step 23 C1 fix).
       setLoading(false);
-    })();
-  }, [slug, canAuthor, editingId]);
+    }
+  }, [slug, editingId]);
+
+  useEffect(() => {
+    if (!canAuthor) return;
+    void load();
+  }, [canAuthor, load]);
 
   const artifactsFor = (t: CommunicationPartType): Artifact[] =>
     t === "exam" ? exams : t === "essay" ? essays : speaking;
@@ -172,10 +208,24 @@ export function CollegeCommunicationEditorPage() {
     }
   };
 
+  const unavailablePickers = (
+    ["exam", "essay", "speaking"] as CommunicationPartType[]
+  ).filter((t) => pickerErrors[t]);
+
   if (!canAuthor) {
     return <Alert variant="info">You don’t have communication authoring access.</Alert>;
   }
   if (loading) return <Alert variant="info">Loading…</Alert>;
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <Alert variant="error">Couldn’t load this assessment: {loadError}</Alert>
+        <Button variant="outline" onClick={() => void load()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -192,6 +242,27 @@ export function CollegeCommunicationEditorPage() {
       </div>
 
       {error && <Alert variant="error">{error}</Alert>}
+
+      {unavailablePickers.length > 0 && (
+        <Alert variant="warning">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>
+              {unavailablePickers
+                .map((t) => PART_TYPE_LABEL[t])
+                .join(", ")}{" "}
+              {unavailablePickers.length === 1 ? "parts are" : "parts are"} not
+              available to pick right now
+              {pickerErrors[unavailablePickers[0]!]
+                ? ` (${pickerErrors[unavailablePickers[0]!]})`
+                : ""}
+              . You can still compose the other part types.
+            </span>
+            <Button size="sm" variant="outline" onClick={() => void load()}>
+              Retry
+            </Button>
+          </div>
+        </Alert>
+      )}
 
       <Card>
         <CardContent className="space-y-4 p-5">
@@ -273,9 +344,14 @@ export function CollegeCommunicationEditorPage() {
                   <select
                     className={`${selectCls} min-w-0 flex-1`}
                     value={p.ref}
+                    disabled={!!pickerErrors[p.partType]}
                     onChange={(e) => setPart(i, { ref: e.target.value })}
                   >
-                    <option value="">— choose {p.partType} —</option>
+                    <option value="">
+                      {pickerErrors[p.partType]
+                        ? `— ${p.partType} unavailable —`
+                        : `— choose ${p.partType} —`}
+                    </option>
                     {opts.map((o) => (
                       <option key={o.id} value={o.id}>
                         {o.title}
@@ -295,6 +371,12 @@ export function CollegeCommunicationEditorPage() {
                     </button>
                   </div>
                 </div>
+                {pickerErrors[p.partType] && (
+                  <p className="text-xs text-amber-600">
+                    The {p.partType} list couldn’t be loaded ({pickerErrors[p.partType]}).
+                    Switch this part to another type, or retry above.
+                  </p>
+                )}
                 <div className="flex flex-wrap items-end gap-4">
                   <div className="min-w-48 flex-1">
                     <Label>Label (shown to the student)</Label>

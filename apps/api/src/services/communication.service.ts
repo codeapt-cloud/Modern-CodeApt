@@ -159,14 +159,24 @@ interface PartOutcome {
   /** ...and is published (so a student could actually open it). */
   published: boolean;
   title: string;
-  /** The student has an attempt (opened it). */
+  /** The student has at least one attempt (opened it). */
   started: boolean;
-  /** The student FINISHED the part (submitted) — the gate signal. */
+  /** The student has FINISHED the part at least once (any completed attempt) —
+   *  the gate signal. "Once complete, always complete": starting a retake does
+   *  NOT re-lock this part or the parts gated behind it (Step 23 C2). */
   complete: boolean;
-  /** A comparable 0..100 score, or null if not scored yet (never a zero). */
+  /** A comparable 0..100 score, or null if not scored yet (never a zero). This
+   *  is the student's BEST scored attempt — a retake in flight cannot lower or
+   *  erase it, and an abandoned/expired retake (scored null) never displaces it. */
   percent: number | null;
   scored: boolean;
-  /** Honesty badges (speaking/essay). */
+  /** How many attempts exist (surfaced to the student as "best of N"). */
+  attemptCount: number;
+  /** A fresh attempt is actively under way (in progress, or submitted and
+   *  awaiting grading) on top of an already-scored result. Excludes a terminal
+   *  abandoned/expired retake — that is finished, not "in progress". */
+  retakeInProgress: boolean;
+  /** Honesty badges, taken from the BEST scored attempt (speaking/essay). */
   approximate: boolean;
   deterministicFallback: boolean;
 }
@@ -179,11 +189,66 @@ const MISSING: PartOutcome = {
   complete: false,
   percent: null,
   scored: false,
+  attemptCount: 0,
+  retakeInProgress: false,
   approximate: false,
   deterministicFallback: false,
 };
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+/**
+ * One normalized attempt as the composite reads it — engine-agnostic. Each
+ * `readXPart` maps its engine's rows into these, then `reduceAttempts` picks the
+ * BEST scored one and derives the aggregate outcome. Keeping the policy in ONE
+ * place is what makes "best attempt, no retake ever erases a score" consistent
+ * across all three engines (Step 23 C2).
+ */
+interface NormalizedAttempt {
+  /** Reached a completed/terminal state (submitted / graded / expired). */
+  done: boolean;
+  /** Has a real, comparable 0..100 score. */
+  scored: boolean;
+  /** The score (only read when `scored`). */
+  percent: number;
+  /** Actively under way (in progress, or awaiting grading) — NOT terminal. A
+   *  retake in this state is "in progress"; an abandoned/expired one is not. */
+  live: boolean;
+  approximate: boolean;
+  deterministicFallback: boolean;
+}
+
+function reduceAttempts(
+  exists: boolean,
+  published: boolean,
+  title: string,
+  attempts: NormalizedAttempt[],
+): PartOutcome {
+  let best: NormalizedAttempt | null = null;
+  let complete = false;
+  let anyLive = false;
+  for (const a of attempts) {
+    if (a.done) complete = true;
+    if (a.live) anyLive = true;
+    if (a.scored && (best === null || a.percent > best.percent)) best = a;
+  }
+  const scored = best !== null;
+  return {
+    exists,
+    published,
+    title,
+    started: attempts.length > 0,
+    complete,
+    percent: scored ? best!.percent : null,
+    scored,
+    attemptCount: attempts.length,
+    // A retake counts as "in progress" only when there is already a score to
+    // protect — otherwise it is just the student's first attempt in progress.
+    retakeInProgress: scored && anyLive,
+    approximate: scored ? best!.approximate : false,
+    deterministicFallback: scored ? best!.deterministicFallback : false,
+  };
+}
 
 async function readExamPart(
   ref: Types.ObjectId,
@@ -193,31 +258,30 @@ async function readExamPart(
     "title isPublished totalMarks",
   );
   if (!exam) return MISSING;
-  const attempt = await StudentExamAttemptModel.findOne({
+  // ALL attempts — the composite reports the BEST scored one, so a retake can't
+  // erase a prior result (Step 23 C2).
+  const attempts = await StudentExamAttemptModel.find({
     exam: ref,
     user: new Types.ObjectId(userId),
-  })
-    .sort({ createdAt: -1 })
-    .select("status score");
-  const complete =
-    !!attempt &&
-    (attempt.status === ExamAttemptStatus.SUBMITTED ||
-      attempt.status === ExamAttemptStatus.GRADED);
+  }).select("status score");
   // MCQ marks are final at submit; CODE grading may still be running (score is
   // the current graded total either way — the composite reads what's there).
   const totalMarks = exam.totalMarks ?? 0;
-  const scored = complete && totalMarks > 0;
-  return {
-    exists: true,
-    published: !!exam.isPublished,
-    title: exam.title,
-    started: !!attempt,
-    complete,
-    percent: scored ? round1(((attempt?.score ?? 0) / totalMarks) * 100) : null,
-    scored,
-    approximate: false,
-    deterministicFallback: false,
-  };
+  const normalized: NormalizedAttempt[] = attempts.map((a) => {
+    const done =
+      a.status === ExamAttemptStatus.SUBMITTED ||
+      a.status === ExamAttemptStatus.GRADED;
+    const scored = done && totalMarks > 0;
+    return {
+      done,
+      scored,
+      percent: scored ? round1(((a.score ?? 0) / totalMarks) * 100) : 0,
+      live: a.status === ExamAttemptStatus.IN_PROGRESS,
+      approximate: false,
+      deterministicFallback: false,
+    };
+  });
+  return reduceAttempts(true, !!exam.isPublished, exam.title, normalized);
 }
 
 async function readEssayPart(
@@ -226,37 +290,34 @@ async function readEssayPart(
 ): Promise<PartOutcome> {
   const topic = await EssayTopicModel.findById(ref).select("title isPublished");
   if (!topic) return MISSING;
-  // Attempts exist only once submitted (drafts live in EssayDraft) — the latest
-  // by attemptNumber is the student's outcome.
-  const attempt = await EssayAttemptModel.findOne({
+  // Attempts exist only once submitted (drafts live in EssayDraft). ALL of them
+  // — the composite reports the BEST scored attempt, so submitting a retake that
+  // is still awaiting grading can't null a previously graded score (Step 23 C2).
+  const attempts = await EssayAttemptModel.find({
     essayTopic: ref,
     user: new Types.ObjectId(userId),
-  })
-    .sort({ attemptNumber: -1 })
-    .select("status gradingStatus finalScore scoreSource");
-  const started = !!attempt;
-  const complete =
-    !!attempt &&
-    (attempt.status === EssayStatus.SUBMITTED ||
-      attempt.status === EssayStatus.UNDER_REVIEW ||
-      attempt.status === EssayStatus.GRADED);
-  const scored =
-    !!attempt &&
-    (attempt.gradingStatus === JobStatus.COMPLETED ||
-      attempt.status === EssayStatus.GRADED);
-  return {
-    exists: true,
-    published: !!topic.isPublished,
-    title: topic.title,
-    started,
-    complete,
-    percent: scored ? round1(attempt.finalScore ?? 0) : null,
-    scored,
-    // The essay's relevance dimension is AI-influenced; carry the badge when the
-    // hybrid path scored it, and the fallback badge when AI was down.
-    approximate: attempt?.scoreSource === "ai_hybrid",
-    deterministicFallback: attempt?.scoreSource === "deterministic_fallback",
-  };
+  }).select("status gradingStatus finalScore scoreSource");
+  const normalized: NormalizedAttempt[] = attempts.map((a) => {
+    const done =
+      a.status === EssayStatus.SUBMITTED ||
+      a.status === EssayStatus.UNDER_REVIEW ||
+      a.status === EssayStatus.GRADED;
+    const scored =
+      a.gradingStatus === JobStatus.COMPLETED ||
+      a.status === EssayStatus.GRADED;
+    return {
+      done,
+      scored,
+      percent: scored ? round1(a.finalScore ?? 0) : 0,
+      // Submitted/under-review but not yet graded = a retake still in flight.
+      live: a.status === EssayStatus.IN_PROGRESS || (done && !scored),
+      // The essay's relevance dimension is AI-influenced; carry the badge when
+      // the hybrid path scored it, and the fallback badge when AI was down.
+      approximate: a.scoreSource === "ai_hybrid",
+      deterministicFallback: a.scoreSource === "deterministic_fallback",
+    };
+  });
+  return reduceAttempts(true, !!topic.isPublished, topic.title, normalized);
 }
 
 async function readSpeakingPart(
@@ -267,48 +328,53 @@ async function readSpeakingPart(
     "title isPublished",
   );
   if (!asm) return MISSING;
-  const attempt = await SpeakingAttemptModel.findOne({
+  // ALL attempts — best scored wins. This is the case the report calls out: an
+  // abandoned retry that the reaper marks EXPIRED scores null, so under the old
+  // "latest attempt" read it registered as a finished part worth nothing and
+  // erased a real score. Best-of makes it harmless (Step 23 C2).
+  const attempts = await SpeakingAttemptModel.find({
     assessment: ref,
     user: new Types.ObjectId(userId),
-  })
-    .sort({ createdAt: -1 })
-    .select("status items");
-  const started = !!attempt;
-  const complete =
-    !!attempt &&
-    (attempt.status === SpeakingAttemptStatus.SUBMITTED ||
-      attempt.status === SpeakingAttemptStatus.SCORED ||
-      attempt.status === SpeakingAttemptStatus.EXPIRED);
-  const subScores = (attempt?.items ?? []).map((it) => it.subScores);
-  const percent = attempt ? speakingOverallPercent(subScores) : null;
-  // Honesty badges from the item scores.
-  let approximate = false;
-  let deterministicFallback = false;
-  for (const sc of subScores) {
-    if (sc && typeof sc === "object") {
-      const s = sc as Record<string, unknown>;
-      if (s.kind === "open_topic") {
-        if (typeof s.aiGrammar === "number" || typeof s.aiRelevance === "number")
+  }).select("status items");
+  const normalized: NormalizedAttempt[] = attempts.map((a) => {
+    const done =
+      a.status === SpeakingAttemptStatus.SUBMITTED ||
+      a.status === SpeakingAttemptStatus.SCORED ||
+      a.status === SpeakingAttemptStatus.EXPIRED;
+    const subScores = (a.items ?? []).map((it) => it.subScores);
+    const percent = speakingOverallPercent(subScores);
+    // Honesty badges from this attempt's item scores.
+    let approximate = false;
+    let deterministicFallback = false;
+    for (const sc of subScores) {
+      if (sc && typeof sc === "object") {
+        const s = sc as Record<string, unknown>;
+        if (
+          s.kind === "open_topic" &&
+          (typeof s.aiGrammar === "number" || typeof s.aiRelevance === "number")
+        )
           approximate = true;
+        if (
+          (s.kind === "open_topic" || s.kind === "story_retell") &&
+          s.source === "deterministic_floor"
+        )
+          deterministicFallback = true;
       }
-      if (
-        (s.kind === "open_topic" || s.kind === "story_retell") &&
-        s.source === "deterministic_floor"
-      )
-        deterministicFallback = true;
     }
-  }
-  return {
-    exists: true,
-    published: !!asm.isPublished,
-    title: asm.title,
-    started,
-    complete,
-    percent,
-    scored: percent !== null,
-    approximate,
-    deterministicFallback,
-  };
+    return {
+      done,
+      scored: percent !== null,
+      percent: percent ?? 0,
+      // In progress, or submitted-and-awaiting-scoring, is "in flight". EXPIRED
+      // is terminal (abandoned) — never "in progress".
+      live:
+        a.status === SpeakingAttemptStatus.IN_PROGRESS ||
+        a.status === SpeakingAttemptStatus.SUBMITTED,
+      approximate,
+      deterministicFallback,
+    };
+  });
+  return reduceAttempts(true, !!asm.isPublished, asm.title, normalized);
 }
 
 function readPart(
@@ -409,6 +475,10 @@ async function buildStudentParts(
             ),
       approximate: o.approximate,
       deterministicFallback: o.deterministicFallback,
+      attemptCount: o.attemptCount,
+      // Only meaningful when the part is otherwise shown as done — a genuine
+      // first attempt in progress is IN_PROGRESS, not a "retake".
+      retakeInProgress: o.retakeInProgress,
     });
 
     prevComplete = o.complete;

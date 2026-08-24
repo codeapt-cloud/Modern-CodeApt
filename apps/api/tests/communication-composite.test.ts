@@ -148,11 +148,16 @@ async function submitExamAttempt(examId: string, userId: string, score: number):
     score,
   });
 }
-async function submitEssayAttempt(topicId: string, userId: string, finalScore: number): Promise<void> {
+async function submitEssayAttempt(
+  topicId: string,
+  userId: string,
+  finalScore: number,
+  attemptNumber = 1,
+): Promise<void> {
   await EssayAttemptModel.create({
     essayTopic: new Types.ObjectId(topicId),
     user: new Types.ObjectId(userId),
-    attemptNumber: 1,
+    attemptNumber,
     status: EssayStatus.GRADED,
     gradingStatus: JobStatus.COMPLETED,
     finalScore,
@@ -165,6 +170,43 @@ async function submitSpeakingAttempt(asmId: string, userId: string, wordAccuracy
     user: new Types.ObjectId(userId),
     status: SpeakingAttemptStatus.SCORED,
     items: [{ itemIndex: 0, subScores: { wordAccuracy } }],
+  });
+}
+
+// --- Step 23 C2: retake-in-flight seeders (as the engines would leave them) ---
+
+/** A fresh exam retake the student has STARTED but not submitted. */
+async function startExamRetake(examId: string, userId: string): Promise<void> {
+  await StudentExamAttemptModel.create({
+    exam: new Types.ObjectId(examId),
+    user: new Types.ObjectId(userId),
+    attemptToken: randomUUID(),
+    status: ExamAttemptStatus.IN_PROGRESS,
+    score: 0,
+  });
+}
+/** An essay retake submitted but still awaiting grading (no finalScore). */
+async function submitPendingEssayAttempt(
+  topicId: string,
+  userId: string,
+  attemptNumber: number,
+): Promise<void> {
+  await EssayAttemptModel.create({
+    essayTopic: new Types.ObjectId(topicId),
+    user: new Types.ObjectId(userId),
+    attemptNumber,
+    status: EssayStatus.SUBMITTED,
+    gradingStatus: JobStatus.PROCESSING,
+    finalScore: 0,
+  });
+}
+/** A speaking retake the reaper marked EXPIRED with nothing scored. */
+async function expireSpeakingAttempt(asmId: string, userId: string): Promise<void> {
+  await SpeakingAttemptModel.create({
+    assessment: new Types.ObjectId(asmId),
+    user: new Types.ObjectId(userId),
+    status: SpeakingAttemptStatus.EXPIRED,
+    items: [],
   });
 }
 
@@ -461,5 +503,150 @@ describe("communication composite — cohort export", () => {
     expect(xlsx.status).toBe(200);
     expect(xlsx.headers["content-type"]).toContain("spreadsheetml");
     expect(Number(xlsx.headers["content-length"])).toBeGreaterThan(0);
+  });
+});
+
+// ===========================================================================
+// Step 23 C2 — retake policy: BEST scored attempt; an in-flight retake never
+// removes a completed score, and a partial composite is not manufactured.
+// ===========================================================================
+
+describe("communication composite — retake policy (best of, never erased)", () => {
+  it("THE REPORTED SCENARIO: score 82%, start a retake → composite is UNCHANGED", async () => {
+    const sc = await setupCollege("cc-retake-82");
+    const exam = await makeExam(sc.collegeId, 100);
+    const student = await addStudent("cc-retake-82", sc.adminToken, "s@r82.test");
+    const id = await compose("cc-retake-82", sc.adminToken, [
+      { partType: "exam", ref: exam, label: "Grammar" },
+    ]);
+    expect(await publish("cc-retake-82", sc.adminToken, id)).toBe(200);
+
+    await submitExamAttempt(exam, student.id, 82); // 82/100 = 82%
+    const before = await request(app)
+      .get(`${base("cc-retake-82")}/${id}/student`)
+      .set(auth(student.token));
+    expect(before.body.composite.compositePercent).toBe(82);
+    expect(before.body.composite.partial).toBe(false);
+    expect(before.body.composite.band).toBe("distinction");
+    expect(before.body.parts[0].status).toBe("complete");
+
+    // Merely STARTING a retake must not touch the recorded result.
+    await startExamRetake(exam, student.id);
+    const after = await request(app)
+      .get(`${base("cc-retake-82")}/${id}/student`)
+      .set(auth(student.token));
+    expect(after.body.composite.compositePercent).toBe(82); // unchanged
+    expect(after.body.composite.partial).toBe(false); // NOT flipped to partial
+    expect(after.body.composite.band).toBe("distinction");
+    // The part still shows its score, flagged that a retake is under way.
+    expect(after.body.parts[0].status).toBe("complete");
+    expect(after.body.parts[0].percent).toBe(82);
+    expect(after.body.parts[0].attemptCount).toBe(2);
+    expect(after.body.parts[0].retakeInProgress).toBe(true);
+  });
+
+  it("reports the BEST scored attempt for exam, essay AND speaking", async () => {
+    const sc = await setupCollege("cc-best");
+    const exam = await makeExam(sc.collegeId, 100);
+    const essay = await makeEssay(sc.collegeId);
+    const speaking = await makeSpeaking(sc.collegeId);
+    const student = await addStudent("cc-best", sc.adminToken, "s@best.test");
+    const id = await compose("cc-best", sc.adminToken, [
+      { partType: "exam", ref: exam, label: "Grammar", weight: 1 },
+      { partType: "essay", ref: essay, label: "Email", weight: 1 },
+      { partType: "speaking", ref: speaking, label: "Speaking", weight: 1 },
+    ]);
+    expect(await publish("cc-best", sc.adminToken, id)).toBe(200);
+
+    // Two attempts each; the LOWER one is the more recent (createdAt/attemptNumber
+    // ordering must NOT win — best does).
+    await submitExamAttempt(exam, student.id, 90); // best
+    await submitExamAttempt(exam, student.id, 60); // later, lower
+    await submitEssayAttempt(essay, student.id, 70, 1); // best
+    await submitEssayAttempt(essay, student.id, 55, 2); // later, lower
+    await submitSpeakingAttempt(speaking, student.id, 80); // best
+    await submitSpeakingAttempt(speaking, student.id, 50); // later, lower
+
+    const res = await request(app)
+      .get(`${base("cc-best")}/${id}/student`)
+      .set(auth(student.token));
+    expect(res.body.parts[0].percent).toBe(90);
+    expect(res.body.parts[1].percent).toBe(70);
+    expect(res.body.parts[2].percent).toBe(80);
+    // (90 + 70 + 80) / 3 = 80
+    expect(res.body.composite.compositePercent).toBe(80);
+    expect(res.body.composite.partial).toBe(false);
+    for (const p of res.body.parts) expect(p.attemptCount).toBe(2);
+  });
+
+  it("an essay retake still awaiting grading keeps the prior graded score", async () => {
+    const sc = await setupCollege("cc-essay-pending");
+    const essay = await makeEssay(sc.collegeId);
+    const student = await addStudent("cc-essay-pending", sc.adminToken, "s@ep.test");
+    const id = await compose("cc-essay-pending", sc.adminToken, [
+      { partType: "essay", ref: essay, label: "Email" },
+    ]);
+    expect(await publish("cc-essay-pending", sc.adminToken, id)).toBe(200);
+
+    await submitEssayAttempt(essay, student.id, 72, 1); // graded 72
+    await submitPendingEssayAttempt(essay, student.id, 2); // retake, awaiting grade
+
+    const res = await request(app)
+      .get(`${base("cc-essay-pending")}/${id}/student`)
+      .set(auth(student.token));
+    expect(res.body.parts[0].percent).toBe(72); // not nulled by the pending retake
+    expect(res.body.parts[0].status).toBe("complete");
+    expect(res.body.parts[0].retakeInProgress).toBe(true);
+    expect(res.body.composite.compositePercent).toBe(72);
+    expect(res.body.composite.partial).toBe(false);
+  });
+
+  it("an abandoned/EXPIRED speaking retake does NOT erase a previously scored attempt", async () => {
+    const sc = await setupCollege("cc-spk-expired");
+    const speaking = await makeSpeaking(sc.collegeId);
+    const student = await addStudent("cc-spk-expired", sc.adminToken, "s@se.test");
+    const id = await compose("cc-spk-expired", sc.adminToken, [
+      { partType: "speaking", ref: speaking, label: "Speaking" },
+    ]);
+    expect(await publish("cc-spk-expired", sc.adminToken, id)).toBe(200);
+
+    await submitSpeakingAttempt(speaking, student.id, 80); // scored 80
+    await expireSpeakingAttempt(speaking, student.id); // reaper-expired, null score
+
+    const res = await request(app)
+      .get(`${base("cc-spk-expired")}/${id}/student`)
+      .set(auth(student.token));
+    expect(res.body.parts[0].percent).toBe(80); // survives
+    expect(res.body.parts[0].status).toBe("complete");
+    // The expired attempt is TERMINAL — not a retake "in progress".
+    expect(res.body.parts[0].retakeInProgress).toBe(false);
+    expect(res.body.composite.compositePercent).toBe(80);
+    expect(res.body.composite.partial).toBe(false);
+  });
+
+  it("an in-progress retake on a gated part does NOT re-lock the part behind it", async () => {
+    const sc = await setupCollege("cc-regate");
+    const exam = await makeExam(sc.collegeId, 100);
+    const essay = await makeEssay(sc.collegeId);
+    const student = await addStudent("cc-regate", sc.adminToken, "s@rg.test");
+    const id = await compose("cc-regate", sc.adminToken, [
+      { partType: "exam", ref: exam, label: "Grammar", requiresPrevious: false },
+      { partType: "essay", ref: essay, label: "Email", requiresPrevious: true },
+    ]);
+    expect(await publish("cc-regate", sc.adminToken, id)).toBe(200);
+
+    await submitExamAttempt(exam, student.id, 70); // completes part 0 → part 1 unlocks
+    await startExamRetake(exam, student.id); // retake part 0
+
+    const res = await request(app)
+      .get(`${base("cc-regate")}/${id}/student`)
+      .set(auth(student.token));
+    expect(res.body.parts[0].status).toBe("complete"); // stays complete
+    expect(res.body.parts[0].retakeInProgress).toBe(true);
+    expect(res.body.parts[1].status).toBe("available"); // NOT re-locked
+    const launch = await request(app)
+      .post(`${base("cc-regate")}/${id}/parts/1/launch`)
+      .set(auth(student.token));
+    expect(launch.status).toBe(200);
   });
 });

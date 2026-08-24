@@ -92,6 +92,15 @@ export function CollegeCommunicationAssessmentsPage() {
       {canAuthor ? (
         authoring.loading ? (
           <Skeleton className="h-40 w-full" />
+        ) : authoring.error ? (
+          <Alert variant="error">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>Couldn’t load your assessments: {authoring.error}</span>
+              <Button size="sm" variant="outline" onClick={() => authoring.refetch()}>
+                Retry
+              </Button>
+            </div>
+          </Alert>
         ) : authoring.data && authoring.data.items.length > 0 ? (
           <div className="space-y-3">
             {authoring.data.items.map((a) => (
@@ -157,6 +166,15 @@ export function CollegeCommunicationAssessmentsPage() {
         )
       ) : available.loading ? (
         <Skeleton className="h-40 w-full" />
+      ) : available.error ? (
+        <Alert variant="error">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>Couldn’t load your assessments: {available.error}</span>
+            <Button size="sm" variant="outline" onClick={() => available.refetch()}>
+              Retry
+            </Button>
+          </div>
+        </Alert>
       ) : available.data && available.data.items.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {available.data.items.map((a) => (

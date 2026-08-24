@@ -6498,11 +6498,19 @@ export const communicationStudentPartSchema = z.object({
   /** Route target for the existing runner — only when the student may open the
    *  part (available / in_progress / complete); "" for locked / unavailable. */
   ref: z.string(),
-  /** Outcome so far — null percent = not scored yet (absent, not zero). */
+  /** Outcome so far — null percent = not scored yet (absent, not zero). The
+   *  composite reports the student's BEST scored attempt (Step 23 C2): a retake
+   *  never removes an already-recorded score. */
   percent: z.number().nullable(),
   band: communicationBandSchema.nullable(),
   approximate: z.boolean(),
   deterministicFallback: z.boolean(),
+  /** How many attempts the student has on this part (drives "best of N"). */
+  attemptCount: z.number().int().nonnegative(),
+  /** A fresh attempt is under way on top of an already-scored result — surfaced
+   *  so the student sees the retake without the composite pretending the part is
+   *  unscored (the previous score still stands until the retake is scored). */
+  retakeInProgress: z.boolean(),
 });
 export type CommunicationStudentPart = z.infer<
   typeof communicationStudentPartSchema
