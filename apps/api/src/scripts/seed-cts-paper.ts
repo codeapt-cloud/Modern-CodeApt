@@ -18,7 +18,11 @@
  * can never mistake it for harvested exam material — a real deployment MUST
  * replace them. Idempotent: exams/topic upsert by (college, title).
  */
-import { EssayPromptKind, ExamQuestionType } from "@codeapt/shared";
+import {
+  CommunicationPartType,
+  EssayPromptKind,
+  ExamQuestionType,
+} from "@codeapt/shared";
 import type { Types } from "mongoose";
 
 import { connectDatabase, disconnectDatabase } from "../lib/db.js";
@@ -29,7 +33,9 @@ import {
   ExamSectionModel,
 } from "../models/assessment.model.js";
 import { CollegeModel } from "../models/college.model.js";
+import { CommunicationAssessmentModel } from "../models/communication.model.js";
 import { EssayTopicModel } from "../models/essay.model.js";
+import { SpeakingAssessmentModel } from "../models/speaking.model.js";
 
 const SLUG = "comm-demo";
 const PH = "[PLACEHOLDER — representative filler, NOT harvested; replace before deployment]";
@@ -81,8 +87,16 @@ async function upsertExam(
   return exam._id;
 }
 
-async function seedGrammar(collegeId: Types.ObjectId): Promise<number> {
-  const examId = await upsertExam(collegeId, "CTS — Grammar (Section C)", 50);
+const GRAMMAR_TITLE = "CTS — Grammar (Section C)";
+const COMPREHENSION_TITLE = "CTS — Comprehension (Section D)";
+const EMAIL_TITLE = "CTS Round 2 — Email";
+const SPEAKING_TITLE = "CTS / Cognizant — Communication (Sections A & B)";
+const COMPOSITE_TITLE = "CTS — Full Communication Assessment";
+
+async function seedGrammar(
+  collegeId: Types.ObjectId,
+): Promise<{ id: Types.ObjectId; count: number }> {
+  const examId = await upsertExam(collegeId, GRAMMAR_TITLE, 50);
   let order = 0;
   let total = 0;
   for (let s = 0; s < GRAMMAR.length; s += 1) {
@@ -101,11 +115,13 @@ async function seedGrammar(collegeId: Types.ObjectId): Promise<number> {
     total += qs.length;
   }
   await ExamModel.updateOne({ _id: examId }, { $set: { totalMarks: total } });
-  return total;
+  return { id: examId, count: total };
 }
 
-async function seedComprehension(collegeId: Types.ObjectId): Promise<number> {
-  const examId = await upsertExam(collegeId, "CTS — Comprehension (Section D)", 50);
+async function seedComprehension(
+  collegeId: Types.ObjectId,
+): Promise<{ id: Types.ObjectId; count: number }> {
+  const examId = await upsertExam(collegeId, COMPREHENSION_TITLE, 50);
   const section = await ExamSectionModel.create({
     exam: examId,
     name: "Comprehension — audio passage",
@@ -122,12 +138,12 @@ async function seedComprehension(collegeId: Types.ObjectId): Promise<number> {
   );
   await ExamQuestionModel.insertMany(qs);
   await ExamModel.updateOne({ _id: examId }, { $set: { totalMarks: qs.length } });
-  return qs.length;
+  return { id: examId, count: qs.length };
 }
 
-async function seedEmail(collegeId: Types.ObjectId): Promise<void> {
-  await EssayTopicModel.findOneAndUpdate(
-    { college: collegeId, title: "CTS Round 2 — Email" },
+async function seedEmail(collegeId: Types.ObjectId): Promise<Types.ObjectId> {
+  const topic = await EssayTopicModel.findOneAndUpdate(
+    { college: collegeId, title: EMAIL_TITLE },
     {
       $set: {
         promptKind: EssayPromptKind.EMAIL,
@@ -145,6 +161,105 @@ async function seedEmail(collegeId: Types.ObjectId): Promise<void> {
     },
     { upsert: true, new: true },
   );
+  return topic._id;
+}
+
+/**
+ * Step 21 — wire the four CTS artifacts into ONE CommunicationAssessment so the
+ * demo is a single assignable unit, not four. The speaking part is looked up by
+ * title (it is seeded separately by seed:speaking); if it isn't there yet, the
+ * composite is still created with the three exam/essay parts and a warning. Parts
+ * are weighted roughly by size (marks/items). Idempotent (upsert by title). The
+ * composite is only PUBLISHED when every referenced part is itself published.
+ */
+async function seedComposite(
+  collegeId: Types.ObjectId,
+  grammar: { id: Types.ObjectId; count: number },
+  comprehension: { id: Types.ObjectId; count: number },
+  emailId: Types.ObjectId,
+): Promise<{ published: boolean; hasSpeaking: boolean }> {
+  const speaking = await SpeakingAssessmentModel.findOne({
+    college: collegeId,
+    title: SPEAKING_TITLE,
+  }).select("_id isPublished");
+
+  const parts: Array<{
+    order: number;
+    partType: CommunicationPartType;
+    ref: Types.ObjectId;
+    label: string;
+    weight: number;
+    requiresPrevious: boolean;
+    availableFrom: Date | null;
+  }> = [];
+  parts.push({
+    order: 0,
+    partType: CommunicationPartType.EXAM,
+    ref: grammar.id,
+    label: "Section C — Grammar",
+    weight: grammar.count,
+    requiresPrevious: false,
+    availableFrom: null,
+  });
+  parts.push({
+    order: 1,
+    partType: CommunicationPartType.EXAM,
+    ref: comprehension.id,
+    label: "Section D — Comprehension",
+    weight: comprehension.count,
+    requiresPrevious: false,
+    availableFrom: null,
+  });
+  if (speaking) {
+    parts.push({
+      order: 2,
+      partType: CommunicationPartType.SPEAKING,
+      ref: speaking._id,
+      label: "Sections A & B — Speaking",
+      weight: 13,
+      requiresPrevious: false,
+      availableFrom: null,
+    });
+  }
+  parts.push({
+    order: parts.length,
+    partType: CommunicationPartType.ESSAY,
+    ref: emailId,
+    // Round 2 is a different day in the real paper — gate it on finishing the
+    // rest (requiresPrevious), leaving availableFrom for an operator to set a
+    // real date. Demo keeps availableFrom null so it's explorable immediately.
+    label: "Round 2 — Email",
+    weight: 20,
+    requiresPrevious: true,
+    availableFrom: null,
+  });
+
+  // The composite guarantees a fully launchable paper, so publish only when every
+  // INCLUDED part is published. The grammar/comprehension exams + email essay are
+  // published by the seeds above; the speaking part (if present) is published by
+  // seed:speaking. So this is true in the normal (seed:speaking-first) flow.
+  const allPartsPublished = !speaking || !!speaking.isPublished;
+
+  await CommunicationAssessmentModel.findOneAndUpdate(
+    { college: collegeId, title: COMPOSITE_TITLE },
+    {
+      $set: {
+        topic: null,
+        orgUnits: [],
+        description:
+          "The complete CTS communication paper as ONE assignment — grammar, " +
+          "comprehension, speaking, and the Round-2 email, in order. " +
+          "(Grammar/comprehension/email content is PLACEHOLDER filler.)",
+        parts,
+        passPercentage: 50,
+        distinctionPercentage: 60,
+        isPublished: allPartsPublished,
+      },
+      $setOnInsert: { college: collegeId },
+    },
+    { upsert: true, new: true },
+  );
+  return { published: allPartsPublished, hasSpeaking: !!speaking };
 }
 
 async function main(): Promise<void> {
@@ -160,13 +275,28 @@ async function main(): Promise<void> {
     const collegeId = college._id;
     const grammar = await seedGrammar(collegeId);
     const comprehension = await seedComprehension(collegeId);
-    await seedEmail(collegeId);
+    const emailId = await seedEmail(collegeId);
+    const composite = await seedComposite(
+      collegeId,
+      grammar,
+      comprehension,
+      emailId,
+    );
     logger.info(
-      { grammar, comprehension },
-      `CTS paper seeded into "${SLUG}" as FOUR SEPARATE artifacts (grammar exam, ` +
-        `comprehension exam, speaking assessment [seed:speaking], email essay). ` +
+      {
+        grammar: grammar.count,
+        comprehension: comprehension.count,
+        compositePublished: composite.published,
+        speakingWired: composite.hasSpeaking,
+      },
+      `CTS paper seeded into "${SLUG}": grammar + comprehension exams, the email ` +
+        `essay, and (Step 21) ONE "${COMPOSITE_TITLE}" CommunicationAssessment that ` +
+        `wraps all four in order — the demo is now a single assignment, not four. ` +
         `Every grammar/comprehension question + the email prompt is PLACEHOLDER filler. ` +
-        `There is no cross-engine paper container: assign the four separately.`,
+        (composite.hasSpeaking
+          ? ""
+          : `NOTE: the speaking part was NOT found — run seed:speaking to include it; ` +
+            `the composite was created with the three exam/essay parts only.`),
     );
   } finally {
     await disconnectDatabase();

@@ -9,7 +9,7 @@
  * phase and is shown here as coming soon.
  */
 import { CollegeFeature, Role, checkEntitlement } from "@codeapt/shared";
-import { FileText, Headphones, Mail, Mic } from "lucide-react";
+import { FileText, Headphones, Layers, Mail, Mic } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Alert } from "../../components/ui/alert.js";
@@ -80,6 +80,26 @@ export function CollegeCommunicationPage() {
           Your college hasn’t enabled Communication yet.
         </Alert>
       ) : (
+        <>
+        {/* The composite — the whole paper as ONE assignable assessment. */}
+        <Link to="assessments" className="block">
+          <Card className="border-primary/40 transition-colors hover:border-primary">
+            <CardContent className="flex items-start gap-3 p-5">
+              <Layers className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+              <div>
+                <div className="font-medium text-ink">
+                  Full Communication Assessment
+                </div>
+                <p className="mt-1 text-sm text-ink-muted">
+                  {isStudent
+                    ? "Take the whole paper — grammar, comprehension, speaking, and email — in order, in one place."
+                    : "Compose grammar, comprehension, speaking, and email into ONE ordered, weighted assessment with a single cohort report."}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
         <div className="grid gap-4 sm:grid-cols-2">
           {cards.map((c) => {
             const body = (
@@ -113,6 +133,7 @@ export function CollegeCommunicationPage() {
             );
           })}
         </div>
+        </>
       )}
     </div>
   );

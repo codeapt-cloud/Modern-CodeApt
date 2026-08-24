@@ -18,6 +18,7 @@ import { collegeExamRouter } from "./college-exam.routes.js";
 import { gameRouter } from "./game.routes.js";
 import { collegeGameRouter } from "./college-game.routes.js";
 import { collegeSpeakingRouter } from "./speaking.routes.js";
+import { collegeCommunicationRouter } from "./communication.routes.js";
 import { attendanceRouter } from "./attendance.routes.js";
 import { codingProfileRouter } from "./coding-profile.routes.js";
 import { studentAiCreditRouter } from "./student-ai-credit.routes.js";
@@ -90,6 +91,11 @@ apiRouter.use(collegeGameRouter);
 // Communication speech spine (Sections A/B): tenant-scoped speaking assessments
 // behind COMMUNICATION + the `speaking` sub-capability. Read-aloud only (Step 10).
 apiRouter.use(collegeSpeakingRouter);
+
+// Communication ASSESSMENT COMPOSITE (Step 21): an ordered container over
+// exam/essay/speaking artifacts + a unified report. Reads the engines, never
+// modifies them. Behind COMMUNICATION + the `authoring` sub-capability.
+apiRouter.use(collegeCommunicationRouter);
 
 apiRouter.use(attendanceRouter);
 // Coding profiles (net-new): student handles + stored per-platform stats,

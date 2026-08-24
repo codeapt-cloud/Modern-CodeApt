@@ -70,6 +70,8 @@ import {
   PAYMENT_STATUS_VALUES,
   POSTING_TYPE_VALUES,
   ROLE_VALUES,
+  COMMUNICATION_PART_TYPE_VALUES,
+  COMMUNICATION_PART_STATUS_VALUES,
   SPEAKING_ATTEMPT_STATUS_VALUES,
   SPEAKING_ITEM_TYPE_VALUES,
   SPEECH_JOB_STATUS_VALUES,
@@ -87,6 +89,8 @@ import {
   type PaymentStatus,
   type PostingType,
   type Role,
+  type CommunicationPartType,
+  type CommunicationPartStatus,
   type SpeakingAttemptStatus,
   type SpeakingItemType,
   type SpeechJobStatus,
@@ -6314,4 +6318,239 @@ export const speakingAttemptAdminListSchema = z.object({
 });
 export type SpeakingAttemptAdminList = z.infer<
   typeof speakingAttemptAdminListSchema
+>;
+
+// ===========================================================================
+// Communication ASSESSMENT COMPOSITE (Step 21)
+// An ordered CONTAINER over existing exam / essay / speaking artifacts + a
+// unified report. No new engine — each part references an existing artifact by
+// id + type and routes into that engine's own runner unchanged.
+// ===========================================================================
+
+export const communicationPartTypeSchema = z.enum(
+  COMMUNICATION_PART_TYPE_VALUES as [
+    CommunicationPartType,
+    ...CommunicationPartType[],
+  ],
+);
+export const communicationPartStatusSchema = z.enum(
+  COMMUNICATION_PART_STATUS_VALUES as [
+    CommunicationPartStatus,
+    ...CommunicationPartStatus[],
+  ],
+);
+export const communicationBandSchema = z.enum(["distinction", "pass", "fail"]);
+
+// --- Authoring (compose from existing artifacts) ---
+export const communicationPartUpsertSchema = z.object({
+  partType: communicationPartTypeSchema,
+  /** Id of the existing artifact (Exam / EssayTopic / SpeakingAssessment). */
+  ref: z.string().min(1),
+  /** Operator-facing label shown in the composite (e.g. "Section C — Grammar"). */
+  label: z.string().trim().min(1).max(160),
+  /** Relative weight in the composite mean (must be > 0). */
+  weight: z.number().positive().max(1000).default(1),
+  /** Gate: part N cannot be started until the PREVIOUS part is complete. */
+  requiresPrevious: z.boolean().default(false),
+  /** Optional wall-clock gate (ISO) — the part opens no earlier than this (the
+   *  Round-2-is-a-different-day case). Null = no date gate. */
+  availableFrom: z.string().datetime().nullable().default(null),
+});
+export type CommunicationPartUpsert = z.infer<
+  typeof communicationPartUpsertSchema
+>;
+
+export const communicationAssessmentUpsertSchema = z.object({
+  title: z.string().trim().min(1),
+  description: z.string().default(""),
+  parts: z.array(communicationPartUpsertSchema).max(50).default([]),
+  /** Band thresholds (the real papers default to 50 / 60). */
+  passPercentage: z.number().min(0).max(100).default(50),
+  distinctionPercentage: z.number().min(0).max(100).default(60),
+  /** College-surface org-unit targeting (empty = whole college). */
+  orgUnitIds: z.array(z.string()).optional(),
+});
+export type CommunicationAssessmentUpsert = z.infer<
+  typeof communicationAssessmentUpsertSchema
+>;
+
+export const setCommunicationPublishSchema = z.object({
+  isPublished: z.boolean(),
+});
+export type SetCommunicationPublish = z.infer<
+  typeof setCommunicationPublishSchema
+>;
+
+// --- Author projections ---
+/** One part as the AUTHOR sees it — the stored config plus a live resolution of
+ *  the referenced artifact (does it still exist, is it published, is its type
+ *  correct). `valid` is false when a ref was deleted / unpublished / retyped, so
+ *  the editor can flag it before the operator publishes. */
+export const communicationPartDetailSchema = z.object({
+  order: z.number().int().nonnegative(),
+  partType: communicationPartTypeSchema,
+  ref: z.string(),
+  label: z.string(),
+  weight: z.number(),
+  requiresPrevious: z.boolean(),
+  availableFrom: z.string().nullable(),
+  /** Live resolution against the engine. */
+  refTitle: z.string(),
+  refExists: z.boolean(),
+  refPublished: z.boolean(),
+  valid: z.boolean(),
+});
+export type CommunicationPartDetail = z.infer<
+  typeof communicationPartDetailSchema
+>;
+
+export const communicationAssessmentDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  isPublished: z.boolean(),
+  passPercentage: z.number(),
+  distinctionPercentage: z.number(),
+  orgUnitIds: z.array(z.string()),
+  parts: z.array(communicationPartDetailSchema),
+});
+export type CommunicationAssessmentDetail = z.infer<
+  typeof communicationAssessmentDetailSchema
+>;
+
+export const communicationAssessmentListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  partCount: z.number().int().nonnegative(),
+  isPublished: z.boolean(),
+  orgUnitIds: z.array(z.string()),
+  createdAt: z.string(),
+});
+export type CommunicationAssessmentListItem = z.infer<
+  typeof communicationAssessmentListItemSchema
+>;
+export const communicationAssessmentListResponseSchema = z.object({
+  items: z.array(communicationAssessmentListItemSchema),
+});
+export type CommunicationAssessmentListResponse = z.infer<
+  typeof communicationAssessmentListResponseSchema
+>;
+
+// --- Student discovery (list the composites their cohort can take) ---
+export const communicationAvailableItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  partCount: z.number().int().nonnegative(),
+});
+export type CommunicationAvailableItem = z.infer<
+  typeof communicationAvailableItemSchema
+>;
+export const communicationAvailableListResponseSchema = z.object({
+  items: z.array(communicationAvailableItemSchema),
+});
+export type CommunicationAvailableListResponse = z.infer<
+  typeof communicationAvailableListResponseSchema
+>;
+
+// --- Composite result (shared shape: student's own + each cohort row) ---
+export const compositeResultSchema = z.object({
+  compositePercent: z.number().nullable(),
+  band: communicationBandSchema.nullable(),
+  partial: z.boolean(),
+  scoredWeight: z.number(),
+  totalWeight: z.number(),
+  scoredCount: z.number().int().nonnegative(),
+  totalCount: z.number().int().nonnegative(),
+});
+export type CompositeResultDto = z.infer<typeof compositeResultSchema>;
+
+// --- Student consumption (the ONE entry point) ---
+/**
+ * One part FOR THE STUDENT: its gate status, why it's locked (human copy), the
+ * ref to route into the runner (present only when the student may open it), and
+ * its outcome so far. `percent` is null when not scored — never a zero. The
+ * honesty carry-overs ride here: `approximate` (AI-scored dimensions), and
+ * `deterministicFallback` (a hybrid part scored on its floor because AI was
+ * down — the student was NOT marked down).
+ */
+export const communicationStudentPartSchema = z.object({
+  order: z.number().int().nonnegative(),
+  partType: communicationPartTypeSchema,
+  label: z.string(),
+  weight: z.number(),
+  status: communicationPartStatusSchema,
+  /** Human-readable reason when locked/unavailable ("" otherwise). */
+  reason: z.string(),
+  /** Route target for the existing runner — only when the student may open the
+   *  part (available / in_progress / complete); "" for locked / unavailable. */
+  ref: z.string(),
+  /** Outcome so far — null percent = not scored yet (absent, not zero). */
+  percent: z.number().nullable(),
+  band: communicationBandSchema.nullable(),
+  approximate: z.boolean(),
+  deterministicFallback: z.boolean(),
+});
+export type CommunicationStudentPart = z.infer<
+  typeof communicationStudentPartSchema
+>;
+
+export const communicationStudentViewSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  passPercentage: z.number(),
+  distinctionPercentage: z.number(),
+  parts: z.array(communicationStudentPartSchema),
+  composite: compositeResultSchema,
+});
+export type CommunicationStudentView = z.infer<
+  typeof communicationStudentViewSchema
+>;
+
+/** The gated launch: 403s (PART_LOCKED) when the gate isn't satisfied, else
+ *  echoes the artifact ref + type so the client routes into the engine runner. */
+export const communicationLaunchResponseSchema = z.object({
+  partType: communicationPartTypeSchema,
+  ref: z.string(),
+});
+export type CommunicationLaunchResponse = z.infer<
+  typeof communicationLaunchResponseSchema
+>;
+
+// --- Operator cohort report + the ONE export (replaces the four manual joins) ---
+export const communicationCohortPartCellSchema = z.object({
+  order: z.number().int().nonnegative(),
+  status: communicationPartStatusSchema,
+  percent: z.number().nullable(),
+  band: communicationBandSchema.nullable(),
+});
+export type CommunicationCohortPartCell = z.infer<
+  typeof communicationCohortPartCellSchema
+>;
+export const communicationCohortRowSchema = z.object({
+  userId: z.string(),
+  userName: z.string(),
+  rollNumber: z.string(),
+  cells: z.array(communicationCohortPartCellSchema),
+  composite: compositeResultSchema,
+});
+export type CommunicationCohortRow = z.infer<
+  typeof communicationCohortRowSchema
+>;
+export const communicationCohortReportSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  parts: z.array(
+    z.object({
+      order: z.number().int().nonnegative(),
+      label: z.string(),
+      partType: communicationPartTypeSchema,
+      weight: z.number(),
+    }),
+  ),
+  rows: z.array(communicationCohortRowSchema),
+});
+export type CommunicationCohortReport = z.infer<
+  typeof communicationCohortReportSchema
 >;

@@ -229,6 +229,13 @@ import {
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentUpsert,
   type SpeakingTtsResponse,
+  type CommunicationAvailableListResponse,
+  type CommunicationStudentView,
+  type CommunicationLaunchResponse,
+  type CommunicationAssessmentListResponse,
+  type CommunicationAssessmentDetail,
+  type CommunicationAssessmentUpsert,
+  type CommunicationCohortReport,
   type MockPayRequest,
   type OrderListResponse,
   type OrderStatusResponse,
@@ -3761,6 +3768,120 @@ export const api = {
         { text },
       );
       return data;
+    },
+  },
+
+  /** Communication ASSESSMENT COMPOSITE (Step 21) — a container over existing
+   *  exam/essay/speaking artifacts. Student consumption + college authoring. */
+  collegeCommunication: {
+    // --- Student consumption ---
+    available: async (
+      slug: string,
+    ): Promise<CommunicationAvailableListResponse> => {
+      const { data } = await http.get<CommunicationAvailableListResponse>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/available`,
+      );
+      return data;
+    },
+    student: async (
+      slug: string,
+      id: string,
+    ): Promise<CommunicationStudentView> => {
+      const { data } = await http.get<CommunicationStudentView>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}/student`,
+      );
+      return data;
+    },
+    launchPart: async (
+      slug: string,
+      id: string,
+      order: number,
+    ): Promise<CommunicationLaunchResponse> => {
+      const { data } = await http.post<CommunicationLaunchResponse>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}/parts/${order}/launch`,
+      );
+      return data;
+    },
+    // --- Authoring (faculty/college_admin + COMMUNICATION.authoring) ---
+    list: async (
+      slug: string,
+    ): Promise<CommunicationAssessmentListResponse> => {
+      const { data } = await http.get<CommunicationAssessmentListResponse>(
+        `${API_PREFIX}/c/${slug}/communication/assessments`,
+      );
+      return data;
+    },
+    get: async (
+      slug: string,
+      id: string,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.get<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}`,
+      );
+      return data;
+    },
+    create: async (
+      slug: string,
+      body: CommunicationAssessmentUpsert,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.post<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/communication/assessments`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      slug: string,
+      id: string,
+      body: CommunicationAssessmentUpsert,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.patch<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      slug: string,
+      id: string,
+      isPublished: boolean,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.post<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (slug: string, id: string): Promise<void> => {
+      await http.delete(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}`,
+      );
+    },
+    cohort: async (
+      slug: string,
+      id: string,
+    ): Promise<CommunicationCohortReport> => {
+      const { data } = await http.get<CommunicationCohortReport>(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}/cohort`,
+      );
+      return data;
+    },
+    /** The ONE export — one row per student × parts × composite (auth header
+     *  rides along via the http client; returns a blob to hand to a download). */
+    exportCohort: async (
+      slug: string,
+      id: string,
+    ): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(
+        `${API_PREFIX}/c/${slug}/communication/assessments/${id}/cohort/export`,
+        { responseType: "blob" },
+      );
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? `communication-${id}.xlsx`,
+      };
     },
   },
 

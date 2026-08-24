@@ -301,6 +301,22 @@ const CollegeSpeakingEditorPage = named(
   () => import("./pages/colleges/CollegeSpeakingEditorPage.js"),
   "CollegeSpeakingEditorPage",
 );
+const CollegeCommunicationAssessmentsPage = named(
+  () => import("./pages/colleges/CollegeCommunicationAssessmentsPage.js"),
+  "CollegeCommunicationAssessmentsPage",
+);
+const CollegeCommunicationEditorPage = named(
+  () => import("./pages/colleges/CollegeCommunicationEditorPage.js"),
+  "CollegeCommunicationEditorPage",
+);
+const CollegeCommunicationRunnerPage = named(
+  () => import("./pages/colleges/CollegeCommunicationRunnerPage.js"),
+  "CollegeCommunicationRunnerPage",
+);
+const CollegeCommunicationCohortPage = named(
+  () => import("./pages/colleges/CollegeCommunicationCohortPage.js"),
+  "CollegeCommunicationCohortPage",
+);
 const CollegeGameSetEditorPage = named(
   () => import("./pages/colleges/CollegeGameSetEditorPage.js"),
   "CollegeGameSetEditorPage",
@@ -691,6 +707,22 @@ export function App() {
               />
               <Route path="speaking" element={<CollegeSpeakingPage />} />
               <Route path="speaking/manage" element={<CollegeSpeakingEditorPage />} />
+              <Route
+                path="communication/assessments"
+                element={<CollegeCommunicationAssessmentsPage />}
+              />
+              <Route
+                path="communication/assessments/manage"
+                element={<CollegeCommunicationEditorPage />}
+              />
+              <Route
+                path="communication/assessments/:assessmentId/cohort"
+                element={<CollegeCommunicationCohortPage />}
+              />
+              <Route
+                path="communication/assessments/:assessmentId"
+                element={<CollegeCommunicationRunnerPage />}
+              />
               <Route path="challenges" element={<CollegeChallengesPage />} />
               <Route path="analytics" element={<CollegeAnalyticsPage />} />
               <Route path="postings" element={<CollegeCareersPage />} />

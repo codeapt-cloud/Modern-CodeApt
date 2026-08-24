@@ -610,6 +610,42 @@ export const SPEAKING_ATTEMPT_STATUS_VALUES = Object.values(
   SpeakingAttemptStatus,
 );
 
+/**
+ * Which engine one part of a CommunicationAssessment composite points at (Step
+ * 21). The composite is an ordered CONTAINER — each part references an existing
+ * artifact by id + this type, and routes into that engine's own runner. NO new
+ * engine: `exam` → Exam, `essay` → EssayTopic, `speaking` → SpeakingAssessment.
+ */
+export const CommunicationPartType = {
+  EXAM: "exam",
+  ESSAY: "essay",
+  SPEAKING: "speaking",
+} as const;
+export type CommunicationPartType =
+  (typeof CommunicationPartType)[keyof typeof CommunicationPartType];
+export const COMMUNICATION_PART_TYPE_VALUES = Object.values(
+  CommunicationPartType,
+);
+
+/**
+ * A part's status FOR ONE STUDENT, derived (never stored) from the underlying
+ * engine's attempt + the gate. `locked` = a gate (requiresPrevious / availableFrom)
+ * is not yet satisfied; `unavailable` = the referenced artifact was deleted or
+ * unpublished out from under the composite (fails safe + visible, never a crash).
+ */
+export const CommunicationPartStatus = {
+  LOCKED: "locked",
+  AVAILABLE: "available",
+  IN_PROGRESS: "in_progress",
+  COMPLETE: "complete",
+  UNAVAILABLE: "unavailable",
+} as const;
+export type CommunicationPartStatus =
+  (typeof CommunicationPartStatus)[keyof typeof CommunicationPartStatus];
+export const COMMUNICATION_PART_STATUS_VALUES = Object.values(
+  CommunicationPartStatus,
+);
+
 // ---------------------------------------------------------------------------
 // Grading / async jobs
 // ---------------------------------------------------------------------------

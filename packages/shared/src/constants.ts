@@ -733,6 +733,28 @@ export const SpeakingErrorCode = {
 export type SpeakingErrorCode =
   (typeof SpeakingErrorCode)[keyof typeof SpeakingErrorCode];
 
+/** CommunicationAssessment composite (Step 21). */
+export const CommunicationErrorCode = {
+  ASSESSMENT_NOT_FOUND: "ASSESSMENT_NOT_FOUND",
+  NOT_AUTHORIZED: "NOT_AUTHORIZED",
+  /** A referenced part order does not exist on this assessment. */
+  PART_NOT_FOUND: "PART_NOT_FOUND",
+  /** The part's gate (requiresPrevious / availableFrom) is not yet satisfied —
+   *  it cannot be launched. Enforced at the composite API, not just the UI. */
+  PART_LOCKED: "PART_LOCKED",
+  /** A part references an artifact that is missing / unpublished / the wrong
+   *  type — authoring is refused; at read time the part shows `unavailable`. */
+  INVALID_PART_REF: "INVALID_PART_REF",
+  /** A referenced target org-unit is unknown in this college / out of scope. */
+  ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
+  /** Publishing refused (e.g. no parts, or a part ref no longer resolves). */
+  NOT_PUBLISHABLE: "NOT_PUBLISHABLE",
+  /** Delete refused (published). */
+  NOT_DELETABLE: "NOT_DELETABLE",
+} as const;
+export type CommunicationErrorCode =
+  (typeof CommunicationErrorCode)[keyof typeof CommunicationErrorCode];
+
 /**
  * Anonymous public-exam starts allowed per IP inside the window. Set high
  * because a whole lab/campus of takers usually shares ONE public IP (NAT) — a
