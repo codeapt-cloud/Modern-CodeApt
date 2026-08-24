@@ -72,9 +72,27 @@ export function isCollegeStudent(
 }
 
 // ---------------------------------------------------------------------------
-// Sub-capability catalog — extensible per-feature toggles. Keys are stored on
-// the college as `${feature}.${subCapability}` (see subCapabilityKey). Add new
-// keys here; the map on the college stays a flat, forward-compatible structure.
+// Sub-capability catalog. Keys are stored on the college as
+// `${feature}.${subCapability}` (see subCapabilityKey); the map stays a flat,
+// forward-compatible structure.
+//
+// THE RULE (Step 26 C8 — what belongs here and what each entry means):
+//   Baseline authoring authority = the FEATURE grant + a faculty role. That is
+//   the default; it needs no sub-capability. A catalog entry only ever REFINES
+//   that baseline, and is exactly one of two kinds:
+//     1. FEATURE TOGGLE — an optional add-on / integration within the feature,
+//        off unless granted. e.g. exams.proctoring, exams.public_links,
+//        analytics.export, gaming.ai_build. checkEntitlement(feature, key)
+//        gates the add-on.
+//     2. AUTHORING SCOPE — narrows authoring to a SUB-KIND of the feature's
+//        content, so an operator can author some kinds but not others. e.g.
+//        communication.speaking = "may author speaking assessments" (a college
+//        may author grammar/email but not speaking). The route gates that
+//        surface on the scope key.
+//   A bare `authoring` key (meaning only "may author at all") is REDUNDANT with
+//   the feature grant and should NOT gate baseline authoring — see the two
+//   inconsistent legacy entries flagged below. Consuming a GRANTED course's
+//   content never needs any of these — the grant is the authorization.
 // ---------------------------------------------------------------------------
 
 export const SUB_CAPABILITY_CATALOG: Record<
@@ -98,17 +116,19 @@ export const SUB_CAPABILITY_CATALOG: Record<
   [CollegeFeature.ATTENDANCE]: [],
   // Coding-profile tracking. Leaderboard arrives in Prompt 2; none in Prompt 1.
   [CollegeFeature.CODING_PROFILES]: [],
-  // Adaptive game rounds. `authoring` = a college creating/cloning its OWN game
-  // sets (consuming a GRANTED course's games needs no feature — the grant is the
-  // authorization). `ai_build` is a Step-8 placeholder listed now so the
-  // super-admin console can expose it without a later schema change.
+  // Adaptive game rounds. `ai_build` is a FEATURE TOGGLE — the AI set-builder
+  // add-on, gated at the ai-build route. `authoring` is a LEGACY, UNENFORCED
+  // entry: gaming's authoring routes gate on the GAMING feature + faculty (the
+  // baseline), NOT on this key, so it's redundant per the rule above. Kept only
+  // so removing it isn't a data migration; do not start enforcing it.
   [CollegeFeature.GAMING]: ["authoring", "ai_build"],
-  // Communication (non-speech Phase 3). `authoring` = a college creating its
-  // own communication content (email scenarios / grammar & comprehension
-  // papers); consuming a GRANTED course's communication content needs no
-  // feature — the grant is the authorization, exactly as gaming. `speaking` is
-  // a placeholder for the later speech phase (Sections A/B) so the console can
-  // expose it without a schema change then.
+  // Communication. `speaking` is an AUTHORING SCOPE — "may author speaking
+  // assessments" (live since Steps 10-13); the speaking author routes gate on
+  // it, so a college can author grammar/email without it. `authoring` is the
+  // odd one out: unlike gaming's, it IS enforced (as the composite editor's
+  // gate), so it behaves as a second, coarser authoring scope — the naming
+  // inconsistency C8 identified. See the rule above; a rename is a separate,
+  // migration-bearing step (do not rename here).
   [CollegeFeature.COMMUNICATION]: ["authoring", "speaking"],
 };
 

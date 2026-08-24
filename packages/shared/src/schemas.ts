@@ -5900,9 +5900,12 @@ export const gameCohortReportSchema = z.object({
 });
 export type GameCohortReport = z.infer<typeof gameCohortReportSchema>;
 
-/** Practice-mode reveal request (post-answer, instantFeedback only). */
+/** Practice-mode reveal request (post-answer, instantFeedback only). `gameIndex`
+ *  is optional — omit for the current game (the inline reveal), or pass it to
+ *  re-explain an EARLIER game in the attempt for a post-set review (Step 26 G9). */
 export const explainGameItemRequestSchema = z.object({
   itemIndex: z.number().int().min(0),
+  gameIndex: z.number().int().min(0).optional(),
 });
 export type ExplainGameItemRequest = z.infer<
   typeof explainGameItemRequestSchema

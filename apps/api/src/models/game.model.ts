@@ -129,7 +129,12 @@ const gameSetAttemptSchema = new Schema(
     // by counting begun, non-ABANDONED attempts — matching speaking, no counter.
     begunAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
-    // Capture-only for later analysis; NO malpractice logic this step.
+    // Proctoring integrity, mirroring the exam engine (Step 7b/A4, live in
+    // `recordGameWarning`): each fullscreen-exit / tab-switch increments
+    // `warningsTriggered`; once it EXCEEDS EXAM_MAX_WARNINGS the attempt is
+    // flagged `isMalpractice` AND force-finished (whatever has been scored is
+    // committed, exactly as an exam auto-submits). Surfaced in the operator
+    // attempt list (Step 24).
     warningsTriggered: { type: Number, default: 0 },
     isMalpractice: { type: Boolean, default: false },
   },

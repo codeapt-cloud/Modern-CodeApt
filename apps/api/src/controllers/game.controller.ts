@@ -139,11 +139,14 @@ export const finishGameSetController = asyncHandler(
 
 export const explainGameItemController = asyncHandler(
   async (req: Request, res: Response) => {
-    const { itemIndex } = explainGameItemRequestSchema.parse(req.body ?? {});
+    const { itemIndex, gameIndex } = explainGameItemRequestSchema.parse(
+      req.body ?? {},
+    );
     const data = await engine.explainGameItem(
       req.params.attemptId ?? "",
       caller(req),
       itemIndex,
+      gameIndex,
     );
     res.status(200).json(data);
   },

@@ -263,7 +263,17 @@ async function currentGameAttempt(parent: ParentDoc): Promise<GameAttemptDoc> {
     parent: parent._id,
     gameIndex: parent.currentIndex,
   });
-  if (!ga) throw ATTEMPT_NOT_FOUND();
+  // G10: the parent is already loaded + authorized, so a missing child means the
+  // current game's clock hasn't been started — the student is on the pre-flight
+  // tutorial and `begin` hasn't run (a serve:false start). Say THAT, not the
+  // misleading "attempt not found" (which implies the whole attempt is gone).
+  if (!ga) {
+    throw new AppError(
+      "This game hasn't been begun yet — start it before playing",
+      409,
+      GameErrorCode.GAME_NOT_BEGUN,
+    );
+  }
   return ga;
 }
 
@@ -989,6 +999,7 @@ export async function explainGameItem(
   attemptId: string,
   caller: Caller,
   itemIndex: number,
+  gameIndex?: number,
 ): Promise<GameExplanationResponse> {
   const parent = await loadAndAuthorize(attemptId, caller);
   if (!parent.instantFeedback) {
@@ -998,7 +1009,22 @@ export async function explainGameItem(
       GameErrorCode.PRACTICE_MODE_OFF,
     );
   }
-  const ga = await currentGameAttempt(parent);
+  // G9: a reveal may target ANY game in the attempt (not just the current one),
+  // so a post-set review screen can re-explain earlier games. Still gated the
+  // same way — practice mode + the item must already be answered. Defaults to
+  // the current game (the inline reveal path is unchanged).
+  const idx = gameIndex ?? parent.currentIndex;
+  const ga = await GameAttemptModel.findOne({
+    parent: parent._id,
+    gameIndex: idx,
+  });
+  if (!ga) {
+    throw new AppError(
+      "That game hasn't been played in this attempt",
+      404,
+      GameErrorCode.GAME_NOT_BEGUN,
+    );
+  }
   if (itemIndex < 0 || itemIndex >= ga.served.length) {
     throw new AppError(
       "No such item on the current game",
@@ -1087,11 +1113,36 @@ export async function advanceGame(
 export async function finishGameSet(
   attemptId: string,
   caller: Caller,
+  opts: { force?: boolean } = {},
 ): Promise<GameResult> {
   const parent = await loadAndAuthorize(attemptId, caller);
   const games = await GameAttemptModel.find({ parent: parent._id }).sort({
     gameIndex: 1,
   });
+
+  // G7: a NORMAL finish requires the whole set to be complete — the student must
+  // be on the LAST game and it must be done (complete / clock-expired / hit its
+  // question cap). Otherwise a stray call would grade a partial set AND burn the
+  // attempt. The malpractice FORCE-finish (opts.force, Step 7b/A4) is exempt: it
+  // must commit whatever was scored. An already-GRADED attempt skips the guard
+  // and returns its frozen result (idempotent), force or not.
+  if (!opts.force && parent.status === GameSetAttemptStatus.IN_PROGRESS) {
+    const lastIndex = parent.sequence.length - 1;
+    const current = games.find((g) => g.gameIndex === parent.currentIndex);
+    const currentDone =
+      !!current &&
+      (current.status === GameAttemptStatus.COMPLETE ||
+        isExpired(current) ||
+        reachedMax(current) ||
+        reachedCap(current));
+    if (parent.currentIndex < lastIndex || !currentDone) {
+      throw new AppError(
+        "Finish every game in the set before submitting",
+        409,
+        GameErrorCode.SET_INCOMPLETE,
+      );
+    }
+  }
   // The composite FLOORS at zero so a disastrous grid_challenge run (its per-game
   // score can be negative under +3/-1) can't drag the whole set below zero. The
   // per-game raw scores are stored UNFLOORED on each GameAttempt and returned in
@@ -1219,7 +1270,8 @@ export async function recordGameWarning(
 
   let autoFinished = false;
   if (parent.isMalpractice) {
-    await finishGameSet(attemptId, caller); // atomic IN_PROGRESS → GRADED
+    // FORCE-finish: commit whatever was scored even mid-set (G7 exemption).
+    await finishGameSet(attemptId, caller, { force: true });
     autoFinished = true;
   }
   return {

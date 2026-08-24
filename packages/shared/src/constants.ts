@@ -702,6 +702,15 @@ export const GameErrorCode = {
   /** The client reported its clock expired but the SERVER clock disagrees — the
    * item is still live, so no outcome is recorded (the client keeps playing). */
   GAME_NOT_EXPIRED: "GAME_NOT_EXPIRED",
+  /** A play action (answer/probe/advance) hit a game whose clock has not been
+   * started — the pre-flight tutorial is up and `begin` hasn't been called yet
+   * (a serve:false start with no child). Distinct from ATTEMPT_NOT_FOUND, which
+   * would wrongly imply the whole attempt is gone (Step 26 G10). */
+  GAME_NOT_BEGUN: "GAME_NOT_BEGUN",
+  /** A normal `finish` was called before every game in the set was completed.
+   * The malpractice force-finish path is exempt (it commits whatever was
+   * scored). (Step 26 G7.) */
+  SET_INCOMPLETE: "SET_INCOMPLETE",
 } as const;
 export type GameErrorCode = (typeof GameErrorCode)[keyof typeof GameErrorCode];
 

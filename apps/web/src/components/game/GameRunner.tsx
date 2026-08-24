@@ -19,6 +19,7 @@ import { GameClock, GameLadder, GameScore } from "./GameChrome.js";
 import { GameResults } from "./GameResults.js";
 import { GameTutorial } from "./GameTutorial.js";
 import { getGameRenderer } from "./renderer-registry.js";
+import { formatReveal } from "./reveal-format.js";
 
 export function GameRunner({
   title,
@@ -200,8 +201,10 @@ export function GameRunner({
       {r.phase === "feedback" && r.feedback ? (
         <FeedbackPanel
           feedback={r.feedback}
+          gameKey={item.gameKey}
           revealSolution={r.reveal?.solution}
           revealNote={r.reveal?.note}
+          hasReveal={r.reveal != null}
           onContinue={() => r.continueAfterFeedback()}
         />
       ) : null}
@@ -211,15 +214,23 @@ export function GameRunner({
 
 function FeedbackPanel({
   feedback,
+  gameKey,
   revealSolution,
   revealNote,
+  hasReveal,
   onContinue,
 }: {
   feedback: AnswerFeedback;
+  gameKey: string;
   revealSolution?: unknown;
   revealNote?: string;
+  hasReveal: boolean;
   onContinue: () => void;
 }): JSX.Element {
+  // Human, per-game reveal text (practice mode) — never a raw JSON dump (G6).
+  const revealText = hasReveal
+    ? formatReveal(gameKey, revealSolution, revealNote)
+    : "";
   const move = ladderMove(feedback);
   const moveText =
     move === "up"
@@ -257,15 +268,10 @@ function FeedbackPanel({
           Continue
         </Button>
       </div>
-      {revealSolution !== undefined ? (
+      {revealText ? (
         <div className="mt-3 flex items-start gap-2 border-t border-subtle pt-3 text-sm text-ink-muted">
           <Eye className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          <span>
-            {revealNote ? `${revealNote} ` : "Answer: "}
-            <code className="rounded bg-surface-base px-1 py-0.5 text-xs text-ink">
-              {JSON.stringify(revealSolution)}
-            </code>
-          </span>
+          <span>{revealText}</span>
         </div>
       ) : null}
     </div>
