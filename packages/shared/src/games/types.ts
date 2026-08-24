@@ -127,6 +127,18 @@ export interface GameModule<
   toClientView(instance: Instance): ClientView & NoSolution;
   score(instance: Instance, submission: z.infer<Schema>): GameScoreResult;
   /**
+   * OPTIONAL custom scoring for an INTERACTIVE game whose marks are NOT the
+   * ladder's tier value — e.g. grid_challenge's +3/-1-per-answer, which can total
+   * NEGATIVE. When a module provides `settle`, the service uses these marks (not
+   * `applyLadderOutcome`'s) for a RESOLVED item; `correct` drives difficulty
+   * movement + analytics. Omitted by every other game → the ladder is unchanged
+   * and no game but this one can score below zero. Called only on resolution, so
+   * `state` is the final accumulated probe state.
+   */
+  settle?(instance: Instance, state: ProbeState): GameScoreResult & {
+    readonly marks: number;
+  };
+  /**
    * PRACTICE-mode reveal (post-answer only, gated by the service). MAY reveal
    * the solution. `submission` is the stored move (null for skip/expired).
    */
@@ -165,5 +177,7 @@ export interface AnyGameModule {
   generate(seed: string, difficulty: GameDifficulty): unknown;
   toClientView(instance: unknown): unknown;
   score(instance: unknown, submission: unknown): GameScoreResult;
+  /** Present iff the concrete module declares custom scoring (grid_challenge). */
+  settle?(instance: unknown, state: unknown): GameScoreResult & { readonly marks: number };
   explain(instance: unknown, submission: unknown): GameExplanation;
 }

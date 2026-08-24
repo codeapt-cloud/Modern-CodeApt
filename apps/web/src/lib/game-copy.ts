@@ -51,4 +51,9 @@ export const GAME_COPY: Record<GameKeyT, GameCopy> = {
     asks: "A maze with invisible walls, keys to collect, and a door.",
     how: "Move with the arrow keys — you discover walls by bumping into them.",
   },
+  [GameKey.GRID_CHALLENGE]: {
+    name: "Grid Challenge",
+    asks: "Three rounds: memorise a highlighted circle, then judge if two patterns are rotations.",
+    how: "Remember the green circle (2s), answer the rotation (6s), ×3, then click the three circles in order. +3 right / -1 wrong.",
+  },
 };

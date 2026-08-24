@@ -626,11 +626,33 @@ export const GAME_MAX_SERVED_ITEMS = 300;
 export const GAME_MAX_PROBES_PER_ITEM = 500;
 
 /** Marks awarded for a CORRECT answer, by the difficulty of the item answered.
- * No negative marking anywhere; a wrong/skip/expired answer awards 0. */
+ * No negative marking anywhere; a wrong/skip/expired answer awards 0. This is the
+ * LADDER scoring every game uses EXCEPT a game that declares custom `settle`. */
 export const GAME_DIFFICULTY_MARKS = {
   easy: 1,
   moderate: 2,
   hard: 3,
+} as const;
+
+/**
+ * Grid Challenge scoring + shape (the ONLY game with a penalty; see grid-challenge.ts).
+ * Faithful to the live technicalhub portal: three interleaved cycles, each a 2s
+ * highlight memorise + a 6s rotation judgement, then an ordered recall — every
+ * answer is +3 correct / -1 wrong. These are game constants, not authorable: the
+ * portal holds 2s/6s constant, so we vary difficulty by circle count / pattern
+ * density only. The per-game score MAY go negative; the set composite floors at 0
+ * (the per-game raw is preserved for operators). */
+export const GRID_CHALLENGE = {
+  CYCLES: 3,
+  /** Client display windows (ms). Server enforces one-time exposure, not the clock. */
+  HIGHLIGHT_MS: 2000,
+  SYMMETRY_MS: 6000,
+  PATTERN_SIZE: 5, // 5x5 rotation patterns
+  MARKS_CORRECT: 3,
+  MARKS_WRONG: -1,
+  /** Min separation between free-floating circle centres, in normalised units
+   * (positions live in a 0..100 box); keeps ~20 circles from overlapping. */
+  MIN_SEPARATION: 9,
 } as const;
 
 /** Machine-readable codes for the gaming surface (UI switches on these). */

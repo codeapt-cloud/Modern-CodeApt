@@ -15,6 +15,7 @@ import { GameKey } from "../enums.js";
 import { bubbleMathModule } from "./bubble-math.js";
 import { doorKeyModule } from "./door-key.js";
 import { geoSudoModule } from "./geo-sudo.js";
+import { gridChallengeModule } from "./grid-challenge.js";
 import { inductiveReasoningModule } from "./inductive-reasoning.js";
 import { motionChallengeModule } from "./motion-challenge.js";
 import { probeModule } from "./probe.js";
@@ -54,6 +55,11 @@ function eraseGame<I, V, S extends z.ZodType, PS, PA>(
     // the submission is validated by submissionSchema before it reaches here.
     score: (instance, submission) =>
       m.score(instance as I, submission as z.infer<S>),
+    // Custom scoring (grid_challenge) erases the same way; states round-trip from
+    // this module's probe.init/apply. Absent for every other module → unchanged.
+    settle: m.settle
+      ? (instance, state) => m.settle!(instance as I, state as PS)
+      : undefined,
     explain: (instance, submission) =>
       m.explain(instance as I, submission as z.infer<S>),
   };
@@ -67,6 +73,7 @@ export const GAME_REGISTRY: Record<GameKey, AnyGameModule> = {
   [GameKey.INDUCTIVE_REASONING]: eraseGame(inductiveReasoningModule),
   [GameKey.BUBBLE_MATH]: eraseGame(bubbleMathModule),
   [GameKey.DOOR_KEY]: eraseGame(doorKeyModule),
+  [GameKey.GRID_CHALLENGE]: eraseGame(gridChallengeModule),
 };
 
 /** Look up a module by key, or undefined if the key isn't registered. */

@@ -12,4 +12,5 @@ export * from "./motion-challenge.js";
 export * from "./inductive-reasoning.js";
 export * from "./bubble-math.js";
 export * from "./door-key.js";
+export * from "./grid-challenge.js";
 export * from "./registry.js";

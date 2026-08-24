@@ -11,9 +11,14 @@ import {
   GAME_MAX_SERVED_ITEMS,
   Role,
   UserType,
+  isAnyRotation,
   solveSwitch,
 } from "@codeapt/shared";
-import type { GeoSudoClientView, SwitchClientView } from "@codeapt/shared";
+import type {
+  GeoSudoClientView,
+  GridClientView,
+  SwitchClientView,
+} from "@codeapt/shared";
 import type { Express } from "express";
 import { Types } from "mongoose";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -1575,5 +1580,152 @@ describe("gaming — Step 7b/A4: proctoring warning endpoint", () => {
     const parent = await GameSetAttemptModel.findById(attemptId);
     expect(parent!.status).toBe("graded");
     expect(parent!.isMalpractice).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 18 — Grid Challenge (interactive; +3/-1 override; composite floor)
+// ---------------------------------------------------------------------------
+
+/**
+ * Play one grid_challenge item END TO END as a real client would — using ONLY the
+ * redacted view (record each cycle's highlight while it's live; judge each rotation
+ * pair with an independent isAnyRotation over the shown patterns). `mode:"correct"`
+ * answers everything right (+12); `mode:"wrong"` negates every judgement + reverses
+ * the recall (-4). Returns the resolved probe response body.
+ */
+async function playGridViaApi(
+  attemptId: string,
+  token: string,
+  firstItem: { itemIndex: number; view: GridClientView },
+  mode: "correct" | "wrong",
+): Promise<{ marksAwarded: number; gameScore: number; gameComplete: boolean }> {
+  const probe = (action: unknown, itemIndex: number) =>
+    request(app)
+      .post(`/api/game-attempts/${attemptId}/probe`)
+      .set(auth(token))
+      .send({ itemIndex, action });
+
+  const itemIndex = firstItem.itemIndex;
+  let view = firstItem.view;
+  const highlights: number[] = [];
+  for (let c = 0; c < 3; c += 1) {
+    expect(view.phase).toBe("memorize");
+    expect(view.highlight).not.toBeNull();
+    highlights.push(view.highlight!);
+    // Ack the memorise → symmetry. The highlight is gone, the pair (no answer) shows.
+    const acked = await probe({ type: "ack" }, itemIndex);
+    expect(acked.status).toBe(200);
+    const sView = acked.body.view as GridClientView;
+    expect(sView.phase).toBe("symmetry");
+    expect(sView.highlight).toBeNull();
+    expect(sView.pattern).not.toBeNull();
+    // Judge the rotation from the shown patterns only (a real player's knowledge).
+    const judged = isAnyRotation(sView.pattern!.a, sView.pattern!.b);
+    const answer = mode === "correct" ? judged : !judged;
+    const sym = await probe({ type: "symmetry", answer }, itemIndex);
+    expect(sym.status).toBe(200);
+    view = sym.body.view as GridClientView;
+  }
+  expect(view.phase).toBe("recall");
+  const order = mode === "correct" ? highlights : [...highlights].reverse();
+  const recall = await probe({ type: "recall", order }, itemIndex);
+  expect(recall.status).toBe(200);
+  expect(recall.body.resolved).toBe(true);
+  return {
+    marksAwarded: recall.body.marksAwarded as number,
+    gameScore: recall.body.gameScore as number,
+    gameComplete: recall.body.gameComplete as boolean,
+  };
+}
+
+describe("grid_challenge (interactive, +3/-1)", () => {
+  it("a view-only client plays a PERFECT level for +12 and the composite reflects it", async () => {
+    const { adminToken } = await setupCollege("gm-grid1");
+    const unit = await createUnit("gm-grid1", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-grid1", adminToken, {
+      games: [gameSpec("grid_challenge", { maxQuestions: 1, allowSkip: false })],
+    });
+    const student = await addStudent("gm-grid1", adminToken, "grid1@e.test", "GR-1", unit);
+    const start = await request(app)
+      .post(`/api/c/gm-grid1/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    expect(start.status).toBe(201);
+    const attemptId = start.body.attemptId as string;
+    // Anti-cheat: the served view never carries the rotation answers.
+    expect(JSON.stringify(start.body.item.view)).not.toContain("isRotation");
+
+    const res = await playGridViaApi(attemptId, student.token, start.body.item, "correct");
+    expect(res.marksAwarded).toBe(12);
+    expect(res.gameScore).toBe(12);
+    expect(res.gameComplete).toBe(true);
+
+    await request(app).post(`/api/game-attempts/${attemptId}/advance`).set(auth(student.token));
+    const finish = await request(app)
+      .post(`/api/game-attempts/${attemptId}/finish`)
+      .set(auth(student.token));
+    expect(finish.status).toBe(200);
+    expect(finish.body.compositeScore).toBe(12);
+    expect(finish.body.games[0].score).toBe(12);
+  });
+
+  it("a NEGATIVE game score is preserved per-game but the composite FLOORS at zero", async () => {
+    const { adminToken } = await setupCollege("gm-grid2");
+    const unit = await createUnit("gm-grid2", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-grid2", adminToken, {
+      games: [gameSpec("grid_challenge", { maxQuestions: 1, allowSkip: false })],
+    });
+    const student = await addStudent("gm-grid2", adminToken, "grid2@e.test", "GR-2", unit);
+    const start = await request(app)
+      .post(`/api/c/gm-grid2/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+
+    const res = await playGridViaApi(attemptId, student.token, start.body.item, "wrong");
+    // Every judgement wrong + a wrong recall = 4 × -1.
+    expect(res.marksAwarded).toBe(-4);
+    expect(res.gameScore).toBe(-4);
+
+    await request(app).post(`/api/game-attempts/${attemptId}/advance`).set(auth(student.token));
+    const finish = await request(app)
+      .post(`/api/game-attempts/${attemptId}/finish`)
+      .set(auth(student.token));
+    expect(finish.status).toBe(200);
+    // Composite FLOORS at 0 (never negative), but the per-game raw -4 is preserved
+    // so an operator can tell "guessed wildly (-4)" from "attempted nothing (0)".
+    expect(finish.body.compositeScore).toBe(0);
+    expect(finish.body.games[0].score).toBe(-4);
+  });
+
+  it("EXPOSURE cannot be re-requested: resuming (begin) after acking a cycle does NOT re-reveal the highlight", async () => {
+    const { adminToken } = await setupCollege("gm-grid3");
+    const unit = await createUnit("gm-grid3", adminToken, "CSE");
+    const setId = await authorPublishedSet("gm-grid3", adminToken, {
+      games: [gameSpec("grid_challenge", { maxQuestions: 1, allowSkip: false })],
+    });
+    const student = await addStudent("gm-grid3", adminToken, "grid3@e.test", "GR-3", unit);
+    const start = await request(app)
+      .post(`/api/c/gm-grid3/game-sets/${setId}/attempts`)
+      .set(auth(student.token));
+    const attemptId = start.body.attemptId as string;
+    const itemIndex = start.body.item.itemIndex as number;
+    expect((start.body.item.view as GridClientView).highlight).not.toBeNull();
+
+    // Ack cycle 0 → symmetry. The highlight has been consumed.
+    const acked = await request(app)
+      .post(`/api/game-attempts/${attemptId}/probe`)
+      .set(auth(student.token))
+      .send({ itemIndex, action: { type: "ack" } });
+    expect((acked.body.view as GridClientView).highlight).toBeNull();
+
+    // Resume via begin — the pending item is re-served, and it must NOT re-reveal
+    // the cycle-0 highlight (buildItemView projects the CURRENT probe state).
+    const resumed = await request(app)
+      .post(`/api/game-attempts/${attemptId}/begin`)
+      .set(auth(student.token));
+    expect(resumed.status).toBe(200);
+    const rView = resumed.body.item.view as GridClientView;
+    expect(rView.phase).toBe("symmetry");
+    expect(rView.highlight).toBeNull();
   });
 });

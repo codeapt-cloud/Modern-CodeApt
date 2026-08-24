@@ -14,6 +14,7 @@ import type { GameRenderer } from "./renderer-contract.js";
 import { BubbleMathRenderer } from "./renderers/BubbleMathRenderer.js";
 import { DoorKeyRenderer } from "./renderers/DoorKeyRenderer.js";
 import { GeoSudoRenderer } from "./renderers/GeoSudoRenderer.js";
+import { GridChallengeRenderer } from "./renderers/GridChallengeRenderer.js";
 import { InductiveRenderer } from "./renderers/InductiveRenderer.js";
 import { MotionRenderer } from "./renderers/MotionRenderer.js";
 import { ProbeRenderer } from "./renderers/ProbeRenderer.js";
@@ -28,6 +29,8 @@ export const GAME_RENDERERS: Partial<Record<GameKey, GameRenderer>> = {
   [GameKey.BUBBLE_MATH]: BubbleMathRenderer,
   // door_key is INTERACTIVE — it drives the `probe` channel, not onSubmit.
   [GameKey.DOOR_KEY]: DoorKeyRenderer,
+  // grid_challenge is INTERACTIVE too — a phased dual task over the probe channel.
+  [GameKey.GRID_CHALLENGE]: GridChallengeRenderer,
 };
 
 export function getGameRenderer(key: GameKey): GameRenderer | undefined {

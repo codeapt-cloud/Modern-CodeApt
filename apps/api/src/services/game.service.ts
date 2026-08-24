@@ -318,8 +318,15 @@ function buildItemView(
     itemIndex: item.index,
     difficulty: item.difficulty as GameDifficultyT,
     // The module strips the solution — the client never receives it. For an
-    // interactive game this is the INITIAL redacted view (fresh items only).
-    view: module.toClientView(item.instance),
+    // interactive game we project the CURRENT discovered state via probe.view so
+    // a resume (beginGame re-serving a pending item) reflects real progress and
+    // never re-reveals a one-time exposure (grid_challenge's highlight); for a
+    // FRESH item probe.view(instance, initState) equals toClientView, so door_key
+    // and the fresh-serve path are unchanged. One-shot games use toClientView.
+    view:
+      module.interactive && module.probe && item.probeState != null
+        ? module.probe.view(item.instance, item.probeState)
+        : module.toClientView(item.instance),
     allowSkip: ga.allowSkip,
     remainingSeconds: remainingSeconds(ga.expiresAt),
     perQuestionTimerSeconds: parent.perQuestionTimerSeconds,
@@ -619,22 +626,41 @@ function finalizeItem(
   outcome: GameOutcome,
   now: Date,
 ): boolean {
+  // Custom-scored interactive games (grid_challenge) compute their OWN marks —
+  // which MAY be negative — from the final probe state on RESOLUTION; the ladder
+  // still drives difficulty (via correct/wrong) but not the marks. Every other
+  // game leaves `settle` undefined and uses the ladder's tier marks exactly as
+  // before, so no game but this one can ever score below zero.
+  const module = GAME_REGISTRY[ga.gameKey as GameKey];
+  const custom =
+    module.settle &&
+    item.probeState != null &&
+    outcome !== GameOutcome.EXPIRED &&
+    outcome !== GameOutcome.SKIPPED
+      ? module.settle(item.instance, item.probeState)
+      : null;
+  const recordedOutcome = custom
+    ? custom.correct
+      ? GameOutcome.CORRECT
+      : GameOutcome.WRONG
+    : outcome;
   const step = applyLadderOutcome(
     { difficulty: item.difficulty as GameDifficultyT },
-    outcome as LadderOutcome,
+    recordedOutcome as LadderOutcome,
   );
-  item.outcome = outcome;
-  item.marks = step.marksAwarded;
+  const marksAwarded = custom ? custom.marks : step.marksAwarded;
+  item.outcome = recordedOutcome;
+  item.marks = marksAwarded;
   item.answeredAt = now;
   item.latencyMs = now.getTime() - item.servedAt.getTime();
 
-  if (outcome !== GameOutcome.EXPIRED) ga.questionsAttempted += 1;
-  if (outcome === GameOutcome.CORRECT) ga.questionsCorrect += 1;
-  ga.score += step.marksAwarded;
+  if (recordedOutcome !== GameOutcome.EXPIRED) ga.questionsAttempted += 1;
+  if (recordedOutcome === GameOutcome.CORRECT) ga.questionsCorrect += 1;
+  ga.score += marksAwarded;
   ga.ladder = { difficulty: step.next.difficulty };
 
   const gameComplete =
-    outcome === GameOutcome.EXPIRED || reachedMax(ga) || reachedCap(ga);
+    recordedOutcome === GameOutcome.EXPIRED || reachedMax(ga) || reachedCap(ga);
   if (gameComplete) {
     ga.status = GameAttemptStatus.COMPLETE;
   } else {
@@ -905,7 +931,13 @@ export async function finishGameSet(
   const games = await GameAttemptModel.find({ parent: parent._id }).sort({
     gameIndex: 1,
   });
-  const composite = games.reduce((sum, g) => sum + g.score, 0);
+  // The composite FLOORS at zero so a disastrous grid_challenge run (its per-game
+  // score can be negative under +3/-1) can't drag the whole set below zero. The
+  // per-game raw scores are stored UNFLOORED on each GameAttempt and returned in
+  // `games[]` below, so an operator still sees a true -4 (guessed wildly) distinct
+  // from a 0 (attempted nothing).
+  const rawComposite = games.reduce((sum, g) => sum + g.score, 0);
+  const composite = Math.max(0, rawComposite);
 
   // Atomic IN_PROGRESS → GRADED — only the first finisher writes the composite.
   const claimed = await GameSetAttemptModel.findOneAndUpdate(

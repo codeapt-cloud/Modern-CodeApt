@@ -15,11 +15,15 @@ import {
   GEO_SUDO_SYMBOLS,
   GameDifficulty,
   GameKey,
+  GRID_CHALLENGE,
   applyLadderOutcome,
   bubbleMathModule,
   createRng,
   doorKeyModule,
   geoSudoModule,
+  gridChallengeModule,
+  isAnyRotation,
+  rotate90,
   inductiveReasoningModule,
   motionChallengeModule,
   probeModule,
@@ -33,6 +37,9 @@ import {
   type DoorKeyClientView,
   type DoorKeyProbeState,
   type GeoSymbol,
+  type GridClientView,
+  type GridInstance,
+  type GridProbeState,
   type ProbeClientView,
 } from "@codeapt/shared";
 import { describe, expect, it } from "vitest";
@@ -1039,5 +1046,191 @@ describe("door_key (interactive)", () => {
     expect(doorKeyModule.submissionSchema.safeParse({ dirs: overCap }).success).toBe(
       false,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 18 — Grid Challenge (interactive three-cycle dual task; +3/-1 override)
+// ---------------------------------------------------------------------------
+
+/** Play a full grid via the PROBE contract with chosen symmetry answers + a recall
+ * order, returning the final accumulated state (what the service would settle). */
+function playGrid(
+  inst: GridInstance,
+  answers: readonly boolean[],
+  recall: readonly number[],
+): GridProbeState {
+  const probe = gridChallengeModule.probe!;
+  let st = probe.init(inst, {}) as GridProbeState;
+  for (let c = 0; c < GRID_CHALLENGE.CYCLES; c += 1) {
+    st = probe.apply(inst, st, { type: "ack" }) as GridProbeState;
+    st = probe.apply(inst, st, {
+      type: "symmetry",
+      answer: answers[c] ?? false,
+    }) as GridProbeState;
+  }
+  return probe.apply(inst, st, {
+    type: "recall",
+    order: [...recall],
+  }) as GridProbeState;
+}
+
+describe("grid_challenge (interactive dual task, +3/-1)", () => {
+  it("rotate90 is a real 90° clockwise rotation and 4× is identity", () => {
+    // A single filled corner cell (0,0) rotates to (0,4).
+    const g = new Array<boolean>(25).fill(false);
+    g[0] = true;
+    const r = rotate90(g);
+    expect(r[4]).toBe(true); // (0,0) → (0, N-1)
+    expect(r[0]).toBe(false);
+    expect(rotate90(rotate90(rotate90(rotate90(g))))).toEqual(g); // 360° = identity
+  });
+
+  it("is interactive, deterministic, forbids skip, and its view omits the rotation answers", () => {
+    const a = gridChallengeModule.generate("g", "moderate");
+    expect(gridChallengeModule.generate("g", "moderate")).toEqual(a);
+    expect(gridChallengeModule.interactive).toBe(true);
+    expect(gridChallengeModule.probe).toBeDefined();
+    expect(gridChallengeModule.allowSkipDefault).toBe(false);
+    const view = gridChallengeModule.toClientView(a);
+    expect("solution" in view).toBe(false);
+    expect(JSON.stringify(view)).not.toContain("isRotation");
+    expect(JSON.stringify(view)).not.toContain("recallOrder");
+  });
+
+  it("PROPERTY: every cycle's stated isRotation matches an INDEPENDENT rotation check; a true pair is a rotation, a false pair is not — across seeds and tiers", () => {
+    for (const difficulty of ["easy", "moderate", "hard"] as const) {
+      const tierCircles = { easy: 18, moderate: 22, hard: 26 }[difficulty];
+      let sawRotation = false;
+      let sawNonRotation = false;
+      for (let s = 0; s < 60; s += 1) {
+        const inst = gridChallengeModule.generate(`grid-${difficulty}-${s}`, difficulty);
+        expect(inst.circles).toHaveLength(tierCircles);
+        expect(inst.cycles).toHaveLength(GRID_CHALLENGE.CYCLES);
+        // Highlights are distinct, in-range circle indices; recallOrder mirrors them.
+        expect(new Set(inst.solution.recallOrder).size).toBe(GRID_CHALLENGE.CYCLES);
+        for (const h of inst.solution.recallOrder) {
+          expect(h).toBeGreaterThanOrEqual(0);
+          expect(h).toBeLessThan(tierCircles);
+        }
+        for (const cyc of inst.cycles) {
+          expect(cyc.patternA).toHaveLength(25);
+          expect(cyc.patternB).toHaveLength(25);
+          // The stored answer must equal a real, independent rotation check.
+          expect(cyc.isRotation).toBe(isAnyRotation(cyc.patternA, cyc.patternB));
+          if (cyc.isRotation) sawRotation = true;
+          else sawNonRotation = true;
+        }
+      }
+      // Both branches of the generator are exercised at each tier.
+      expect(sawRotation).toBe(true);
+      expect(sawNonRotation).toBe(true);
+    }
+  });
+
+  it("EXPOSURE cannot be re-requested: a cycle's highlight is visible ONLY while its memorise is live, and is gone after ack and during recall", () => {
+    const inst = gridChallengeModule.generate("grid-expose", "easy");
+    const probe = gridChallengeModule.probe!;
+    let st = probe.init(inst, {}) as GridProbeState;
+
+    // Cycle 0 memorise is live → the highlight is the cycle-0 circle.
+    let view = probe.view(inst, st) as GridClientView;
+    expect(view.phase).toBe("memorize");
+    expect(view.highlight).toBe(inst.cycles[0]!.highlight);
+    // Re-requesting the view within the same live window is harmless (same value),
+    // and you CANNOT see a future cycle's highlight early.
+    expect((probe.view(inst, st) as GridClientView).highlight).toBe(inst.cycles[0]!.highlight);
+
+    // Ack → symmetry: the highlight is GONE and cannot be re-requested.
+    st = probe.apply(inst, st, { type: "ack" }) as GridProbeState;
+    view = probe.view(inst, st) as GridClientView;
+    expect(view.phase).toBe("symmetry");
+    expect(view.highlight).toBeNull();
+    expect(view.pattern).not.toBeNull(); // the rotation pair, WITHOUT the answer
+    // Repeated views in symmetry never re-expose cycle 0.
+    expect((probe.view(inst, st) as GridClientView).highlight).toBeNull();
+
+    // Answer cycle 0 → cycle 1 memorise: now cycle 1's highlight (not 0's).
+    st = probe.apply(inst, st, { type: "symmetry", answer: true }) as GridProbeState;
+    view = probe.view(inst, st) as GridClientView;
+    expect(view.phase).toBe("memorize");
+    expect(view.cycle).toBe(1);
+    expect(view.highlight).toBe(inst.cycles[1]!.highlight);
+
+    // Drive to recall: no highlight anywhere during recall.
+    const done = playGrid(inst, [true, true, true], inst.solution.recallOrder);
+    const recallState: GridProbeState = { ...done, phase: "recall", recall: [] };
+    expect((probe.view(inst, recallState) as GridClientView).highlight).toBeNull();
+  });
+
+  it("SCORING: +3/-1 per answer; a perfect play is +12 and an all-wrong play is -4 (the only negative in the set)", () => {
+    const inst = gridChallengeModule.generate("grid-score", "moderate");
+    const truth = inst.solution.rotations;
+
+    // Perfect: every rotation judged right + recall in exact order = 4 × +3.
+    const perfect = playGrid(inst, truth, inst.solution.recallOrder);
+    expect(gridChallengeModule.settle!(inst, perfect)).toEqual({ marks: 12, correct: true });
+
+    // All wrong: flip every rotation answer + a wrong recall = 4 × -1.
+    const wrongRecall = [...inst.solution.recallOrder].reverse();
+    const allWrong = playGrid(inst, truth.map((t) => !t), wrongRecall);
+    expect(gridChallengeModule.settle!(inst, allWrong)).toEqual({ marks: -4, correct: false });
+  });
+
+  it("RECALL is ALL-OR-NOTHING: right circles in the WRONG ORDER scores -1, and two-of-three is wrong too", () => {
+    const inst = gridChallengeModule.generate("grid-recall", "easy");
+    const order = inst.solution.recallOrder;
+    // Right circles, wrong order (swap first two) → recall wrong.
+    const swapped = [order[1]!, order[0]!, order[2]!];
+    expect(swapped).not.toEqual(order); // (distinct highlights guarantee a real swap)
+    const wrongOrder = playGrid(inst, inst.solution.rotations, swapped);
+    // Symmetry all correct (+9), recall wrong (-1) → +8.
+    expect(gridChallengeModule.settle!(inst, wrongOrder).marks).toBe(8);
+
+    // Two of three right (third replaced by a different circle) → recall wrong.
+    const other = inst.circles.findIndex((_c, i) => !order.includes(i));
+    const twoOfThree = [order[0]!, order[1]!, other];
+    const partial = playGrid(inst, inst.solution.rotations, twoOfThree);
+    expect(gridChallengeModule.settle!(inst, partial).marks).toBe(8); // +9 - 1
+  });
+
+  it("score() (the closed answer path) agrees with settle on correctness", () => {
+    const inst = gridChallengeModule.generate("grid-replay", "hard");
+    const perfect = gridChallengeModule.score(inst, {
+      symmetryAnswers: [...inst.solution.rotations],
+      recall: [...inst.solution.recallOrder],
+    });
+    expect(perfect.correct).toBe(true);
+    const wrong = gridChallengeModule.score(inst, {
+      symmetryAnswers: inst.solution.rotations.map((t) => !t),
+      recall: [...inst.solution.recallOrder].reverse(),
+    });
+    expect(wrong.correct).toBe(false);
+  });
+
+  it("NO-NEGATIVE-LEAK: grid_challenge is the ONLY registered game that declares custom `settle` — every other game uses the ladder (marks >= 0)", () => {
+    for (const key of Object.keys(GAME_REGISTRY) as GameKey[]) {
+      const mod = GAME_REGISTRY[key];
+      if (key === GameKey.GRID_CHALLENGE) {
+        expect(typeof mod.settle).toBe("function");
+      } else {
+        // No `settle` → finalizeItem falls to applyLadderOutcome, which never
+        // awards below zero. A penalty can never leak into another game.
+        expect(mod.settle).toBeUndefined();
+      }
+    }
+  });
+
+  it("actionSchema + submissionSchema reject malformed / oversized payloads", () => {
+    const probe = gridChallengeModule.probe!;
+    expect(probe.actionSchema.safeParse({ type: "ack" }).success).toBe(true);
+    expect(probe.actionSchema.safeParse({ type: "symmetry", answer: true }).success).toBe(true);
+    expect(probe.actionSchema.safeParse({ type: "symmetry" }).success).toBe(false);
+    expect(probe.actionSchema.safeParse({ type: "nope" }).success).toBe(false);
+    // Recall is bounded to the cycle count.
+    expect(probe.actionSchema.safeParse({ type: "recall", order: [0, 1, 2] }).success).toBe(true);
+    expect(probe.actionSchema.safeParse({ type: "recall", order: [0, 1, 2, 3] }).success).toBe(false);
+    expect(gridChallengeModule.submissionSchema.safeParse({ symmetryAnswers: [true, false, true], recall: [0, 1, 2] }).success).toBe(true);
+    expect(gridChallengeModule.submissionSchema.safeParse({ symmetryAnswers: [true, true, true, true], recall: [] }).success).toBe(false);
   });
 });

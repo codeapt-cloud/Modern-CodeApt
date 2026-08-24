@@ -407,6 +407,9 @@ export const GameKey = {
   BUBBLE_MATH: "bubble_math",
   /** Maze with INVISIBLE walls: collect keys, reach the door (interactive/probe). */
   DOOR_KEY: "door_key",
+  /** Three-cycle interleaved dual task: memorise a highlighted circle, judge a
+   * rotation, ×3, then recall the circles in order (interactive; +3/-1). */
+  GRID_CHALLENGE: "grid_challenge",
 } as const;
 export type GameKey = (typeof GameKey)[keyof typeof GameKey];
 export const GAME_KEY_VALUES = Object.values(GameKey);
