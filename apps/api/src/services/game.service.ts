@@ -52,7 +52,6 @@ import { Types, type HydratedDocument } from "mongoose";
 import { AppError } from "../errors/app-error.js";
 import {
   GameAttemptModel,
-  GameSetAttemptCounterModel,
   GameSetAttemptModel,
   GameSetModel,
   type GameAttempt,
@@ -268,6 +267,61 @@ async function currentGameAttempt(parent: ParentDoc): Promise<GameAttemptDoc> {
 }
 
 // ---------------------------------------------------------------------------
+// Attempt accounting (Step 22) — count documents, no counter table (matches
+// speaking). An attempt COUNTS only once its clock started (begunAt set) and it
+// was not ABANDONED — so reading the rules is free (G5) and a reaped attempt is
+// refunded (G4). `excludeAttemptId` omits the current attempt when computing the
+// remaining-for-display figure.
+// ---------------------------------------------------------------------------
+export async function countUsedAttempts(
+  userId: string,
+  gameSetId: Types.ObjectId,
+  excludeAttemptId?: Types.ObjectId,
+): Promise<number> {
+  const filter: Record<string, unknown> = {
+    user: new Types.ObjectId(userId),
+    gameSet: gameSetId,
+    begunAt: { $ne: null },
+    status: { $ne: GameSetAttemptStatus.ABANDONED },
+  };
+  if (excludeAttemptId) filter._id = { $ne: excludeAttemptId };
+  return GameSetAttemptModel.countDocuments(filter);
+}
+
+/** Mark the attempt CONSUMED — stamp begunAt exactly once (the clock has
+ *  started). ATOMIC conditional update (`begunAt: null` in the filter), NOT a
+ *  read-then-write: two racing begins both issue it, but only the first matches
+ *  and writes; the second matches nothing. So begunAt is set once no matter how
+ *  many begins race (double-click, retry, two tabs) — the used-count (which
+ *  counts begun documents) can never see it as two (G5). */
+async function markBegun(parentId: Types.ObjectId): Promise<void> {
+  await GameSetAttemptModel.updateOne(
+    { _id: parentId, begunAt: null },
+    { $set: { begunAt: new Date() } },
+  );
+}
+
+/** A MongoDB duplicate-key (E11000) error — the unique (parent, gameIndex)
+ *  index rejecting a second concurrent child insert. */
+function isDuplicateKeyError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: number }).code === 11000
+  );
+}
+
+/** The item to disclose for a child on (re)entry: the pending unanswered one, or
+ *  the last served if none pend (a resolved game re-read idempotently). */
+function disclosableItem(
+  ga: GameAttemptDoc,
+): GameAttempt["served"][number] {
+  return (
+    ga.served.find((s) => s.outcome == null) ?? ga.served[ga.served.length - 1]!
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Serving + views
 // ---------------------------------------------------------------------------
 
@@ -374,6 +428,78 @@ async function createGameAttempt(
 // Play lifecycle
 // ---------------------------------------------------------------------------
 
+/**
+ * Build the start/resume/current response from a parent attempt. Used by a fresh
+ * start, by resume-or-start, and by GET /current so all three speak ONE shape
+ * (mirroring speaking's single buildCurrent). It restores the CURRENT game and,
+ * for a resumed mid-game attempt, the pending item WITH the server's remaining
+ * clock (buildItemView reads `expiresAt` — a resume can never reset time), or
+ * flags `awaitingAdvance` when a refresh landed between games.
+ */
+async function buildStartResponse(
+  parent: ParentDoc,
+  gameSet: GameSetDoc,
+  opts: { resumed: boolean; freshItem?: GameItemView | null },
+): Promise<StartGameSetResponse> {
+  const currentIndex = parent.currentIndex;
+  let item: GameItemView | null = null;
+  let awaitingAdvance = false;
+
+  if (opts.freshItem !== undefined) {
+    // Fresh start: the caller already served (serve:true) or not (serve:false).
+    item = opts.freshItem;
+  } else if (parent.status === GameSetAttemptStatus.IN_PROGRESS) {
+    // Resume: restore from the current game's child, if it has begun.
+    const child = await GameAttemptModel.findOne({
+      parent: parent._id,
+      gameIndex: currentIndex,
+    });
+    if (child) {
+      const now = new Date();
+      const pending = child.served.find((s) => s.outcome == null);
+      const live =
+        pending != null &&
+        !isExpired(child) &&
+        !itemExpired(pending, now) &&
+        child.status === GameAttemptStatus.IN_PROGRESS;
+      if (live) {
+        item = buildItemView(parent, child, pending!);
+      } else {
+        // The current game has begun but is finished/expired — a refresh landed
+        // between games. The runner advances rather than re-showing the tutorial.
+        awaitingAdvance = true;
+      }
+    }
+    // No child → still at pre-flight; item stays null → the runner shows the
+    // tutorial (the clock has NOT started, so resuming must not start it).
+  }
+
+  const otherUsed = await countUsedAttempts(
+    parent.user!.toString(),
+    gameSet._id,
+    parent._id,
+  );
+  const attemptsRemaining =
+    gameSet.maxAttempts === 0
+      ? null
+      : Math.max(0, gameSet.maxAttempts - otherUsed - 1);
+
+  return {
+    attemptId: parent._id.toString(),
+    attemptToken: parent.attemptToken,
+    gameSetId: gameSet._id.toString(),
+    sequence: parent.sequence as GameKey[],
+    totalGames: parent.sequence.length,
+    attemptsRemaining,
+    firstGame: gameInfoFor(gameSet, parent, 0),
+    resumed: opts.resumed,
+    currentIndex,
+    currentGame: gameInfoFor(gameSet, parent, currentIndex),
+    item,
+    awaitingAdvance,
+  };
+}
+
 export async function startGameSetAttempt(
   userId: string,
   gameSetId: string,
@@ -391,27 +517,34 @@ export async function startGameSetAttempt(
     );
   }
 
-  // Attempt-limit enforcement (0 = unlimited). Mirrors exam.service's ordering:
-  // the limit is checked BEFORE the counter is incremented, so a REJECTED start
-  // never consumes an attempt. Runs AFTER assertCanPlayGameSet, so an
-  // auth-rejected start doesn't touch the counter either.
-  let attemptsRemaining: number | null = null;
+  // RESUME-OR-START (G1). An existing IN_PROGRESS attempt for (user, gameSet) is
+  // RESUMED, never re-started — keyed on (user, gameSet) so a refresh, which
+  // destroys the client's attemptId, still finds it (server-authoritative). This
+  // is the mount path: the runner calls start on every mount, so this collapses
+  // "resume vs start" into one idempotent call the server decides. A resume does
+  // NOT touch the attempt count.
+  const existing = await GameSetAttemptModel.findOne({
+    user: new Types.ObjectId(userId),
+    gameSet: gameSet._id,
+    status: GameSetAttemptStatus.IN_PROGRESS,
+  }).sort({ createdAt: -1 });
+  if (existing) {
+    return buildStartResponse(existing, gameSet, { resumed: true });
+  }
+
+  // NEW attempt. Enforce the cap by COUNTING begun, non-ABANDONED attempts (0 =
+  // unlimited). Checked at START — before any tutorial — so a capped student is
+  // told immediately; the attempt is only CONSUMED (begunAt) when the clock
+  // starts (serve:true here, or the first `begin`), never by reaching pre-flight.
   if (gameSet.maxAttempts !== 0) {
-    const counter = await GameSetAttemptCounterModel.findOneAndUpdate(
-      { user: new Types.ObjectId(userId), gameSet: gameSet._id },
-      { $setOnInsert: { attemptCount: 0 } },
-      { upsert: true, new: true },
-    );
-    if (counter.attemptCount >= gameSet.maxAttempts) {
+    const used = await countUsedAttempts(userId, gameSet._id);
+    if (used >= gameSet.maxAttempts) {
       throw new AppError(
         "You have reached the attempt limit for this game set",
         409,
         GameErrorCode.ATTEMPT_LIMIT_REACHED,
       );
     }
-    counter.attemptCount += 1;
-    await counter.save();
-    attemptsRemaining = gameSet.maxAttempts - counter.attemptCount;
   }
 
   // Resolve + FREEZE the sequence. random_n_of_pool picks ONCE here.
@@ -436,30 +569,38 @@ export async function startGameSetAttempt(
     compositeScore: 0,
     attemptToken: randomUUID(),
     startedAt: new Date(),
+    begunAt: null,
     perQuestionTimerSeconds: gameSet.perQuestionTimerSeconds,
     instantFeedback: gameSet.instantFeedback,
   });
 
   // A1: the deferred (UI) flow passes serve:false — return the first game's
   // pre-flight INFO only, with NO child created and NO clock started, so the
-  // tutorial runs against a stopped clock; `begin` serves + starts the clock.
-  // serve:true (the default — tests / quick-start) also serves the first item.
+  // tutorial runs against a stopped clock; `begin` serves + starts the clock AND
+  // consumes the attempt. serve:true (tests / quick-start) serves + consumes now.
   let item: GameItemView | null = null;
   if (serve) {
     const firstSpec = games[pickedIndices[0]!]!;
     const ga = await createGameAttempt(parent, 0, firstSpec);
     item = buildItemView(parent, ga, ga.served[0]!);
+    await markBegun(parent._id);
   }
-  return {
-    attemptId: parent._id.toString(),
-    attemptToken: parent.attemptToken,
-    gameSetId: gameSet._id.toString(),
-    sequence: sequence as GameKey[],
-    totalGames: sequence.length,
-    attemptsRemaining,
-    firstGame: gameInfoFor(gameSet, parent, 0),
-    item,
-  };
+  return buildStartResponse(parent, gameSet, { resumed: false, freshItem: item });
+}
+
+/**
+ * GET /current — the read-only current state of an attempt (mirror of speaking's
+ * /attempts/:id/current). Same shape as start/resume; never mutates, never
+ * starts a clock. The runner can re-sync to it, and it is the honest source for
+ * "where am I" after a reconnect.
+ */
+export async function getCurrentGame(
+  attemptId: string,
+  caller: Caller,
+): Promise<StartGameSetResponse> {
+  const parent = await loadAndAuthorize(attemptId, caller);
+  const gameSet = await requireGameSet(parent.gameSet.toString());
+  return buildStartResponse(parent, gameSet, { resumed: true });
 }
 
 /** Pre-flight info for a game in the frozen sequence, WITHOUT serving it (no
@@ -505,21 +646,40 @@ export async function beginGame(
       GameErrorCode.ALREADY_GRADED,
     );
   }
+  // G5: the attempt is CONSUMED here — when the clock starts, not at the tutorial.
+  // ATOMIC + idempotent, so begin called any number of times counts exactly once.
+  await markBegun(parent._id);
+
+  // Idempotent — an already-served game re-discloses its pending (or last) item,
+  // clock untouched.
   const existing = await GameAttemptModel.findOne({
     parent: parent._id,
     gameIndex: parent.currentIndex,
   });
   if (existing) {
-    // Idempotent — return the current pending (or last) item, clock untouched.
-    const pending =
-      existing.served.find((s) => s.outcome == null) ??
-      existing.served[existing.served.length - 1]!;
-    return { item: buildItemView(parent, existing, pending) };
+    return { item: buildItemView(parent, existing, disclosableItem(existing)) };
   }
+
   const gameSet = await requireGameSet(parent.gameSet.toString());
   const spec = gameSet.games[parent.pickedIndices[parent.currentIndex]!]!;
-  const ga = await createGameAttempt(parent, parent.currentIndex, spec);
-  return { item: buildItemView(parent, ga, ga.served[0]!) };
+  try {
+    const ga = await createGameAttempt(parent, parent.currentIndex, spec);
+    return { item: buildItemView(parent, ga, ga.served[0]!) };
+  } catch (err) {
+    // CONCURRENCY: a racing begin created the child first (unique
+    // (parent, gameIndex) index → E11000). Re-read the winner's child so BOTH
+    // racers return the SAME served item — no second child, no second clock.
+    if (isDuplicateKeyError(err)) {
+      const winner = await GameAttemptModel.findOne({
+        parent: parent._id,
+        gameIndex: parent.currentIndex,
+      });
+      if (winner) {
+        return { item: buildItemView(parent, winner, disclosableItem(winner)) };
+      }
+    }
+    throw err;
+  }
 }
 
 export async function answerGameItem(

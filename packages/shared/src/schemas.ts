@@ -5677,11 +5677,24 @@ export const startGameSetResponseSchema = z.object({
   totalGames: z.number().int(),
   /** Attempts still available after this start; null = unlimited. */
   attemptsRemaining: z.number().int().nullable(),
-  /** The first game's pre-flight info (clock NOT running yet). */
+  /** The first game's pre-flight info (clock NOT running yet). Kept as game 0's
+   * info; use `currentGame` for the game the runner should actually show. */
   firstGame: gameInfoSchema,
-  /** The first item when `serve` was true, else null — served + clock started
-   * only by `begin` in the deferred (UI) flow. */
+  /** RESUME (Step 22): true when this returned an EXISTING in-progress attempt
+   * rather than creating a new one — a refresh/remount resumes, never re-starts. */
+  resumed: z.boolean(),
+  /** The game the runner is on (== firstGame on a fresh start; the mid-set game
+   * on a resume). */
+  currentIndex: z.number().int(),
+  currentGame: gameInfoSchema,
+  /** The pending item WITH the server's remaining clock — present when the
+   * current game has begun and isn't finished (a resume drops straight into
+   * play); null at pre-flight (tutorial) OR when `awaitingAdvance`. On a fresh
+   * serve:true start this is the served first item, as before. */
   item: gameItemViewSchema.nullable(),
+  /** The current game has FINISHED but the set has not been advanced yet (a
+   * refresh landed between games) — the runner should advance, not re-tutorial. */
+  awaitingAdvance: z.boolean(),
 });
 export type StartGameSetResponse = z.infer<typeof startGameSetResponseSchema>;
 

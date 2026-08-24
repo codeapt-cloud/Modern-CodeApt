@@ -18,10 +18,8 @@ import {
   ModuleModel,
   TopicModel,
 } from "../models/curriculum.model.js";
-import {
-  GameSetAttemptCounterModel,
-  GameSetModel,
-} from "../models/game.model.js";
+import { GameSetModel } from "../models/game.model.js";
+import { countUsedAttempts } from "./game.service.js";
 import { toGamePlayListItem } from "./game-set-admin.service.js";
 
 export async function listGamesForUser(
@@ -46,11 +44,8 @@ export async function listGamesForUser(
   const sets = await GameSetModel.find({ topic: { $in: topicIds } });
   const items = [];
   for (const set of sets) {
-    const counter = await GameSetAttemptCounterModel.findOne({
-      user: userId,
-      gameSet: set._id,
-    });
-    items.push(toGamePlayListItem(set, counter?.attemptCount ?? 0));
+    const used = await countUsedAttempts(userId, set._id);
+    items.push(toGamePlayListItem(set, used));
   }
   return { items };
 }

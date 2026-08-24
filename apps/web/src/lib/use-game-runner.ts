@@ -92,26 +92,6 @@ export function useGameRunner({ start }: UseGameRunnerArgs) {
     setPhase("playing");
   }, []);
 
-  // Start on mount (serve:false): pre-flight info only, clock stopped.
-  useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    void (async () => {
-      try {
-        const res = await start();
-        attemptRef.current = res.attemptId;
-        tokenRef.current = res.attemptToken;
-        setTotalGames(res.totalGames);
-        setInfo(res.firstGame);
-        setGameScore(0);
-        setPhase("preflight");
-      } catch (err) {
-        setError(parseApiError(err).message);
-        setPhase("error");
-      }
-    })();
-  }, [start]);
-
   const finish = useCallback(async (): Promise<void> => {
     const attemptId = attemptRef.current;
     if (!attemptId) return;
@@ -173,6 +153,40 @@ export function useGameRunner({ start }: UseGameRunnerArgs) {
       pendingNext.current = null;
     }
   }, [advanceToNext, loadItem]);
+
+  // Mount = RESUME-OR-START (Step 22 G1). The server resolves whether this is a
+  // fresh attempt or an existing in-progress one (keyed on user+gameSet, so a
+  // refresh — which lost our attemptId — still finds it). We restore from what it
+  // returns, with the SERVER's clocks, and NEVER re-show the tutorial for a game
+  // whose clock is already running:
+  //   - `item` present  → drop straight into play (fresh serve:true, or resume
+  //     mid-item with its accumulated probeState + reduced clock).
+  //   - `awaitingAdvance`→ a refresh landed between games → advance, don't tutorial.
+  //   - otherwise        → pre-flight tutorial (clock not started yet).
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    void (async () => {
+      try {
+        const res = await start();
+        attemptRef.current = res.attemptId;
+        tokenRef.current = res.attemptToken;
+        setTotalGames(res.totalGames);
+        setGameScore(0);
+        setInfo(res.currentGame);
+        if (res.item) {
+          loadItem(res.item);
+        } else if (res.awaitingAdvance) {
+          void advanceToNext();
+        } else {
+          setPhase("preflight");
+        }
+      } catch (err) {
+        setError(parseApiError(err).message);
+        setPhase("error");
+      }
+    })();
+  }, [start, loadItem, advanceToNext]);
 
   const applyAnswerResponse = useCallback(
     async (res: AnswerGameItemResponse): Promise<void> => {

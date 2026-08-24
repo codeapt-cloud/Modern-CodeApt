@@ -58,7 +58,9 @@ export const startGameSetController = asyncHandler(
       req.params.gameSetId ?? "",
       serve,
     );
-    res.status(201).json(data);
+    // 201 when a NEW attempt was created; 200 when an existing in-progress
+    // attempt was RESUMED (nothing created — a refresh/remount).
+    res.status(data.resumed ? 200 : 201).json(data);
   },
 );
 
@@ -89,6 +91,16 @@ export const probeGameItemController = asyncHandler(
 export const beginGameController = asyncHandler(
   async (req: Request, res: Response) => {
     const data = await engine.beginGame(req.params.attemptId ?? "", caller(req));
+    res.status(200).json(data);
+  },
+);
+
+export const currentGameController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const data = await engine.getCurrentGame(
+      req.params.attemptId ?? "",
+      caller(req),
+    );
     res.status(200).json(data);
   },
 );

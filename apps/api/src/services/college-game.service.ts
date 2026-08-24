@@ -22,13 +22,10 @@ import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
 import { createTenantScope, type TenantScope } from "../lib/tenant-scope.js";
-import {
-  GameSetAttemptCounterModel,
-  GameSetModel,
-  type GameSet,
-} from "../models/game.model.js";
+import { GameSetModel, type GameSet } from "../models/game.model.js";
 import { OrgUnitModel } from "../models/org-unit.model.js";
 import { UserModel } from "../models/user.model.js";
+import { countUsedAttempts } from "./game.service.js";
 import {
   assertDeletable,
   assertPublishable,
@@ -323,11 +320,8 @@ export async function listPlayableCollegeGameSets(
       const allowed = new Set(collectDescendantUnitIds(refs, targets));
       if (!studentUnit || !allowed.has(studentUnit)) continue;
     }
-    const counter = await GameSetAttemptCounterModel.findOne({
-      user: new Types.ObjectId(userId),
-      gameSet: s._id,
-    });
-    items.push(toGamePlayListItem(s, counter?.attemptCount ?? 0));
+    const used = await countUsedAttempts(userId, s._id);
+    items.push(toGamePlayListItem(s, used));
   }
   return { items };
 }

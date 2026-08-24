@@ -122,6 +122,12 @@ const gameSetAttemptSchema = new Schema(
     // Opaque per-attempt token — authorizes the lifecycle like the exam engine.
     attemptToken: { type: String, required: true },
     startedAt: { type: Date, default: Date.now },
+    // When the FIRST clock actually started (serve:true at start, or the first
+    // `begin`). null = the student only reached the pre-flight tutorial. An
+    // attempt COUNTS toward maxAttempts only once this is set (Step 22 G5:
+    // reading the rules must not cost an attempt), and the used-count is computed
+    // by counting begun, non-ABANDONED attempts — matching speaking, no counter.
+    begunAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
     // Capture-only for later analysis; NO malpractice logic this step.
     warningsTriggered: { type: Number, default: 0 },
@@ -203,26 +209,17 @@ const gameAttemptSchema = new Schema(
   },
   { timestamps: true },
 );
-gameAttemptSchema.index({ parent: 1, gameIndex: 1 });
+// UNIQUE per (parent, gameIndex): there is exactly ONE child game per position
+// in the sequence. This is also the CONCURRENCY guard for `begin` — two racing
+// begins can't both create a child; the second insert hits E11000 and the loser
+// re-reads the winner's child, so both return the SAME served item (Step 22).
+gameAttemptSchema.index({ parent: 1, gameIndex: 1 }, { unique: true });
 export type GameAttempt = InferSchemaType<typeof gameAttemptSchema>;
 export const GameAttemptModel = model("GameAttempt", gameAttemptSchema);
 
-// --- GameSetAttemptCounter (per-user attempt limit enforcement) -------------
-// Mirrors ExamAttemptCounter: an atomic upsert-counter per (user, gameSet) so a
-// concurrent double-start can't both pass the maxAttempts check.
-const gameSetAttemptCounterSchema = new Schema(
-  {
-    user: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    gameSet: { type: Schema.Types.ObjectId, ref: "GameSet", required: true },
-    attemptCount: { type: Number, default: 0 },
-  },
-  { timestamps: true },
-);
-gameSetAttemptCounterSchema.index({ user: 1, gameSet: 1 }, { unique: true });
-export type GameSetAttemptCounter = InferSchemaType<
-  typeof gameSetAttemptCounterSchema
->;
-export const GameSetAttemptCounterModel = model(
-  "GameSetAttemptCounter",
-  gameSetAttemptCounterSchema,
-);
+// NOTE (Step 22): the former GameSetAttemptCounter table is GONE. maxAttempts is
+// now enforced by COUNTING begun, non-ABANDONED GameSetAttempts (see
+// game.service `countUsedAttempts`) — one source of truth, matching speaking, so
+// an ABANDONED attempt is automatically refunded and a pre-flight-only attempt
+// (begunAt null) never counts. Any old `gamesetattemptcounters` collection in a
+// deployed DB is simply orphaned and can be dropped.

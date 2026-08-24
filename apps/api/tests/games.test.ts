@@ -27,7 +27,6 @@ import request from "supertest";
 import { createApp } from "../src/app.js";
 import {
   GameAttemptModel,
-  GameSetAttemptCounterModel,
   GameSetAttemptModel,
 } from "../src/models/game.model.js";
 import { UserModel } from "../src/models/user.model.js";
@@ -625,7 +624,7 @@ describe("gaming — Step 3 hardening", () => {
     expect(ans.body.next).toBeNull();
   });
 
-  it("attempt limit blocks a second start; a rejected start does NOT consume an attempt", async () => {
+  it("a second start RESUMES the in-progress attempt (no double-consume); the cap blocks a NEW start only once the first is finished", async () => {
     const { adminToken } = await setupCollege("gm-lim");
     const dept = await createUnit("gm-lim", adminToken, "CSE");
     const setId = await authorPublishedSet("gm-lim", adminToken, {
@@ -638,30 +637,48 @@ describe("gaming — Step 3 hardening", () => {
       .post(`/api/c/gm-lim/game-sets/${setId}/attempts`)
       .set(auth(student.token));
     expect(first.status).toBe(201);
+    expect(first.body.resumed).toBe(false);
     expect(first.body.attemptsRemaining).toBe(0);
+    const attemptId = first.body.attemptId as string;
 
+    // A refresh RESUMES the SAME attempt (200, resumed) — it never creates a
+    // second one or trips the cap.
     const second = await request(app)
       .post(`/api/c/gm-lim/game-sets/${setId}/attempts`)
       .set(auth(student.token));
-    expect(second.status).toBe(409);
-    expect(second.body.error.code).toBe("ATTEMPT_LIMIT_REACHED");
+    expect(second.status).toBe(200);
+    expect(second.body.resumed).toBe(true);
+    expect(second.body.attemptId).toBe(attemptId);
 
-    // Proof it didn't consume: the counter is still 1, not 2.
-    const counter = await GameSetAttemptCounterModel.findOne({
-      user: new Types.ObjectId(student.id),
-      gameSet: new Types.ObjectId(setId),
-    });
-    expect(counter?.attemptCount).toBe(1);
-
-    // A THIRD rejected start also leaves it at 1.
+    // Play the first attempt to completion.
+    let item = first.body.item;
+    let gameComplete = false;
+    while (!gameComplete) {
+      const ans = await request(app)
+        .post(`/api/game-attempts/${attemptId}/answer`)
+        .set(auth(student.token))
+        .send({
+          itemIndex: item.itemIndex,
+          action: "answer",
+          submission: { order: correctOrder(item.view.numbers) },
+        });
+      gameComplete = ans.body.gameComplete;
+      if (!gameComplete) item = ans.body.next;
+    }
     await request(app)
+      .post(`/api/game-attempts/${attemptId}/advance`)
+      .set(auth(student.token));
+    await request(app)
+      .post(`/api/game-attempts/${attemptId}/finish`)
+      .set(auth(student.token));
+
+    // Now capped: a brand-new start is refused at START (no in-progress attempt
+    // to resume, and one begun attempt is on record).
+    const capped = await request(app)
       .post(`/api/c/gm-lim/game-sets/${setId}/attempts`)
       .set(auth(student.token));
-    const after = await GameSetAttemptCounterModel.findOne({
-      user: new Types.ObjectId(student.id),
-      gameSet: new Types.ObjectId(setId),
-    });
-    expect(after?.attemptCount).toBe(1);
+    expect(capped.status).toBe(409);
+    expect(capped.body.error.code).toBe("ATTEMPT_LIMIT_REACHED");
   });
 
   it("refuses a skip on switch_challenge server-side (authoring can't re-enable it)", async () => {

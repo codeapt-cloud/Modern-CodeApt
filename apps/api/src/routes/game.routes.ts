@@ -18,6 +18,7 @@ import {
   adminUpdateGameSetController,
   answerGameItemController,
   beginGameController,
+  currentGameController,
   explainGameItemController,
   finishGameSetController,
   listMyGamesController,
@@ -56,6 +57,9 @@ gameRouter.post(
 // --- Attempt engine (owner session OR attempt token) ---
 // Begin the current game: serves its first item + starts the (server-set) clock.
 gameRouter.post("/game-attempts/:attemptId/begin", ...engine, beginGameController);
+// Read-only CURRENT state (resume after a reconnect) — never starts a clock.
+// Mirrors /c/:slug/speaking/attempts/:attemptId/current (Step 14).
+gameRouter.get("/game-attempts/:attemptId/current", ...engine, currentGameController);
 gameRouter.post(
   "/game-attempts/:attemptId/answer",
   ...engine,
