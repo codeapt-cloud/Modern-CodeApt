@@ -30,6 +30,13 @@ const platformStatSchema = new Schema(
       enum: CODING_FETCH_STATUS_VALUES,
       default: CodingFetchStatus.NEVER,
     },
+    /**
+     * Whether the student proved ownership of this handle. Default false: a
+     * successful fetch proves the handle exists, not ownership. Preserved across
+     * refreshes (a fetch never confers ownership); reset on a handle change. The
+     * leaderboard ranks only verified handles.
+     */
+    verified: { type: Boolean, default: false },
     /** The (trimmed) source payload for auditing/future fields. Server-only. */
     raw: { type: Schema.Types.Mixed, default: null },
     lastFetchedAt: { type: Date, default: null },

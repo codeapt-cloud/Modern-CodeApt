@@ -16,13 +16,21 @@ const CF = CodingPlatform.CODEFORCES;
 function student(
   id: string,
   name: string,
-  stat: { status: CodingFetchStatus; rating: number | null; problemsSolved: number | null },
+  stat: {
+    status: CodingFetchStatus;
+    verified: boolean;
+    rating: number | null;
+    problemsSolved: number | null;
+  },
 ): RankableStudent {
   return { studentId: id, fullName: name, stats: [{ platform: CF, ...stat }] };
 }
 
+// A ranked stat must be BOTH ok AND verified; `ok` defaults verified:true so the
+// ranking tests isolate the status/metric behavior.
 const ok = (rating: number | null, solved: number | null = null) => ({
   status: CodingFetchStatus.OK,
+  verified: true,
   rating,
   problemsSolved: solved,
 });
@@ -32,9 +40,9 @@ describe("rankByMetric", () => {
     const students = [
       student("a", "Alice", ok(1500)),
       student("b", "Bob", ok(1800)),
-      student("c", "Carol", { status: CodingFetchStatus.NOT_FOUND, rating: 9999, problemsSolved: null }),
-      student("d", "Dan", { status: CodingFetchStatus.ERROR, rating: 2000, problemsSolved: null }),
-      student("e", "Eve", { status: CodingFetchStatus.NEVER, rating: null, problemsSolved: null }),
+      student("c", "Carol", { status: CodingFetchStatus.NOT_FOUND, verified: true, rating: 9999, problemsSolved: null }),
+      student("d", "Dan", { status: CodingFetchStatus.ERROR, verified: true, rating: 2000, problemsSolved: null }),
+      student("e", "Eve", { status: CodingFetchStatus.NEVER, verified: true, rating: null, problemsSolved: null }),
     ];
     const { ranked, unranked } = rankByMetric(students, CF, "rating");
 
@@ -69,5 +77,17 @@ describe("rankByMetric", () => {
     const { ranked, unranked } = rankByMetric(students, CF, "rating");
     expect(ranked).toHaveLength(0);
     expect(unranked.map((u) => u.studentId)).toEqual(["a"]);
+  });
+
+  it("an UNVERIFIED handle is unranked even with a real ok rating (anti-fabrication)", () => {
+    const students = [
+      student("a", "Alice", ok(1500)), // verified → ranked
+      // A real, fetched 3800 on an UNVERIFIED (self-reported) handle must NOT rank
+      // — otherwise anyone claiming `tourist` sits at position one.
+      student("b", "Faker", { status: CodingFetchStatus.OK, verified: false, rating: 3800, problemsSolved: null }),
+    ];
+    const { ranked, unranked } = rankByMetric(students, CF, "rating");
+    expect(ranked.map((r) => r.row.studentId)).toEqual(["a"]);
+    expect(unranked.map((u) => u.studentId)).toEqual(["b"]);
   });
 });

@@ -38,6 +38,7 @@ export const codingRefreshStore: CodingRefreshStore = {
       problemsSolved: s.problemsSolved ?? null,
       rank: s.rank ?? null,
       status: s.status,
+      verified: s.verified ?? false,
       raw: s.raw ?? null,
       lastFetchedAt: s.lastFetchedAt ?? null,
     }));
@@ -60,6 +61,7 @@ export const codingRefreshStore: CodingRefreshStore = {
             problemsSolved: s.problemsSolved,
             rank: s.rank ?? "",
             status: s.status,
+            verified: s.verified,
             raw: s.raw ?? null,
             lastFetchedAt: s.lastFetchedAt,
           })),

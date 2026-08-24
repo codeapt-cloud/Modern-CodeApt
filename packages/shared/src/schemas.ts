@@ -3910,6 +3910,13 @@ export const codingPlatformStatSchema = z.object({
   problemsSolved: z.number().nullable(),
   rank: z.string().nullable(),
   status: codingFetchStatusSchema,
+  /**
+   * Whether the student proved they own this handle. Self-reported handles are
+   * false — a successful fetch proves the handle exists, not ownership. The UI
+   * must mark an unverified handle as self-reported wherever its rating appears,
+   * and the leaderboard ranks only verified handles.
+   */
+  verified: z.boolean(),
   lastFetchedAt: z.string().datetime().nullable(),
 });
 export type CodingPlatformStat = z.infer<typeof codingPlatformStatSchema>;

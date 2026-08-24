@@ -34,7 +34,11 @@ function statValue(
   field: "rating" | "problemsSolved",
 ): number | string {
   const s = row.stats.find((x) => x.platform === platform);
-  return s ? dash(s[field]) : "—";
+  if (!s) return "—";
+  const v = dash(s[field]);
+  // A self-reported (unverified) handle's numbers are marked so the sheet never
+  // presents them as measured; the value becomes a string ("1500 *") on purpose.
+  return v !== "—" && !s.verified ? `${v} *` : v;
 }
 
 export async function buildCodingLeaderboardWorkbook(
@@ -92,13 +96,17 @@ export async function buildCodingLeaderboardWorkbook(
     ]);
   }
 
-  // Counts footer (honest — ranked over ok stats only).
+  // Counts footer (honest — ranked over verified ok stats only).
   ws.addRow([]);
   ws.addRow([
     "",
-    `Ranked ${overview.ranked} of ${overview.linked} linked · ${overview.unranked} not ranked (na/stale) · ${overview.totalStudents} students in view`,
+    `Ranked ${overview.ranked} of ${overview.linked} linked · ${overview.unranked} not ranked (unverified/na) · ${overview.totalStudents} students in view`,
   ]);
   ws.getRow(ws.rowCount).font = HEADER_FONT;
+  ws.addRow([
+    "",
+    "* self-reported (unverified) handle — the rating may not be the student's own; excluded from ranking.",
+  ]);
 
   const out = await wb.xlsx.writeBuffer();
   return Buffer.from(out);

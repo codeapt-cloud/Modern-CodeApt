@@ -101,11 +101,12 @@ describe("mergePlatformStat keeps last-known data", () => {
     problemsSolved: 300,
     rank: "candidate master",
     status: CodingFetchStatus.OK,
+    verified: true,
     raw: null,
     lastFetchedAt: new Date("2026-07-01T00:00:00.000Z"),
   };
 
-  it("ok overwrites numbers + stamps time", () => {
+  it("ok overwrites numbers + stamps time, and preserves verified (a fetch never confers ownership)", () => {
     const merged = mergePlatformStat(
       prev,
       { platform: CodingPlatform.CODEFORCES, handle: "cf", ok: true, stats: okStats(2100) },
@@ -114,6 +115,7 @@ describe("mergePlatformStat keeps last-known data", () => {
     expect(merged.rating).toBe(2100);
     expect(merged.status).toBe(CodingFetchStatus.OK);
     expect(merged.lastFetchedAt).toBe(NOW);
+    expect(merged.verified).toBe(true); // same handle → verification preserved
   });
 
   it("error keeps last-known numbers, only flags status", () => {
@@ -149,6 +151,7 @@ describe("mergePlatformStat keeps last-known data", () => {
     expect(merged.handle).toBe("different");
     expect(merged.rating).toBeNull(); // reset — not carried from "cf"
     expect(merged.status).toBe(CodingFetchStatus.NOT_FOUND);
+    expect(merged.verified).toBe(false); // a new handle is a new, unverified claim
   });
 });
 
@@ -163,6 +166,7 @@ describe("refreshCodingProfile pipeline", () => {
         problemsSolved: 500,
         rank: "#10",
         status: CodingFetchStatus.OK,
+        verified: true,
         raw: null,
         lastFetchedAt: new Date("2026-07-01T00:00:00.000Z"),
       },

@@ -49,6 +49,7 @@ interface StatSubdoc {
   problemsSolved?: number | null;
   rank?: string | null;
   status: string;
+  verified?: boolean | null;
   lastFetchedAt?: Date | null;
 }
 
@@ -63,6 +64,8 @@ function toStatDTO(s: StatSubdoc): CodingPlatformStat {
     problemsSolved: s.problemsSolved ?? null,
     rank: rank === "" ? null : rank,
     status: s.status as CodingFetchStatus,
+    // Unverified handles are never ranked (rankedStatFor requires verified).
+    verified: s.verified ?? false,
     lastFetchedAt: s.lastFetchedAt ? new Date(s.lastFetchedAt).toISOString() : null,
   };
 }

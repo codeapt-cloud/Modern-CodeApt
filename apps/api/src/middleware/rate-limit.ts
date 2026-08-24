@@ -181,6 +181,32 @@ export const gameProbeRateLimiter = rateLimit({
 });
 
 /**
+ * Per-user rate limit for the coding-profile handle SET + manual REFRESH. Both
+ * enqueue a worker job that resolves the stored handles against Codeforces /
+ * LeetCode / CodeChef from OUR egress IP, so an unthrottled client could use us
+ * as a fetch proxy to enumerate arbitrary (self-declared) handles. Honest use is
+ * rare — set handles once, refresh occasionally — so 10/min per user is generous
+ * headroom while bounding enumeration velocity (the worker also de-dupes jobs per
+ * (college,user), collapsing concurrent triggers). The admin per-student refresh
+ * is a trusted college_admin path and is left unlimited. Skipped under
+ * NODE_ENV=test.
+ */
+export const codingRefreshRateLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => env.NODE_ENV === "test",
+  keyGenerator: (req) => req.auth?.userId ?? req.ip ?? "anonymous",
+  message: {
+    error: {
+      message: "Too many profile refreshes, please slow down",
+      code: "RATE_LIMITED",
+    },
+  },
+});
+
+/**
  * Per-user rate limit for AUTHENTICATED exam-attempt starts (individual +
  * college). A start can be code-gated, so this throttles start-code guessing —
  * the anonymous public start is already per-IP limited below. The cap is modest

@@ -28,6 +28,7 @@ import { enforcePasswordChange } from "../middleware/enforce-password-change.js"
 import { requireAuth } from "../middleware/require-auth.js";
 import { requireFeature } from "../middleware/require-entitlement.js";
 import { requireCollegeAdmin, requireFaculty } from "../middleware/require-role.js";
+import { codingRefreshRateLimiter } from "../middleware/rate-limit.js";
 import { resolveTenant } from "../middleware/resolve-tenant.js";
 
 export const codingProfileRouter: Router = Router();
@@ -51,14 +52,19 @@ codingProfileRouter.get(
   ...feature,
   getMyCodingProfileController,
 );
+// Both triggers enqueue a worker fetch of the stored handles from our egress IP,
+// so they carry a per-user rate limit (enumeration guard) on top of the feature
+// stack.
 codingProfileRouter.put(
   "/c/:collegeSlug/coding-profiles/me/handles",
   ...feature,
+  codingRefreshRateLimiter,
   setMyCodingHandlesController,
 );
 codingProfileRouter.post(
   "/c/:collegeSlug/coding-profiles/me/refresh",
   ...feature,
+  codingRefreshRateLimiter,
   refreshMyCodingProfileController,
 );
 

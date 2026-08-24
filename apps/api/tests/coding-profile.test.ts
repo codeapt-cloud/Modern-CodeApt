@@ -106,6 +106,8 @@ describe("coding-profile handles (self-edit)", () => {
     expect(set.body.handles).toMatchObject({ codeforces: "tourist", leetcode: "lee215", codechef: null });
     expect(set.body.stats).toHaveLength(2);
     expect(set.body.stats.every((s: { status: string }) => s.status === CodingFetchStatus.NEVER)).toBe(true);
+    // A freshly-linked handle is self-reported → unverified until proven.
+    expect(set.body.stats.every((s: { verified: boolean }) => s.verified === false)).toBe(true);
     expect(set.body.refreshQueued).toBe(true);
     expect(enqueueCodingRefreshJob).toHaveBeenCalledTimes(1);
 

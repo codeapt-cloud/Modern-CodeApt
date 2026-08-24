@@ -103,6 +103,8 @@ interface StatSeed {
   rating?: number | null;
   problemsSolved?: number | null;
   status: string;
+  /** Defaults true in seedProfile so ranking tests exercise ranking, not gating. */
+  verified?: boolean;
 }
 async function seedProfile(
   collegeId: string,
@@ -124,6 +126,7 @@ async function seedProfile(
       rating: s.rating ?? null,
       problemsSolved: s.problemsSolved ?? null,
       status: s.status,
+      verified: s.verified ?? true,
       lastFetchedAt: s.status === CodingFetchStatus.OK ? new Date() : null,
     })),
   });
@@ -201,6 +204,44 @@ describe("coding leaderboard ranking", () => {
     expect(carolRow.rank).toBeNull();
     expect(carolRow.metricValue).toBeNull();
     expect(carolRow.rankedStatus).toBe("not_found");
+  });
+
+  it("an UNVERIFIED handle is unranked even with a real ok rating (anti-fabrication)", async () => {
+    const sc = await setupCollege({ coding: true });
+    const real = await makeStudent(sc.collegeId, null, "Real");
+    const faker = await makeStudent(sc.collegeId, null, "Faker");
+    // Real student: verified handle, modest rating → ranked.
+    await seedProfile(sc.collegeId, real, { codeforces: "real" }, [cfOk(1500, 50)]);
+    // Faker: claims someone else's handle; the fetch succeeds (ok, 3800) but the
+    // handle is UNVERIFIED, so it must be listed unranked, never at rank 1.
+    await seedProfile(sc.collegeId, faker, { codeforces: "tourist" }, [
+      {
+        platform: CodingPlatform.CODEFORCES,
+        handle: "tourist",
+        rating: 3800,
+        problemsSolved: 1200,
+        status: CodingFetchStatus.OK,
+        verified: false,
+      },
+    ]);
+
+    const res = await request(app)
+      .get(url(sc.slug))
+      .query({ platform: "codeforces", metric: "rating" })
+      .set(auth(sc.adminToken));
+    expect(res.status).toBe(200);
+    expect(res.body.overview).toMatchObject({ linked: 2, ranked: 1, unranked: 1 });
+
+    const ranked = res.body.rows.filter((r: { rank: number | null }) => r.rank !== null);
+    expect(ranked.map((r: { fullName: string }) => r.fullName)).toEqual(["Real"]);
+    const fakerRow = res.body.rows.find((r: { fullName: string }) => r.fullName === "Faker");
+    expect(fakerRow.rank).toBeNull();
+    expect(fakerRow.metricValue).toBeNull();
+    // The self-reported flag is surfaced on the chosen-platform stat.
+    const cf = fakerRow.stats.find(
+      (s: { platform: string }) => s.platform === "codeforces",
+    );
+    expect(cf.verified).toBe(false);
   });
 
   it("ranks by problemsSolved when chosen", async () => {
@@ -322,6 +363,40 @@ describe("coding leaderboard export + gating", () => {
     expect(ws).toBeTruthy();
     expect(ws!.getRow(1).getCell(1).value).toBe("Rank");
     expect(ws!.getRow(2).getCell(2).value).toBe("Alice"); // first data row
+  });
+
+  it("marks an unverified handle's rating in the .xlsx (never presented as measured)", async () => {
+    const sc = await setupCollege({ coding: true });
+    const faker = await makeStudent(sc.collegeId, null, "Zeta"); // sorts last (unranked)
+    await seedProfile(sc.collegeId, faker, { codeforces: "tourist" }, [
+      {
+        platform: CodingPlatform.CODEFORCES,
+        handle: "tourist",
+        rating: 3800,
+        problemsSolved: 1200,
+        status: CodingFetchStatus.OK,
+        verified: false,
+      },
+    ]);
+
+    const res = await request(app)
+      .get(`${url(sc.slug)}/report`)
+      .query({ platform: "codeforces", metric: "rating" })
+      .set(auth(sc.adminToken))
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => chunks.push(Buffer.from(c)));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body as Buffer);
+    const ws = wb.getWorksheet("Leaderboard")!;
+    // Zeta's CF rating cell (col 6) is marked, not a bare 3800.
+    const zetaRow = ws.getRow(2);
+    expect(zetaRow.getCell(2).value).toBe("Zeta");
+    expect(String(zetaRow.getCell(6).value)).toBe("3800 *");
   });
 
   it("403s without the coding_profiles feature", async () => {

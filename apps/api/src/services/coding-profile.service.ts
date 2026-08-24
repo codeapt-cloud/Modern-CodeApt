@@ -69,6 +69,7 @@ function statToDTO(s: {
   problemsSolved?: number | null;
   rank?: string | null;
   status: string;
+  verified?: boolean | null;
   lastFetchedAt?: Date | null;
 }): CodingPlatformStat {
   return {
@@ -79,6 +80,7 @@ function statToDTO(s: {
     problemsSolved: s.problemsSolved ?? null,
     rank: blankToNull(s.rank),
     status: s.status as CodingFetchStatus,
+    verified: s.verified ?? false,
     lastFetchedAt: s.lastFetchedAt ? new Date(s.lastFetchedAt).toISOString() : null,
   };
 }
@@ -93,6 +95,7 @@ function statToSubdoc(s: StoredPlatformStat) {
     problemsSolved: s.problemsSolved,
     rank: s.rank ?? "",
     status: s.status,
+    verified: s.verified,
     raw: s.raw ?? null,
     lastFetchedAt: s.lastFetchedAt,
   };
@@ -189,6 +192,7 @@ export async function setMyCodingHandles(
         problemsSolved: s.problemsSolved ?? null,
         rank: blankToNull(s.rank),
         status: s.status as CodingFetchStatus,
+        verified: s.verified ?? false,
         raw: null,
         lastFetchedAt: s.lastFetchedAt ?? null,
       },

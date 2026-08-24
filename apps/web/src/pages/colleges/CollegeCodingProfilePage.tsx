@@ -78,6 +78,14 @@ function PlatformCard({ stat }: { stat: CodingPlatformStat }) {
             {PLATFORM_LABEL[stat.platform]}
           </h3>
           <p className="text-xs text-ink-muted">@{stat.handle}</p>
+          {!stat.verified ? (
+            <p className="text-xs text-warning-fg">
+              Unverified — self-reported. We haven&apos;t confirmed this handle is
+              yours, so its rating is shown for your reference only and is excluded
+              from the ranked leaderboard. Once handle verification is available,
+              you&apos;ll verify ownership to appear on the ranking.
+            </p>
+          ) : null}
         </div>
         {statusBadge(stat)}
       </div>

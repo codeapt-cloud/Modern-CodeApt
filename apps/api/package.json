@@ -17,6 +17,7 @@
     "backfill:tenancy": "tsx src/scripts/backfill-tenancy.ts",
     "backfill:enrollment-expiry": "tsx src/scripts/backfill-enrollment-expiry.ts",
     "backfill:ai-entitlements": "tsx src/scripts/backfill-ai-entitlements.ts",
+    "backfill:coding-verified": "tsx src/scripts/backfill-coding-verified.ts",
     "seed:curriculum": "tsx src/scripts/seed-curriculum.ts",
     "seed:challenges": "tsx src/scripts/seed-challenges.ts",
     "seed:exams": "tsx src/scripts/seed-exams.ts",

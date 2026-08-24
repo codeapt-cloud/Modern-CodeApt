@@ -8,6 +8,11 @@
  *    linked a handle but whose fetch is `never` / `not_found` / `error` (even if
  *    it carries a last-known number) is UNRANKED — never given a fabricated rank
  *    or a fake 0 that would outrank a genuine low score.
+ *  - Only a VERIFIED handle is RANKED. A handle is self-reported until the student
+ *    proves ownership, and a fetch succeeding proves only that the handle EXISTS —
+ *    not that the caller owns it. So an unverified handle (even a real `ok` 3800)
+ *    is UNRANKED and listed separately, never ranked against genuine students on a
+ *    rating that may not be theirs.
  *  - Ties break by the OTHER metric (desc), then by name (asc) — deterministic.
  */
 import { CodingFetchStatus, type CodingMetric, type CodingPlatform } from "./enums.js";
@@ -16,6 +21,8 @@ import { CodingFetchStatus, type CodingMetric, type CodingPlatform } from "./enu
 export interface RankableStat {
   platform: CodingPlatform;
   status: CodingFetchStatus;
+  /** Ownership proven by a verification challenge — only verified stats rank. */
+  verified: boolean;
   rating: number | null;
   problemsSolved: number | null;
 }
@@ -43,13 +50,17 @@ function metricValue(stat: RankableStat, metric: CodingMetric): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-/** The chosen-platform stat, only if it's a real `ok` reading (else null). */
+/**
+ * The chosen-platform stat, only if it's a real `ok` reading AND the handle is
+ * verified (else null → the student is unranked). Verification is required so an
+ * unverified handle can never rank on a rating the student may not own.
+ */
 export function rankedStatFor(
   stats: readonly RankableStat[],
   platform: CodingPlatform,
 ): RankableStat | null {
   const s = stats.find((x) => x.platform === platform);
-  return s && s.status === CodingFetchStatus.OK ? s : null;
+  return s && s.status === CodingFetchStatus.OK && s.verified ? s : null;
 }
 
 /** The rankable value for a student on the chosen platform+metric, or null. */

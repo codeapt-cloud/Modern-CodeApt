@@ -86,9 +86,15 @@ function PlatformMini({
 }) {
   const s = row.stats.find((x) => x.platform === platform);
   if (!s || s.handle === "") return <span className="text-ink-muted">—</span>;
+  // An unverified (self-reported) handle is dimmed and starred wherever its
+  // numbers appear — the rating may not be the student's own.
   return (
-    <span className="tabular-nums text-ink-secondary">
+    <span
+      className={`tabular-nums ${s.verified ? "text-ink-secondary" : "text-ink-muted"}`}
+      title={s.verified ? undefined : "Self-reported handle — not verified"}
+    >
       {num(s.rating)} · {num(s.problemsSolved)}
+      {s.verified ? "" : " *"}
     </span>
   );
 }
@@ -106,6 +112,67 @@ function StatusBadge({ status }: { status: CodingFetchStatus }) {
     default:
       return null;
   }
+}
+
+function LeaderTableHeader({ metricHeader }: { metricHeader: string }) {
+  return (
+    <TableHeader>
+      <TableRow>
+        <TableHead className="w-16">#</TableHead>
+        <TableHead>Student</TableHead>
+        <TableHead>Roll</TableHead>
+        <TableHead>Org unit</TableHead>
+        <TableHead>{metricHeader}</TableHead>
+        <TableHead>CF (r·s)</TableHead>
+        <TableHead>LC (r·s)</TableHead>
+        <TableHead>CC (r·s)</TableHead>
+        <TableHead>Status</TableHead>
+      </TableRow>
+    </TableHeader>
+  );
+}
+
+function LeaderboardRow({
+  row,
+  platform,
+}: {
+  row: CodingLeaderboardRow;
+  platform: CodingPlatform;
+}) {
+  const chosen = row.stats.find((x) => x.platform === platform);
+  const selfReported = !!chosen && chosen.handle !== "" && !chosen.verified;
+  return (
+    <TableRow>
+      <TableCell>
+        {row.rank === null ? (
+          <span className="text-ink-muted">—</span>
+        ) : (
+          <Badge variant={row.rank <= 3 ? "success" : "neutral"}>#{row.rank}</Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-ink">{row.fullName}</TableCell>
+      <TableCell className="font-mono text-ink-secondary">{row.rollNumber}</TableCell>
+      <TableCell className="text-ink-secondary">{row.orgUnitName ?? "—"}</TableCell>
+      <TableCell className="tabular-nums font-semibold text-ink">
+        {num(row.metricValue)}
+      </TableCell>
+      <TableCell>
+        <PlatformMini row={row} platform={CodingPlatform.CODEFORCES} />
+      </TableCell>
+      <TableCell>
+        <PlatformMini row={row} platform={CodingPlatform.LEETCODE} />
+      </TableCell>
+      <TableCell>
+        <PlatformMini row={row} platform={CodingPlatform.CODECHEF} />
+      </TableCell>
+      <TableCell>
+        <div className="flex flex-wrap gap-1">
+          <StatusBadge status={row.rankedStatus} />
+          {selfReported ? <Badge variant="warning">self-reported</Badge> : null}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
 }
 
 export function CollegeCodingLeaderboardPage() {
@@ -194,6 +261,16 @@ export function CollegeCodingLeaderboardPage() {
     : rows;
 
   const metricHeader = `${PLATFORM_LABEL[platform]} ${METRIC_LABEL[metric]}`;
+
+  // Unverified (self-reported) handles are pulled into their OWN list — never mixed
+  // into the ranked table — so an unverified rating is never presented as measured.
+  // A ranked row is always verified, so this only catches unranked self-reported rows.
+  const isSelfReported = (r: CodingLeaderboardRow): boolean => {
+    const chosen = r.stats.find((x) => x.platform === platform);
+    return !!chosen && chosen.handle !== "" && !chosen.verified;
+  };
+  const mainRows = filteredRows.filter((r) => !(r.rank === null && isSelfReported(r)));
+  const unverifiedRows = filteredRows.filter((r) => r.rank === null && isSelfReported(r));
 
   return (
     <div className="space-y-6">
@@ -296,8 +373,15 @@ export function CollegeCodingLeaderboardPage() {
             <StatCard icon={Users} label="Students in view" value={data.overview.totalStudents} />
             <StatCard icon={Code2} label="Linked handles" value={data.overview.linked} />
             <StatCard icon={BarChart3} label={`Ranked (${metricHeader})`} value={data.overview.ranked} />
-            <StatCard icon={BarChart3} label="Not ranked (na/stale)" value={data.overview.unranked} />
+            <StatCard icon={BarChart3} label="Not ranked (unverified/na)" value={data.overview.unranked} />
           </div>
+
+          <p className="text-xs text-ink-muted">
+            Only <strong>verified</strong> handles are ranked. A{" "}
+            <span className="text-ink-secondary">self-reported *</span> handle is
+            unverified — its rating may not be the student&apos;s own — so it is
+            listed separately below, never counted as measured.
+          </p>
 
           {data.overview.linked === 0 ? (
             <EmptyState
@@ -323,53 +407,43 @@ export function CollegeCodingLeaderboardPage() {
                 </div>
               </div>
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-16">#</TableHead>
-                    <TableHead>Student</TableHead>
-                    <TableHead>Roll</TableHead>
-                    <TableHead>Org unit</TableHead>
-                    <TableHead>{metricHeader}</TableHead>
-                    <TableHead>CF (r·s)</TableHead>
-                    <TableHead>LC (r·s)</TableHead>
-                    <TableHead>CC (r·s)</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
+                <LeaderTableHeader metricHeader={metricHeader} />
                 <TableBody>
-                  {filteredRows.map((r) => (
-                    <TableRow key={r.studentId}>
-                      <TableCell>
-                        {r.rank === null ? (
-                          <span className="text-ink-muted">—</span>
-                        ) : (
-                          <Badge variant={r.rank <= 3 ? "success" : "neutral"}>#{r.rank}</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-ink">{r.fullName}</TableCell>
-                      <TableCell className="font-mono text-ink-secondary">{r.rollNumber}</TableCell>
-                      <TableCell className="text-ink-secondary">{r.orgUnitName ?? "—"}</TableCell>
-                      <TableCell className="tabular-nums font-semibold text-ink">
-                        {num(r.metricValue)}
-                      </TableCell>
-                      <TableCell>
-                        <PlatformMini row={r} platform={CodingPlatform.CODEFORCES} />
-                      </TableCell>
-                      <TableCell>
-                        <PlatformMini row={r} platform={CodingPlatform.LEETCODE} />
-                      </TableCell>
-                      <TableCell>
-                        <PlatformMini row={r} platform={CodingPlatform.CODECHEF} />
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={r.rankedStatus} />
-                      </TableCell>
-                    </TableRow>
+                  {mainRows.map((r) => (
+                    <LeaderboardRow key={r.studentId} row={r} platform={platform} />
                   ))}
                 </TableBody>
               </Table>
             </Card>
           )}
+
+          {/* Unverified handles, listed SEPARATELY — never ranked, never presented
+              as measured. Honest copy, not a euphemism: nothing is "pending". */}
+          {unverifiedRows.length > 0 ? (
+            <Card className="overflow-hidden border-warning-border">
+              <div className="space-y-1 border-b border-subtle p-4">
+                <h3 className="text-sm font-semibold text-ink">
+                  Unverified — self-reported
+                </h3>
+                <p className="text-xs text-ink-muted">
+                  These students entered a handle we haven&apos;t confirmed they own.
+                  A successful fetch proves the handle exists, not that it&apos;s
+                  theirs, so these ratings are shown for reference only and are{" "}
+                  <strong>excluded from the ranking</strong>. Once handle
+                  verification is available, a student verifies ownership to appear
+                  on the ranked board.
+                </p>
+              </div>
+              <Table>
+                <LeaderTableHeader metricHeader={metricHeader} />
+                <TableBody>
+                  {unverifiedRows.map((r) => (
+                    <LeaderboardRow key={r.studentId} row={r} platform={platform} />
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          ) : null}
         </>
       )}
     </div>

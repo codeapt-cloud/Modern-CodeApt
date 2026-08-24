@@ -16,6 +16,15 @@ export interface StoredPlatformStat {
   problemsSolved: number | null;
   rank: string | null;
   status: CodingFetchStatus;
+  /**
+   * Whether the STUDENT was proven to own this handle (a verification challenge).
+   * Self-reported handles are `false` — a fetch succeeding proves the handle
+   * EXISTS on the platform, never that the caller owns it. Defaults false, and a
+   * handle change resets it (a new handle is a new, unverified claim). The
+   * leaderboard ranks only verified stats, so an unverified handle can never sit
+   * at rank 1 on someone else's rating.
+   */
+  verified: boolean;
   raw: unknown;
   lastFetchedAt: Date | null;
 }
@@ -30,6 +39,7 @@ export function initialStat(platform: CodingPlatform, handle: string): StoredPla
     problemsSolved: null,
     rank: null,
     status: CodingFetchStatus.NEVER,
+    verified: false,
     raw: null,
     lastFetchedAt: null,
   };
@@ -61,6 +71,9 @@ export function mergePlatformStat(
       problemsSolved: outcome.stats.problemsSolved,
       rank: outcome.stats.rank,
       status: CodingFetchStatus.OK,
+      // A successful fetch never confers ownership — carry the prior verified
+      // flag (reset to false on a handle change, via `carried`).
+      verified: carried.verified,
       raw: outcome.stats.raw,
       lastFetchedAt: now,
     };
