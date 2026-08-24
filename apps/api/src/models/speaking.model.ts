@@ -47,6 +47,11 @@ const speakingItemSchema = new Schema(
     promptAudioVoiceVersion: { type: String, default: "" },
     // Listening stimulus audio (conversation / passage_question / story_retell).
     stimulusAudioUrl: { type: String, default: "" },
+    // Authoring-only source text for the stimulus "Generate audio" (withheld from
+    // the student view) + its TTS provenance — mirrors promptAudio*.
+    stimulusText: { type: String, default: "" },
+    stimulusAudioVoiceId: { type: String, default: "" },
+    stimulusAudioVoiceVersion: { type: String, default: "" },
     stimulusPlayLimit: { type: Number, default: 0, min: 0 },
     // Acceptable answers (short_answer / conversation / passage_question).
     answerSet: { type: [String], default: [] },

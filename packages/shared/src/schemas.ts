@@ -6017,6 +6017,14 @@ export const speakingItemUpsertSchema = z
     promptAudioVoiceVersion: z.string().default(""),
     /** Listening stimulus audio (conversation / passage_question / story_retell). */
     stimulusAudioUrl: z.string().default(""),
+    /** The passage/dialogue to SYNTHESISE for the stimulus (authoring-only source
+     *  text for "Generate audio"; WITHHELD from the student view — they hear it,
+     *  never see it). Mirrors referenceText's role for the prompt. */
+    stimulusText: z.string().default(""),
+    /** TTS provenance for stimulusAudioUrl (same pinning as the prompt). Empty
+     *  when the stimulus clip was uploaded/pasted rather than generated. */
+    stimulusAudioVoiceId: z.string().default(""),
+    stimulusAudioVoiceVersion: z.string().default(""),
     /** How many times the stimulus may be played; 0 = unlimited (Step-9 precedent). */
     stimulusPlayLimit: z.number().int().min(0).default(0),
     /** Acceptable answers (short_answer / conversation / passage_question). */
@@ -6124,6 +6132,9 @@ export const speakingAssessmentItemDetailSchema = z.object({
   promptAudioVoiceId: z.string(),
   promptAudioVoiceVersion: z.string(),
   stimulusAudioUrl: z.string(),
+  stimulusText: z.string(),
+  stimulusAudioVoiceId: z.string(),
+  stimulusAudioVoiceVersion: z.string(),
   stimulusPlayLimit: z.number().int().nonnegative(),
   answerSet: z.array(z.string()),
   missingWord: z.string(),

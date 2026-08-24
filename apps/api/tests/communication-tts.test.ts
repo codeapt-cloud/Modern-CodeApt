@@ -235,4 +235,56 @@ describe("speaking TTS — voice pinned + indistinguishable downstream", () => {
     expect("promptAudioVoiceId" in item).toBe(false);
     expect("promptAudioVoiceVersion" in item).toBe(false);
   });
+
+  it("STIMULUS audio has the same voice pinning, and its text + voice are withheld from the student view", async () => {
+    const sc = await setupCollege("tts-stim");
+    const student = await addStudent("tts-stim", sc.adminToken, "s2@tts.test");
+    const tts = await request(app)
+      .post(ttsUrl("tts-stim"))
+      .set(auth(sc.adminToken))
+      .send({ text: "Two friends plan to meet at the library after lunch." });
+    expect(tts.status).toBe(200);
+
+    const created = await request(app)
+      .post(`/api/c/tts-stim/speaking`)
+      .set(auth(sc.adminToken))
+      .send({
+        title: "TTS stimulus paper",
+        items: [
+          {
+            itemType: "conversation",
+            promptText: "Where do they plan to meet?",
+            answerSet: ["the library", "library"],
+            stimulusAudioUrl: tts.body.audioUrl,
+            stimulusText: "Two friends plan to meet at the library after lunch.",
+            stimulusAudioVoiceId: tts.body.voiceId,
+            stimulusAudioVoiceVersion: tts.body.voiceVersion,
+            responseWindowSeconds: 20,
+          },
+        ],
+      });
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+
+    // Author DETAIL records the stimulus source text + pinned voice.
+    const detail = await request(app)
+      .get(`/api/c/tts-stim/speaking/${id}`)
+      .set(auth(sc.adminToken));
+    expect(detail.body.items[0].stimulusAudioUrl).toBe(tts.body.audioUrl);
+    expect(detail.body.items[0].stimulusText).toContain("library");
+    expect(detail.body.items[0].stimulusAudioVoiceId).toBe("en_US-amy-medium");
+
+    // Student VIEW: hears the stimulus (URL) but never SEES its text or the voice.
+    await request(app)
+      .post(`/api/c/tts-stim/speaking/${id}/publish`)
+      .set(auth(sc.adminToken))
+      .send({ isPublished: true });
+    const start = await request(app)
+      .post(`/api/c/tts-stim/speaking/${id}/attempts`)
+      .set(auth(student.token));
+    const item = start.body.item;
+    expect(item.stimulusAudioUrl).toBe(tts.body.audioUrl);
+    expect("stimulusText" in item).toBe(false);
+    expect("stimulusAudioVoiceId" in item).toBe(false);
+  });
 });

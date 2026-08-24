@@ -581,6 +581,9 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
       promptAudioVoiceId: it.promptAudioVoiceId ?? "",
       promptAudioVoiceVersion: it.promptAudioVoiceVersion ?? "",
       stimulusAudioUrl: it.stimulusAudioUrl ?? "",
+      stimulusText: it.stimulusText ?? "",
+      stimulusAudioVoiceId: it.stimulusAudioVoiceId ?? "",
+      stimulusAudioVoiceVersion: it.stimulusAudioVoiceVersion ?? "",
       stimulusPlayLimit: it.stimulusPlayLimit ?? 0,
       answerSet: it.answerSet ?? [],
       missingWord: it.missingWord ?? "",
@@ -621,6 +624,9 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
   promptAudioVoiceId: string;
   promptAudioVoiceVersion: string;
   stimulusAudioUrl: string;
+  stimulusText: string;
+  stimulusAudioVoiceId: string;
+  stimulusAudioVoiceVersion: string;
   stimulusPlayLimit: number;
   answerSet: string[];
   missingWord: string;
@@ -638,6 +644,9 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
     promptAudioVoiceId: it.promptAudioVoiceId,
     promptAudioVoiceVersion: it.promptAudioVoiceVersion,
     stimulusAudioUrl: it.stimulusAudioUrl,
+    stimulusText: it.stimulusText,
+    stimulusAudioVoiceId: it.stimulusAudioVoiceId,
+    stimulusAudioVoiceVersion: it.stimulusAudioVoiceVersion,
     stimulusPlayLimit: it.stimulusPlayLimit,
     answerSet: it.answerSet,
     missingWord: it.missingWord,

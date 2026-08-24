@@ -26,6 +26,7 @@
     "seed:careers": "tsx src/scripts/seed-careers.ts",
     "seed:speaking": "tsx src/scripts/seed-speaking.ts",
     "seed:games": "tsx src/scripts/seed-games.ts",
+    "seed:cts-paper": "tsx src/scripts/seed-cts-paper.ts",
     "gateway:healthcheck": "tsx src/scripts/gateway-healthcheck.ts",
     "fix:migration-dupes": "tsx src/scripts/fix-migration-duplicates.ts"
   },

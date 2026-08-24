@@ -46,6 +46,9 @@ function blankItem(): SpeakingItemUpsert {
     promptAudioVoiceId: "",
     promptAudioVoiceVersion: "",
     stimulusAudioUrl: "",
+    stimulusText: "",
+    stimulusAudioVoiceId: "",
+    stimulusAudioVoiceVersion: "",
     stimulusPlayLimit: 0,
     answerSet: [],
     missingWord: "",
@@ -381,6 +384,42 @@ function ItemForm({
     }
   };
 
+  // --- Stimulus audio: the SAME controls as the prompt (upload + generate +
+  //     preview + pinned voice), synthesised from the authored stimulus text. ---
+  const [stimUploading, setStimUploading] = useState(false);
+  const [stimGenerating, setStimGenerating] = useState(false);
+  const [stimError, setStimError] = useState<string | null>(null);
+  const onPickStimulus = async (file: File | undefined): Promise<void> => {
+    if (!file) return;
+    setStimUploading(true);
+    try {
+      const url = await uploadPromptAudio(file);
+      onChange({
+        stimulusAudioUrl: url,
+        stimulusAudioVoiceId: "",
+        stimulusAudioVoiceVersion: "",
+      });
+    } finally {
+      setStimUploading(false);
+    }
+  };
+  const onGenerateStimulus = async (): Promise<void> => {
+    setStimError(null);
+    setStimGenerating(true);
+    try {
+      const res = await generatePromptAudio(item.stimulusText.trim());
+      onChange({
+        stimulusAudioUrl: res.audioUrl,
+        stimulusAudioVoiceId: res.voiceId,
+        stimulusAudioVoiceVersion: res.voiceVersion,
+      });
+    } catch (err) {
+      setStimError(parseApiError(err).message);
+    } finally {
+      setStimGenerating(false);
+    }
+  };
+
   return (
     <Card>
       <CardContent className="space-y-3 p-4">
@@ -507,11 +546,55 @@ function ItemForm({
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
-            <Label>Stimulus audio URL (listening clip)</Label>
-            <Input
-              value={item.stimulusAudioUrl}
-              onChange={(e) => onChange({ stimulusAudioUrl: e.target.value })}
+            <Label>Stimulus (listening clip)</Label>
+            <textarea
+              className="w-full rounded-md border border-subtle bg-surface-base p-2 text-sm text-ink"
+              rows={2}
+              placeholder="Passage / dialogue text to synthesise…"
+              value={item.stimulusText}
+              onChange={(e) => onChange({ stimulusText: e.target.value })}
             />
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Mirror of the prompt controls: generate with the fixed Piper
+                  voice OR upload; both set stimulusAudioUrl. */}
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={
+                  stimGenerating || stimUploading || item.stimulusText.trim().length === 0
+                }
+                onClick={() => void onGenerateStimulus()}
+              >
+                {stimGenerating ? "Generating…" : "Generate audio"}
+              </Button>
+              <label className="text-sm text-ink-muted">
+                or upload:{" "}
+                <input
+                  type="file"
+                  accept="audio/*"
+                  className="text-sm text-ink-muted"
+                  onChange={(e) => void onPickStimulus(e.target.files?.[0])}
+                />
+              </label>
+            </div>
+            {stimUploading ? (
+              <span className="text-xs text-ink-muted">Uploading…</span>
+            ) : null}
+            {stimError ? (
+              <span className="text-xs text-error-fg">{stimError}</span>
+            ) : null}
+            {item.stimulusAudioUrl ? (
+              <div className="space-y-1">
+                <audio controls src={item.stimulusAudioUrl} className="h-8 w-full max-w-sm" />
+                <span className="block text-xs text-success-fg">
+                  Stimulus audio attached ✓
+                  {item.stimulusAudioVoiceId
+                    ? ` — voice ${item.stimulusAudioVoiceId} (${item.stimulusAudioVoiceVersion})`
+                    : " — uploaded"}
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className="space-y-1">
             <Label>Prompt audio</Label>
