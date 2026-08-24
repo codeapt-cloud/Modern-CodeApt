@@ -59,7 +59,9 @@ async function seedGames(): Promise<void> {
         durationSeconds: 240,
         allowSkip: false,
         startingDifficulty: GameDifficulty.EASY,
-        maxQuestions: 3, // three levels
+        // ONE composite item (3 internal cycles + recall). maxQuestions>1 would
+        // RE-SERVE the whole game — it is not "3 questions".
+        maxQuestions: 1,
       },
       {
         gameKey: GameKey.BUBBLE_MATH,

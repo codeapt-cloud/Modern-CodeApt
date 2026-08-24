@@ -127,7 +127,10 @@ async function seedGameSet(collegeId: Types.ObjectId): Promise<void> {
     durationSeconds: gameKey === GameKey.GRID_CHALLENGE ? 240 : 150,
     allowSkip: gameKey !== GameKey.GRID_CHALLENGE,
     startingDifficulty: GameDifficulty.EASY,
-    maxQuestions: gameKey === GameKey.GRID_CHALLENGE ? 3 : 5,
+    // grid_challenge is ONE composite item (3 internal cycles + recall), so its
+    // completion = 1 resolved item. maxQuestions>1 would RE-SERVE it. Others
+    // serve up to 5 items within the clock.
+    maxQuestions: gameKey === GameKey.GRID_CHALLENGE ? 1 : 5,
   }));
   await GameSetModel.findOneAndUpdate(
     { college: collegeId, title: GAME_SET_TITLE },

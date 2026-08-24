@@ -154,6 +154,14 @@ export function GameRunner({
       <div className="rounded-2xl border border-subtle bg-surface-raised p-6">
         {Renderer ? (
           <Renderer
+            // Remount on EVERY new item. Interactive renderers (grid_challenge)
+            // seed internal state from the first `view` and drive themselves via
+            // the probe channel; without a per-item key, a re-served item (e.g. a
+            // game with maxQuestions > 1) or a following same-gameKey game reuses
+            // the previous instance — frozen at its `done` state — and the set
+            // appears to "stop". The (gameIndex,itemIndex) pair is unique per item
+            // across the whole set (itemIndex restarts at 0 each game).
+            key={`${item.gameIndex}-${item.itemIndex}`}
             gameKey={item.gameKey}
             view={item.view}
             difficulty={item.difficulty}

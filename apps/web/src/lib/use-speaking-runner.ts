@@ -131,7 +131,15 @@ export function useSpeakingRunner(opts: {
       return;
     }
     if (recorder.state === "upload_failed") {
-      setError("That answer could not be uploaded. Moving on.");
+      // The clip never reached the audio host — a connection/upload problem on
+      // this end, NOT a rejection of the answer itself. Distinguished from a
+      // server rejection (see submitText) so the student knows to check their
+      // network. The item is recorded as UNANSWERED and we move on: this engine
+      // does not re-record within an attempt.
+      setError(
+        "That recording couldn't be uploaded — likely a connection problem, not your answer. " +
+          "It's saved as unanswered and we've moved on (recordings can't be redone in this attempt).",
+      );
       void advanceSilent();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,7 +182,12 @@ export function useSpeakingRunner(opts: {
         .submitItem(slug, attempt.attemptId, indexRef.current, { text })
         .then((res) => applyCurrent(res.current))
         .catch(() => {
-          setError("That answer could not be submitted. Moving on.");
+          // The server did not accept the submission (rejection or a network
+          // failure reaching our API) — distinct from an audio-upload failure.
+          // The item is recorded as unanswered and we move on (no re-record).
+          setError(
+            "The server couldn't accept that answer. It's saved as unanswered and we've moved on.",
+          );
           void advanceSilent();
         });
     },
