@@ -1,83 +1,79 @@
-# Local infrastructure for CodeApt.
+# CodeApt infrastructure.
 #
-#   docker compose up -d          → starts MongoDB + Redis (for `pnpm dev`)
-#   docker compose --profile full up --build
-#                                 → also builds & runs api, worker, web
+#   docker compose up -d
+#       PRODUCTION shape. Starts ONLY the app services (api, worker, asr, web,
+#       piston). It does NOT start a database — api/worker connect to the
+#       managed Mongo + Redis named in .env (MONGODB_URI / REDIS_URL). This is
+#       the point: production must never accidentally run — or connect to — a
+#       throwaway local database (see "WHY THESE GUARDS EXIST" below).
 #
-# The app services live behind the `full` profile so the common workflow
-# (containerized data stores + local `pnpm dev`) stays the default.
+#   docker compose --profile local-db up -d mongo redis
+#       LOCAL DEV data stores for `pnpm dev` — a disposable Mongo + Redis bound
+#       to 127.0.0.1 only. Opt-in on purpose; never on by default.
+#
+#   docker compose --profile local-db up -d --build
+#       LOCAL full stack in containers (app services + the local data stores).
+#
+# ---------------------------------------------------------------------------
+# WHY THESE GUARDS EXIST — do not "simplify" them away.
+#
+#   During a live incident a routine rebuild silently pointed PRODUCTION at an
+#   empty local Mongo: the compose file HARDCODED
+#       MONGODB_URI: mongodb://mongo:27017/codeapt
+#   which WON over the real URI in .env, so the api connected to a fresh, empty
+#   container instead of the production database. CORS_ORIGIN was likewise
+#   hardcoded to http://localhost:5173, breaking the real origin.
+#
+#   The fixes, all of which must stay:
+#     1. MONGODB_URI / REDIS_URL / CORS_ORIGIN / the JWT secrets come from .env
+#        and are REQUIRED (${VAR:?...}) — a missing value fails the `up` LOUDLY
+#        instead of silently falling back to a wrong/empty default. There are no
+#        hardcoded connection strings and no baked-in dev JWT secrets any more.
+#     2. mongo + redis live behind the OPT-IN `local-db` profile, so a bare
+#        `up` in production cannot start (or reconnect to) a local database.
+#     3. local mongo/redis publish to 127.0.0.1 ONLY — never a public interface.
+# ---------------------------------------------------------------------------
 
 services:
-  mongo:
-    image: mongo:7
-    container_name: codeapt-mongo
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:7-alpine
-    container_name: codeapt-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+  # ==== App services — started by a bare `docker compose up -d` ====
 
   api:
-    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     container_name: codeapt-api
     restart: unless-stopped
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    # No depends_on for mongo/redis: in production those are MANAGED (external,
+    # via .env), and the local containers are opt-in behind the `local-db`
+    # profile — a depends_on would break a bare `up` (dependency not enabled)
+    # and is unnecessary (mongoose/ioredis retry the connection on boot).
     environment:
       NODE_ENV: production
       PORT: "4000"
-      MONGODB_URI: mongodb://mongo:27017/codeapt
-      REDIS_URL: redis://redis:6379
-      CORS_ORIGIN: http://localhost:5173
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-only-access-secret-change-me-32chars}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-only-refresh-secret-change-me-32char}
+      # REQUIRED from .env — no hardcoded fallback (see the incident note above).
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env (the managed database — NOT a local container)}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN in .env (the real web origin, e.g. https://app.example.com)}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
     ports:
       - "4000:4000"
 
   worker:
-    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
     container_name: codeapt-worker
     restart: unless-stopped
-    depends_on:
-      mongo:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     environment:
       NODE_ENV: production
-      MONGODB_URI: mongodb://mongo:27017/codeapt
-      REDIS_URL: redis://redis:6379
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env (the managed database — NOT a local container)}
+      REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
       WORKER_CONCURRENCY: "5"
-      # Public Piston by default; point at a self-hosted instance to avoid rate limits.
-      PISTON_URL: ${PISTON_URL:-https://emkc.org/api/v2/piston}
+      # Self-hosted Piston on the compose network (service `piston`, below). A
+      # self-hosted instance serves its API at /api/v2 (the ".../piston" segment
+      # is public-emkc routing only). Override via .env to point elsewhere.
+      PISTON_URL: ${PISTON_URL:-http://piston:2000/api/v2}
       PISTON_TIMEOUT_MS: "15000"
       # Speech transcription (Communication A/B) — the self-hosted ASR container.
       ASR_URL: ${ASR_URL:-http://asr:2600}
@@ -99,7 +95,6 @@ services:
   #   8 vCPU: asr 3.0, worker 2.0, api 1.5, mongo 1.0, redis 0.5 (+ Piston if co-located)
   # ASR_THREADS in the image bounds the model's own thread pool as a second lever.
   asr:
-    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/asr/Dockerfile
@@ -113,8 +108,32 @@ services:
     ports:
       - "2600:2600"
 
+  # Self-hosted Piston (code execution). The worker reaches it as `piston:2000`
+  # over the compose network (the service name IS the network alias), so
+  # PISTON_URL=http://piston:2000/api/v2 keeps resolving.
+  #
+  # CRITICAL — THE RUNTIMES LIVE IN AN EXTERNAL VOLUME. `piston-data` holds the
+  # INSTALLED language runtimes (Python/Java/C++/JS) under /piston/packages. It
+  # is declared `external` (below) with the EXACT existing name so compose
+  # REATTACHES it and never creates a fresh, empty one — recreating it empty
+  # would break code execution for every student until the runtimes were
+  # reinstalled. No host port is published on purpose: Piston executes arbitrary
+  # code and must not be reachable from the public internet — only from the
+  # worker on the internal network.
+  #
+  # CONFIRM BEFORE `up`: the image tag + privileged flag here must match the
+  # running container. Inspect it first (see the runbook) and reconcile this
+  # service if it differs; the volume reattaches regardless, but the container
+  # is recreated if its config changed.
+  piston:
+    image: ghcr.io/engineer-man/piston
+    container_name: codeapt-piston
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - piston-data:/piston/packages
+
   web:
-    profiles: ["full"]
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -125,6 +144,48 @@ services:
     ports:
       - "8080:80"
 
+  # ==== Data stores — OPT-IN via `--profile local-db` (local dev only) ====
+  # Not started by a bare `up`, so production cannot accidentally run an empty
+  # local database. Published to 127.0.0.1 ONLY (never a public interface).
+
+  mongo:
+    profiles: ["local-db"]
+    image: mongo:7
+    container_name: codeapt-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    profiles: ["local-db"]
+    image: redis:7-alpine
+    container_name: codeapt-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   mongo-data:
   redis-data:
+  # The installed-runtimes volume for Piston. EXTERNAL with its exact existing
+  # name so compose reattaches the runtimes rather than creating an empty one.
+  # If you ever start fresh, create it explicitly:
+  #   docker volume create modern-codeapt_piston-data
+  # then install runtimes via the Piston package API.
+  piston-data:
+    external: true
+    name: modern-codeapt_piston-data

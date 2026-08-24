@@ -26,7 +26,7 @@ queue for fast post-deploy responses.
 ├── packages/
 │   └── shared/       Shared TS types, enums, constants, scoring
 │                     weights, queue config, and zod validators
-├── docker-compose.yml   MongoDB + Redis (+ optional app services)
+├── docker-compose.yml   App services (default) + opt-in `local-db` Mongo/Redis
 ├── tsconfig.base.json   Strict TS config extended by every package
 ├── eslint.config.mjs    Single shared flat ESLint config
 └── .env.example         Full environment inventory
@@ -51,8 +51,8 @@ The API, worker, and web all import shared contracts from `@codeapt/shared`
 # 1. Install all workspace dependencies
 pnpm install
 
-# 2. Start MongoDB + Redis
-docker compose up -d
+# 2. Start local MongoDB + Redis (opt-in `local-db` profile, bound to 127.0.0.1)
+docker compose --profile local-db up -d mongo redis
 
 # 3. Create local env files (dev-ready defaults included)
 cp apps/api/.env.example    apps/api/.env
@@ -72,12 +72,22 @@ Then:
 > The web dev server proxies `/api/*` to the API, so the SPA calls the API
 > same-origin (no CORS friction in dev).
 
-### Everything in containers (optional)
+### Everything in containers (optional, local)
 
 ```bash
-docker compose --profile full up --build
+# app services + the local data stores, all in containers
+docker compose --profile local-db up -d --build
 # web → http://localhost:8080 , api → http://localhost:4000
 ```
+
+> **Production is different — and deliberately so.** A bare `docker compose up -d`
+> starts **only the app services** (api, worker, asr, web, piston); it does **not**
+> start a database. In production, `MONGODB_URI` and `REDIS_URL` in `.env` point at
+> the **managed** Mongo + Redis, and the `local-db` profile is left off so the box
+> never runs — or reconnects to — a throwaway local database. Those connection
+> strings, `CORS_ORIGIN`, and the JWT secrets are **required**: a missing value
+> fails the `up` loudly rather than silently falling back to a wrong default. See
+> the header of `docker-compose.yml` for the incident this prevents.
 
 ---
 
