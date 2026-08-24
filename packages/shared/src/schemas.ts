@@ -6352,6 +6352,17 @@ export const startSpeakingResponseSchema = speakingCurrentResponseSchema.extend(
 });
 export type StartSpeakingResponse = z.infer<typeof startSpeakingResponseSchema>;
 
+/** The student's CURRENT in-progress attempt on a given assessment, or null when
+ *  they have none live (Step 25 C5). READ-ONLY: lets a deep link resume an
+ *  existing attempt instead of starting a second one; it never creates an
+ *  attempt or touches the cap. `attempt` is the same shape `start` returns. */
+export const speakingCurrentAttemptResponseSchema = z.object({
+  attempt: startSpeakingResponseSchema.nullable(),
+});
+export type SpeakingCurrentAttemptResponse = z.infer<
+  typeof speakingCurrentAttemptResponseSchema
+>;
+
 export const submitSpeakingItemRequestSchema = z.object({
   /** Cloudinary URL of the recorded audio (spoken items; only the URL reaches
    *  the API). Absent for dictation and for a silent/skipped item. */

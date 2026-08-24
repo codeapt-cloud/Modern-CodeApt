@@ -225,6 +225,7 @@ import {
   type SpeakingPlayListResponse,
   type StartSpeakingResponse,
   type SpeakingCurrentResponse,
+  type SpeakingCurrentAttemptResponse,
   type SubmitSpeakingItemResponse,
   type SpeakingAttemptResult,
   type SpeakingAttemptAdminList,
@@ -3713,6 +3714,17 @@ export const api = {
     ): Promise<StartSpeakingResponse> => {
       const { data } = await http.post<StartSpeakingResponse>(
         `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/attempts`,
+      );
+      return data;
+    },
+    /** C5: the student's current in-progress attempt on this assessment (or
+     *  null), so a deep link can RESUME instead of starting a second attempt. */
+    currentAttempt: async (
+      slug: string,
+      assessmentId: string,
+    ): Promise<SpeakingCurrentAttemptResponse> => {
+      const { data } = await http.get<SpeakingCurrentAttemptResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/attempt`,
       );
       return data;
     },

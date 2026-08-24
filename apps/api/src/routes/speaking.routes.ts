@@ -19,6 +19,7 @@ import {
   listSpeakingAttemptsController,
   setCollegeSpeakingPublishController,
   speakingCurrentController,
+  speakingInProgressAttemptController,
   speakingResultController,
   speakingTtsController,
   startSpeakingController,
@@ -89,6 +90,14 @@ collegeSpeakingRouter.get(
   "/c/:collegeSlug/speaking/attempts/:attemptId/result",
   ...member,
   speakingResultController,
+);
+// C5: the student's current in-progress attempt on an assessment (or null), for
+// the composite deep link to RESUME. Member-gated; deeper than "/:assessmentId"
+// (the author GET) so never captured as an id, and distinct from "/attempts".
+collegeSpeakingRouter.get(
+  "/c/:collegeSlug/speaking/:assessmentId/attempt",
+  ...member,
+  speakingInProgressAttemptController,
 );
 
 // --- Authoring (author) — literal + list before "/:assessmentId" ---

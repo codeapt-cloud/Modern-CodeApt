@@ -19,6 +19,7 @@ import { Spinner } from "../../components/ui/spinner.js";
 import { api } from "../../lib/api-client.js";
 import { essayAttemptStatus } from "../../lib/essay-compose.js";
 import { collegeEssayWriterApi } from "../../lib/essay-writer-api.js";
+import { safeReturnPath } from "../../lib/return-to.js";
 import { useEssayGrading } from "../../lib/use-essay-grading.js";
 import { useQuery } from "../../lib/use-query.js";
 
@@ -53,6 +54,11 @@ export function EssayWriterPage() {
   const essaysHome = collegeSlug
     ? `/c/${encodeURIComponent(collegeSlug)}/essays`
     : "/essays";
+  // A composite launch passes a validated in-app `?from=` return target (C3);
+  // absent/invalid → the normal essays home, so a direct visit is unchanged.
+  const returnTo = safeReturnPath(searchParams.get("from")) ?? essaysHome;
+  const fromComposite = returnTo !== essaysHome;
+  const backLabel = fromComposite ? "Back to your assessment" : "All essays";
   const writerApi = useMemo(
     () => (collegeSlug ? collegeEssayWriterApi(collegeSlug) : api.essays),
     [collegeSlug],
@@ -102,13 +108,13 @@ export function EssayWriterPage() {
       <PageHeader
         title="Write essay"
         breadcrumbs={[
-          { label: "Essays", href: essaysHome },
+          { label: fromComposite ? "Assessment" : "Essays", href: returnTo },
           { label: prompt.data?.title ?? "Prompt" },
         ]}
         actions={
           <Button asChild variant="ghost" size="sm">
-            <Link to={essaysHome}>
-              <ArrowLeft className="h-4 w-4" /> All essays
+            <Link to={returnTo}>
+              <ArrowLeft className="h-4 w-4" /> {backLabel}
             </Link>
           </Button>
         }

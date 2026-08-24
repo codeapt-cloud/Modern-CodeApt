@@ -16,6 +16,7 @@ import { Input } from "../../components/ui/input.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { api, parseApiError } from "../../lib/api-client.js";
 import { rateLimitRetrySeconds } from "../../lib/rate-limit.js";
+import { safeReturnPath } from "../../lib/return-to.js";
 import { useQuery } from "../../lib/use-query.js";
 
 export function ExamRunnerPage() {
@@ -31,6 +32,11 @@ export function ExamRunnerPage() {
   const examsHome = collegeSlug
     ? `/c/${encodeURIComponent(collegeSlug)}/exams`
     : "/exams";
+  // A composite launch passes a validated in-app `?from=` return target (C3).
+  // Absent/invalid → the normal exams home, so a direct run is unchanged.
+  const returnTo = safeReturnPath(searchParams.get("from")) ?? examsHome;
+  const fromComposite = returnTo !== examsHome;
+  const exitLabel = fromComposite ? "Back to your assessment" : undefined;
 
   const { data, loading } = useQuery(
     () =>
@@ -89,7 +95,8 @@ export function ExamRunnerPage() {
         attemptId={started.attemptId}
         token={null}
         initial={started}
-        onExit={() => navigate(examsHome)}
+        onExit={() => navigate(returnTo)}
+        exitLabel={exitLabel}
       />
     );
   }
@@ -107,7 +114,9 @@ export function ExamRunnerPage() {
       <div className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center gap-4 px-4 text-center">
         <p className="font-mono text-2xl text-primary">{"{ }"}</p>
         <p className="text-ink">This exam isn’t available to you.</p>
-        <Button onClick={() => navigate(examsHome)}>Back to exams</Button>
+        <Button onClick={() => navigate(returnTo)}>
+          {exitLabel ?? "Back to exams"}
+        </Button>
       </div>
     );
   }

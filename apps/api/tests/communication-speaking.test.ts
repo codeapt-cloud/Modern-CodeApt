@@ -325,6 +325,40 @@ describe("access matrix", () => {
     expect(second.status).toBe(409);
     expect(second.body.error.code).toBe("ATTEMPT_LIMIT_REACHED");
   });
+
+  it("C5: the deep-link lookup resumes an in-progress attempt instead of starting a second one", async () => {
+    const { collegeId, adminToken } = await setupCollege("sp-resume", {
+      speaking: true,
+    });
+    const student = await addStudent("sp-resume", adminToken, "spr@x.com");
+    const assessmentId = await makeAssessment(collegeId, { maxAttempts: 2 });
+
+    // No attempt yet → null (the deep link would then start a fresh one).
+    const none = await request(app)
+      .get(`/api/c/sp-resume/speaking/${assessmentId}/attempt`)
+      .set(auth(student.token));
+    expect(none.status).toBe(200);
+    expect(none.body.attempt).toBeNull();
+
+    const start = await request(app)
+      .post(`/api/c/sp-resume/speaking/${assessmentId}/attempts`)
+      .set(auth(student.token));
+    expect(start.status).toBe(201);
+    const attemptId = start.body.attemptId as string;
+
+    // The lookup RESUMES the same attempt — same id, and it never creates one.
+    const cur = await request(app)
+      .get(`/api/c/sp-resume/speaking/${assessmentId}/attempt`)
+      .set(auth(student.token));
+    expect(cur.status).toBe(200);
+    expect(cur.body.attempt).not.toBeNull();
+    expect(cur.body.attempt.attemptId).toBe(attemptId);
+    const count = await SpeakingAttemptModel.countDocuments({
+      user: new Types.ObjectId(student.id),
+      assessment: new Types.ObjectId(assessmentId),
+    });
+    expect(count).toBe(1);
+  });
 });
 
 describe("authoring — gated on the speaking sub-capability", () => {

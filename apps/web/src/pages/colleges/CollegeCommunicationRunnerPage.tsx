@@ -9,7 +9,6 @@
 import {
   CollegeFeature,
   checkEntitlement,
-  type CommunicationPartType,
   type CommunicationStudentPart,
 } from "@codeapt/shared";
 import { ArrowRight, Lock, CircleAlert, CheckCircle2 } from "lucide-react";
@@ -22,21 +21,10 @@ import { Button } from "../../components/ui/button.js";
 import { Card, CardContent } from "../../components/ui/card.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
 import { api, parseApiError } from "../../lib/api-client.js";
+import { communicationRunnerPath } from "../../lib/communication-launch.js";
 import { useQuery } from "../../lib/use-query.js";
 import { useCollege } from "./college-context.js";
 
-/** Where each part type's EXISTING runner lives (composite never re-implements). */
-function runnerPath(
-  slug: string,
-  partType: CommunicationPartType,
-  ref: string,
-): string {
-  if (partType === "exam") return `/exam/${ref}`;
-  if (partType === "essay") return `/essays/${ref}`;
-  // Speaking is a list-and-pick page (no per-id route) — land there; the student
-  // opens the matching paper. (The one entry-point asymmetry across engines.)
-  return `/c/${slug}/speaking`;
-}
 
 const STATUS: Record<
   CommunicationStudentPart["status"],
@@ -83,7 +71,9 @@ export function CollegeCommunicationRunnerPage() {
         assessmentId,
         part.order,
       );
-      navigate(runnerPath(slug, res.partType, res.ref));
+      // Return the student to THIS composite view on completion.
+      const from = `/c/${slug}/communication/assessments/${assessmentId}`;
+      navigate(communicationRunnerPath(slug, res.partType, res.ref, from));
     } catch (err) {
       setLaunchError(parseApiError(err).message);
       // Re-derive the parts so the stale card corrects itself immediately.

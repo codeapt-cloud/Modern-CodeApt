@@ -59,11 +59,15 @@ export function ExamRunner({
   token,
   initial,
   onExit,
+  exitLabel,
 }: {
   attemptId: string;
   token: string | null;
   initial: AttemptSectionView;
   onExit: () => void;
+  /** Label for the exit affordance — defaults preserve the standalone wording;
+   *  a composite passes "Back to your assessment" (Step 25 C3). */
+  exitLabel?: string;
 }) {
   const runner = useExamRunner({ attemptId, token, initial });
   const {
@@ -116,14 +120,14 @@ export function ExamRunner({
   }, [done, phase]);
 
   if (done && result) {
-    return <ResultsReview result={result} onExit={onExit} />;
+    return <ResultsReview result={result} onExit={onExit} exitLabel={exitLabel} />;
   }
   if (phase === "error") {
     return (
       <div className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center gap-4 px-4 text-center">
         <ShieldAlert className="h-10 w-10 text-error-fg" />
         <p className="text-ink">{error ?? "Something went wrong."}</p>
-        <Button onClick={onExit}>Back to exams</Button>
+        <Button onClick={onExit}>{exitLabel ?? "Back to exams"}</Button>
       </div>
     );
   }
@@ -447,9 +451,11 @@ const fmtOpts = (idx: number[] | null): string =>
 function ResultsReview({
   result,
   onExit,
+  exitLabel,
 }: {
   result: ExamResult;
   onExit: () => void;
+  exitLabel?: string;
 }) {
   // Organiser has turned result display off — acknowledge the submission and
   // show "coming soon" instead of a score/breakdown.
@@ -466,7 +472,7 @@ function ResultsReview({
           Results coming soon
         </p>
         <div className="mt-8">
-          <Button onClick={onExit}>Done</Button>
+          <Button onClick={onExit}>{exitLabel ?? "Done"}</Button>
         </div>
       </div>
     );
@@ -577,7 +583,7 @@ function ResultsReview({
       ) : null}
 
       <div className="mt-8 flex justify-center">
-        <Button onClick={onExit}>Back to exams</Button>
+        <Button onClick={onExit}>{exitLabel ?? "Back to exams"}</Button>
       </div>
     </div>
   );

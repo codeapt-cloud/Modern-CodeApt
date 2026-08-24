@@ -90,6 +90,21 @@ export const speakingCurrentController = asyncHandler(
   },
 );
 
+/** C5: the student's current in-progress attempt on an assessment (or null), so
+ *  a deep link can RESUME rather than start a second one. Read-only. */
+export const speakingInProgressAttemptController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await speaking.getInProgressSpeakingAttempt(
+          userId(req),
+          req.params.assessmentId ?? "",
+        ),
+      );
+  },
+);
+
 export const speakingResultController = asyncHandler(
   async (req: Request, res: Response) => {
     res

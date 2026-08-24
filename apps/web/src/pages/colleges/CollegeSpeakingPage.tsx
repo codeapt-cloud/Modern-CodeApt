@@ -15,9 +15,9 @@ import {
   checkEntitlement,
   type StartSpeakingResponse,
 } from "@codeapt/shared";
-import { Mic, Settings2, Square } from "lucide-react";
+import { ArrowLeft, Mic, Settings2, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { SpeakingResults } from "../../components/speaking/SpeakingResults.js";
 import { SpeakingRunner } from "../../components/speaking/SpeakingRunner.js";
@@ -26,7 +26,8 @@ import { Button } from "../../components/ui/button.js";
 import { Card, CardContent } from "../../components/ui/card.js";
 import { EmptyState } from "../../components/ui/empty-state.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
-import { api } from "../../lib/api-client.js";
+import { api, parseApiError } from "../../lib/api-client.js";
+import { safeReturnPath } from "../../lib/return-to.js";
 import {
   PREFLIGHT_MESSAGE,
   preflightChecklist,
@@ -56,6 +57,15 @@ export function CollegeSpeakingPage() {
   );
   const [phase, setPhase] = useState<Phase>("list");
   const [attempt, setAttempt] = useState<StartSpeakingResponse | null>(null);
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Composite deep link (C5): `?assessment=<id>` auto-selects the paper, and a
+  // validated `?from=` returns the student to the composite (C3). Absent → the
+  // page behaves exactly as before (list-and-pick, no back-link).
+  const deepLinkId = searchParams.get("assessment");
+  const returnTo = safeReturnPath(searchParams.get("from"));
+  const [autoError, setAutoError] = useState<string | null>(null);
+  const autoStarted = useRef(false);
 
   const list = useQuery(
     () =>
@@ -70,6 +80,39 @@ export function CollegeSpeakingPage() {
     setAttempt(res);
     setPhase("preflight");
   };
+
+  // Deep-link auto-select: RESUME an in-progress attempt if one exists (Step 22
+  // resume, via the read-only currentAttempt lookup — no second attempt), else
+  // start a fresh one; either way land on the mic pre-flight. Runs once.
+  useEffect(() => {
+    if (!entitled || !deepLinkId || autoStarted.current) return;
+    autoStarted.current = true;
+    void (async () => {
+      try {
+        const existing = await api.collegeSpeaking.currentAttempt(
+          slug,
+          deepLinkId,
+        );
+        const res =
+          existing.attempt ??
+          (await api.collegeSpeaking.start(slug, deepLinkId));
+        setAttempt(res);
+        setPhase("preflight");
+      } catch (err) {
+        // e.g. cap reached with no resumable attempt — show it on the list.
+        setAutoError(parseApiError(err).message);
+      }
+    })();
+  }, [entitled, deepLinkId, slug]);
+
+  const BackToAssessment = (): JSX.Element | null =>
+    returnTo ? (
+      <Button asChild variant="ghost" size="sm">
+        <Link to={returnTo}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> Back to your assessment
+        </Link>
+      </Button>
+    ) : null;
 
   if (!entitled) {
     return (
@@ -88,15 +131,20 @@ export function CollegeSpeakingPage() {
             clarity are not scored.
           </p>
         </div>
-        {canAuthor && phase === "list" ? (
-          <Button asChild variant="secondary" size="sm">
-            <Link to={`/c/${slug}/speaking/manage`}>
-              <Settings2 className="mr-2 h-4 w-4" />
-              Manage
-            </Link>
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          <BackToAssessment />
+          {canAuthor && phase === "list" ? (
+            <Button asChild variant="secondary" size="sm">
+              <Link to={`/c/${slug}/speaking/manage`}>
+                <Settings2 className="mr-2 h-4 w-4" />
+                Manage
+              </Link>
+            </Button>
+          ) : null}
+        </div>
       </div>
+
+      {autoError ? <Alert variant="error">{autoError}</Alert> : null}
 
       {phase === "list" && (
         <>
@@ -145,7 +193,16 @@ export function CollegeSpeakingPage() {
       )}
 
       {phase === "done" && attempt && (
-        <SpeakingResults slug={slug} attemptId={attempt.attemptId} />
+        <>
+          <SpeakingResults slug={slug} attemptId={attempt.attemptId} />
+          {returnTo ? (
+            <div className="flex justify-center">
+              <Button onClick={() => navigate(returnTo)}>
+                Back to your assessment
+              </Button>
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );

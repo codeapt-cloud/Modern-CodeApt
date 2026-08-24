@@ -36,6 +36,7 @@ import {
   type SpeakingAssessmentUpsert,
   type SpeakingAttemptAdminList,
   type SpeakingAttemptResult,
+  type SpeakingCurrentAttemptResponse,
   type SpeakingCurrentResponse,
   type SpeakingItemResult,
   type SpeakingItemScoreDto,
@@ -322,6 +323,38 @@ async function finalizeIfExpired(attempt: AttemptDoc, now: Date): Promise<void> 
     );
     attempt.status = SpeakingAttemptStatus.EXPIRED;
   }
+}
+
+/**
+ * Step 25 C5 — the student's CURRENT in-progress attempt on ONE assessment, or
+ * null. READ-ONLY: it lets the composite's speaking deep link RESUME an existing
+ * attempt (found by (user, assessment) after a refresh, when the client has no
+ * attemptId) instead of starting a second one. It never creates an attempt and
+ * never touches the cap, so `start` and its cap behaviour are unchanged. Same
+ * access gate as `start`; an expired-but-not-yet-reaped attempt is finalized and
+ * reported as none (a dead attempt must not be resumed).
+ */
+export async function getInProgressSpeakingAttempt(
+  userId: string,
+  assessmentId: string,
+): Promise<SpeakingCurrentAttemptResponse> {
+  const assessment = await loadAssessmentOr404(assessmentId);
+  await assertCanTakeSpeakingAssessment(userId, assessment);
+  const now = new Date();
+  const attempt = await SpeakingAttemptModel.findOne({
+    user: new Types.ObjectId(userId),
+    assessment: assessment._id,
+    status: SpeakingAttemptStatus.IN_PROGRESS,
+  }).sort({ createdAt: -1 });
+  if (!attempt) return { attempt: null };
+  await finalizeIfExpired(attempt, now);
+  if (attempt.status !== SpeakingAttemptStatus.IN_PROGRESS) return { attempt: null };
+  return {
+    attempt: {
+      ...buildCurrent(attempt, assessment, now),
+      assessmentTitle: assessment.title,
+    },
+  };
 }
 
 /** READ the attempt's current item — progressive disclosure + resume. Enforces

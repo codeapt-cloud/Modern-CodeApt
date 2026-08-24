@@ -5,8 +5,8 @@
  * introduce a new resource; it orients the user and links into those surfaces
  * (which carry their own tenant/course access + authoring). Role-aware: an
  * operator sees "author"; a student sees "your assigned" copy. The speech half
- * (read-aloud / listen-and-repeat / spoken topics — Sections A & B) is a later
- * phase and is shown here as coming soon.
+ * (Sections A & B) is LIVE — all eleven speaking item types ship — and links
+ * into the Speaking page.
  */
 import { CollegeFeature, Role, checkEntitlement } from "@codeapt/shared";
 import { FileText, Headphones, Layers, Mail, Mic } from "lucide-react";
@@ -36,15 +36,17 @@ export function CollegeCommunicationPage() {
     {
       icon: FileText,
       title: "Grammar (Section C)",
-      operator: "Author a 34-question grammar paper across the five categories.",
-      student: "Take the grammar paper assigned to your cohort.",
+      operator:
+        "Author a 34-question grammar paper across the five categories — it's a standard exam, so it lives in your exam list.",
+      student: "Open your exam list to take the assigned grammar paper.",
       to: "../exams",
     },
     {
       icon: Headphones,
       title: "Comprehension (Section D)",
-      operator: "Build a paper with an audio passage, then MCQs about it.",
-      student: "Listen to the passage, then answer the questions.",
+      operator:
+        "Build a paper with an audio passage, then MCQs about it — also a standard exam in your exam list.",
+      student: "Open your exam list to take the assigned comprehension paper.",
       to: "../exams",
     },
     {
@@ -58,8 +60,9 @@ export function CollegeCommunicationPage() {
       icon: Mic,
       title: "Speaking (Sections A & B)",
       operator:
-        "Read-aloud is live (record → transcribe → score); more item types soon.",
-      student: "Read aloud and get word-accuracy + fluency feedback.",
+        "Author speaking assessments across all eleven item types: read-aloud, repeat, short answer, sentence build, conversation, passage question, fill-missing-word, error-correct, dictation, story retell, and open topic (incl. role-play). Scored on word accuracy, listening & fluency, with grammar & relevance approximate; accent and clarity are not scored.",
+      student:
+        "Listening & speaking practice across eleven item types. You get word-accuracy, listening and fluency feedback — grammar and relevance are approximate, and accent and clarity are not scored.",
       to: "../speaking",
     },
   ];
@@ -133,6 +136,16 @@ export function CollegeCommunicationPage() {
             );
           })}
         </div>
+
+        {/* C7 honesty: grammar & comprehension are ordinary Exams with no
+            "communication section" marker, so these cards open the FULL exam
+            list, not a specific paper. The composite above is the targeted,
+            ordered path. */}
+        <p className="text-xs text-ink-muted">
+          Grammar and comprehension are standard exams and aren’t tagged as a
+          distinct type, so those links open your full exam list. For the exact
+          papers in the right order, use the Full Communication Assessment above.
+        </p>
         </>
       )}
     </div>
