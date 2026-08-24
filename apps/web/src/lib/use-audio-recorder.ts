@@ -24,6 +24,12 @@ export interface UseAudioRecorder {
   state: RecorderState;
   /** 0..1 live input level (drives the meter). */
   level: number;
+  /** 0..1 PEAK level over the current/just-finished take. Unlike `level` (the
+   *  instantaneous frame, which falls back to ~0 once recording stops), this
+   *  holds the loudest moment of the whole take — so a pre-flight "sound
+   *  detected" check reads it AFTER the take, not the dead live meter. Reset to
+   *  0 at the start of each take. */
+  peakLevel: number;
   /** Seconds left in the fixed window while recording. */
   remainingSeconds: number;
   requestMic: () => Promise<void>;
@@ -42,6 +48,7 @@ export function useAudioRecorder(opts: {
 }): UseAudioRecorder {
   const [state, dispatch] = useReducer(recorderReducer, "idle");
   const [level, setLevel] = useState(0);
+  const [peakLevel, setPeakLevel] = useState(0);
   const [remainingSeconds, setRemaining] = useState(opts.windowSeconds);
   const [blob, setBlob] = useState<Blob | null>(null);
 
@@ -92,6 +99,7 @@ export function useAudioRecorder(opts: {
     if (!stream) return;
     chunksRef.current = [];
     peakRef.current = 0;
+    setPeakLevel(0);
     setBlob(null);
     setRemaining(opts.windowSeconds);
     const rec = new MediaRecorder(stream, { mimeType: MIME });
@@ -127,6 +135,7 @@ export function useAudioRecorder(opts: {
         for (const v of buf) peak = Math.max(peak, Math.abs(v - 128) / 128);
         peakRef.current = Math.max(peakRef.current, peak);
         setLevel(peak);
+        setPeakLevel(peakRef.current);
       }
       const left = deadlineRef.current
         ? Math.max(0, (deadlineRef.current - performance.now()) / 1000)
@@ -161,6 +170,7 @@ export function useAudioRecorder(opts: {
   return {
     state,
     level,
+    peakLevel,
     remainingSeconds,
     requestMic,
     start,

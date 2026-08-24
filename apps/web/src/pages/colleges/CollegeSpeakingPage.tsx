@@ -36,7 +36,6 @@ import {
 import {
   RECORDER_MESSAGE,
   isBlocked,
-  isSilentTake,
 } from "../../lib/audio-recorder-machine.js";
 import { useAudioRecorder } from "../../lib/use-audio-recorder.js";
 import { useQuery } from "../../lib/use-query.js";
@@ -174,7 +173,10 @@ function MicPreflight({
     micGranted: rec.state !== "idle" && rec.state !== "requesting" && !isBlocked(rec.state),
     hasDevice: rec.state !== "no_device",
     testRecorded: rec.blob !== null,
-    testPeakLevel: rec.blob && !isSilentTake(rec.level) ? 1 : rec.state === "silent" ? 0 : rec.level,
+    // The PEAK over the whole take (held after recording stops) — NOT the live
+    // `level`, which falls to ~0 once the meter stops, making "sound detected"
+    // impossible to satisfy after the clip finished.
+    testPeakLevel: rec.peakLevel,
     testPlayedBack: playedBack,
   };
   const gate = preflightReady(checks);
