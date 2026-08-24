@@ -209,6 +209,54 @@ describe("POST submit-mcq", () => {
     expect(res.body.streak.attemptedToday).toBe(true);
     expect(res.body.streak.solvedToday).toBe(false);
   });
+
+  // Step 16 (integrity): the once-per-day gate must neither lock out a legitimate
+  // student on a failed/rejected request, nor be farmable by resubmitting. These
+  // lock both directions.
+  it("[step 16] a submit rejected BEFORE the write consumes no daily attempt", async () => {
+    // Today is a CODE challenge, so an MCQ submit is rejected (WRONG_QUESTION_TYPE)
+    // before any DailySubmission is written — nothing is consumed and the student
+    // still has today's real attempt open. This is the "a failed request must not
+    // lock me out" property: the write that consumes the attempt is the LAST step
+    // and carries the graded result atomically (mirrors exam startAttempt, which
+    // rejects before the attempt counter is touched).
+    await makeCodeToday();
+    const { token } = await registerAndLogin();
+    const rejected = await request(app)
+      .post("/api/challenges/today/submit-mcq")
+      .set(auth(token))
+      .send({ option: 0 });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.error.code).toBe("WRONG_QUESTION_TYPE");
+    const today = await request(app)
+      .get("/api/challenges/today")
+      .set(auth(token));
+    expect(today.body.streak.attemptedToday).toBe(false);
+  });
+
+  it("[step 16] a refused resubmit cannot farm score or streak", async () => {
+    await makeMcqToday();
+    const { token } = await registerAndLogin();
+    const first = await request(app)
+      .post("/api/challenges/today/submit-mcq")
+      .set(auth(token))
+      .send({ option: 2 });
+    expect(first.body.streak.totalScore).toBe(5);
+    expect(first.body.streak.currentStreak).toBe(1);
+    const again = await request(app)
+      .post("/api/challenges/today/submit-mcq")
+      .set(auth(token))
+      .send({ option: 2 });
+    expect(again.status).toBe(409);
+    // The unique (user, question) index means the refused second attempt awards
+    // nothing: the leaderboard total and streak are unchanged — resubmitting
+    // cannot farm points or streak.
+    const today = await request(app)
+      .get("/api/challenges/today")
+      .set(auth(token));
+    expect(today.body.streak.totalScore).toBe(5);
+    expect(today.body.streak.currentStreak).toBe(1);
+  });
 });
 
 describe("CODE submit + finalize", () => {
