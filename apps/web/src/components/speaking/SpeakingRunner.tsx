@@ -90,6 +90,13 @@ export function SpeakingRunner({
   const { Renderer, capture } = def;
   const promptAudio = item.stimulusAudioUrl || item.promptAudioUrl;
   const locked = r.phase === "submitted" || r.recorder.state === "uploading";
+  // A listen-based item with NO audio is unanswerable — its reference is
+  // withheld, so there is nothing to respond to. Never present it as recordable
+  // (Step 27); block + explain instead. `requiresAudio` is computed per-item on
+  // the server (correct for sentence_build with vs without chunks). The publish
+  // guard makes this unreachable in a published assessment, so it only guards a
+  // draft / mid-flight deletion.
+  const audioMissing = item.requiresAudio && !promptAudio;
 
   return (
     <Card>
@@ -125,6 +132,19 @@ export function SpeakingRunner({
           </div>
         ) : null}
 
+        {audioMissing ? (
+          <Alert variant="error">
+            This item needs an audio prompt to answer, but none is available — so
+            there’s nothing to play. Please tell your faculty. You won’t be
+            marked down for skipping it.
+            <div className="mt-2">
+              <Button size="sm" onClick={() => void r.skipItem()} disabled={locked}>
+                Skip this item
+              </Button>
+            </div>
+          </Alert>
+        ) : (
+          <>
         {/* The per-type stimulus presentation. */}
         <Renderer
           view={item}
@@ -208,6 +228,8 @@ export function SpeakingRunner({
             ) : null}
           </div>
         ) : null}
+          </>
+        )}
 
         {r.error ? <Alert variant="warning">{r.error}</Alert> : null}
 

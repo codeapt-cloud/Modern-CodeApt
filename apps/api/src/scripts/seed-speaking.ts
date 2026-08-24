@@ -17,7 +17,14 @@
  *      its reference; dictation is typed (scored inline); story_retell/open_topic
  *      score on the deterministic floor unless the LLM gateway is configured.
  */
-import { buildItemsFromPreset, Role, SPEAKING_PRESETS, UserType } from "@codeapt/shared";
+import {
+  buildItemsFromPreset,
+  Role,
+  SPEAKING_PRESETS,
+  speakingItemNeedsAudio,
+  SpeakingItemType,
+  UserType,
+} from "@codeapt/shared";
 import { Types } from "mongoose";
 
 import { connectDatabase, disconnectDatabase } from "../lib/db.js";
@@ -68,6 +75,7 @@ async function seedSpeaking(): Promise<void> {
       answerSet: spec.answerSet ? [...spec.answerSet] : [],
       missingWord: spec.missingWord ?? "",
       keyFacts: spec.keyFacts ? [...spec.keyFacts] : [],
+      chunks: spec.chunks ? [...spec.chunks] : [],
       section: spec.section,
       prepSeconds: spec.prepSeconds ?? 0,
       responseWindowSeconds: spec.responseWindowSeconds ?? 60,
@@ -80,7 +88,9 @@ async function seedSpeaking(): Promise<void> {
         $set: {
           topic: null,
           orgUnits: [],
-          isPublished: true,
+          // Publish is DECIDED below, after the audio pass — a listen item with
+          // no audio must not ship published (Step 27).
+          isPublished: false,
           description: preset.description,
           items,
           maxAttempts: 0, // unlimited for a demo
@@ -96,22 +106,28 @@ async function seedSpeaking(): Promise<void> {
     // (e.g. an offline content-only seed), each item logs a skip and keeps its
     // text — the paper is still fully seeded. read_aloud / open_topic show their
     // text on screen, so they need no spoken prompt.
-    const HEARD = new Set([
-      "repeat",
-      "dictation",
-      "sentence_build",
-      "error_correct",
-      "fill_missing_word",
-      "short_answer",
-      "conversation",
-      "passage_question",
-    ]);
+    // Which items NEED audio comes from the shared predicate (one source of
+    // truth with the runner + publish guard) — NOT a hand-kept list. This fixes
+    // two prior bugs: sentence_build was being synthesised (it would have played
+    // the ANSWER) and story_retell was being skipped (it needs the narration).
     let generated = 0;
     let skipped = 0;
     for (let i = 0; i < doc.items.length; i += 1) {
       const it = doc.items[i]!;
-      if (!HEARD.has(it.itemType) || it.promptAudioUrl) continue;
-      const text = (it.referenceText || it.promptText || "").trim();
+      if (
+        !speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks }) ||
+        it.promptAudioUrl
+      ) {
+        continue;
+      }
+      // The spoken stimulus per type: sentence_build speaks the SCRAMBLED CHUNKS
+      // (never the reference answer); everything else speaks its read-only
+      // reference (repeat/fill/error/story narration) or its question/turn
+      // (short_answer/conversation/passage).
+      const text =
+        it.itemType === SpeakingItemType.SENTENCE_BUILD
+          ? it.chunks.join(". ")
+          : (it.referenceText || it.promptText || "").trim();
       if (!text) continue;
       try {
         const tts = await generateSpeakingPromptAudio(collegeId, text);
@@ -127,14 +143,39 @@ async function seedSpeaking(): Promise<void> {
         );
       }
     }
-    if (generated > 0) {
-      doc.markModified("items");
-      await doc.save();
+
+    // Decide publish HONESTLY: a listen item still missing audio makes the paper
+    // unplayable, so it stays DRAFT with a loud, actionable message — never a
+    // published-but-broken paper (Step 27 / matches the new publish guard).
+    const missing = doc.items
+      .map((it, idx) => ({ it, idx }))
+      .filter(
+        ({ it }) =>
+          speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks }) &&
+          !it.promptAudioUrl &&
+          !it.stimulusAudioUrl,
+      );
+    doc.isPublished = missing.length === 0;
+    doc.markModified("items");
+    await doc.save();
+
+    if (missing.length === 0) {
+      logger.info(
+        { generated, skipped },
+        "seed:speaking — all listen items have audio; assessment PUBLISHED and fully playable",
+      );
+    } else {
+      logger.warn(
+        {
+          missing: missing.map((m) => ({ index: m.idx + 1, itemType: m.it.itemType })),
+        },
+        "seed:speaking — LEFT DRAFT: some listen items have no audio, so the paper " +
+          "is not playable end to end. To fix: set CLOUDINARY_URL (or CLOUDINARY_* " +
+          "cloud/key/secret) AND rebuild the ASR image with Piper enabled, then re-run " +
+          "`pnpm --filter @codeapt/api seed:speaking`; or attach audio per item in the " +
+          "editor and publish. Until then the composite's speaking part stays unpublished.",
+      );
     }
-    logger.info(
-      { generated, skipped },
-      "seed:speaking — prompt audio generation pass complete",
-    );
 
     // 4. Upsert a demo STUDENT in the college so the paper is reachable.
     let student = await UserModel.findOne({ email: DEMO_STUDENT_EMAIL });
@@ -166,7 +207,8 @@ async function seedSpeaking(): Promise<void> {
 
     logger.info(
       `Speaking seeded: college "${SLUG}", assessment "${doc.title}" ` +
-        `(${items.length} items across ${new Set(items.map((i) => i.section)).size} sections), published. ` +
+        `(${items.length} items across ${new Set(items.map((i) => i.section)).size} sections), ` +
+        `${doc.isPublished ? "PUBLISHED" : "DRAFT (see the audio warning above)"}. ` +
         `Demo student ${DEMO_STUDENT_EMAIL} / ${DEMO_STUDENT_PASSWORD}.`,
     );
   } finally {

@@ -26,6 +26,8 @@ export interface PresetItemSpec {
   readonly answerSet?: readonly string[];
   readonly missingWord?: string;
   readonly keyFacts?: readonly string[];
+  /** Scrambled chunks the student HEARS for sentence_build (spoken in order). */
+  readonly chunks?: readonly string[];
   readonly prepSeconds?: number;
   readonly responseWindowSeconds?: number;
 }
@@ -90,7 +92,13 @@ const CTS: SpeakingPreset = {
     {
       itemType: SpeakingItemType.SENTENCE_BUILD,
       section: "Section A — Reading & Listening",
+      // The scoring answer — WITHHELD from the view; the student never sees it.
       referenceText: "My mother was reading her favorite magazine.",
+      // The three scrambled parts the student HEARS (canonical Versant example:
+      // heard "was reading / my mother / her favorite magazine" → spoken
+      // "My mother was reading her favorite magazine."). The seed synthesises
+      // THESE (in this order), never the reference answer.
+      chunks: ["was reading", "my mother", "her favorite magazine"],
       promptText:
         "You will hear three parts of a sentence. Say the whole sentence in the correct order.",
       responseWindowSeconds: 25,
@@ -136,6 +144,14 @@ const CTS: SpeakingPreset = {
       section: "Section A — Reading & Listening",
       promptText:
         "Listen to the story about the Norway road tunnel, then retell it in your own words (30 seconds).",
+      // The story NARRATION — the seed synthesises this to prompt audio; the
+      // student HEARS it and it is withheld from the on-screen view (only
+      // read_aloud shows its reference). keyFacts remain the scoring anchors.
+      referenceText:
+        "The Lærdal Tunnel in Norway is the longest road tunnel in the world, " +
+        "at twenty-four and a half kilometres. It took five years to build and " +
+        "has four large caves along the way where drivers can stop and rest. " +
+        "Driving all the way through takes about twenty minutes.",
       stimulusAudioUrl: "",
       keyFacts: [...NORWAY_TUNNEL_FACTS],
       responseWindowSeconds: 30,

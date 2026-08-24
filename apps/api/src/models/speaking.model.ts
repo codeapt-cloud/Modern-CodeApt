@@ -59,6 +59,10 @@ const speakingItemSchema = new Schema(
     missingWord: { type: String, default: "" },
     // Authored key facts a retell should cover (story_retell).
     keyFacts: { type: [String], default: [] },
+    // Scrambled sentence chunks the student HEARS for sentence_build (spoken in
+    // this order; the student says the correctly-ordered sentence). Separate from
+    // referenceText, which stays the scoring answer and is withheld from the view.
+    chunks: { type: [String], default: [] },
     // Preset-composition grouping label (e.g. "Section B").
     section: { type: String, default: "" },
     // Client-side prep countdown before recording (open_topic/role_play); 0 = none.

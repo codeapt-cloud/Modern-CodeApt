@@ -106,19 +106,30 @@ async function addStudent(
 const READ_REF = "the river winds slowly past the old stone bridge";
 const DICT_REF = "the invoice was paid on time";
 const RETELL_FACTS = ["5 years to build", "24.5 km long"];
+// Listen-based items carry a prompt audio URL so the assessment is publishable
+// under the Step-27 guard (the URL is play metadata only; scoring is unaffected).
+const HEARD_AUDIO = "https://res.cloudinary.test/demo/prompt.mp3";
 const ITEMS = [
   { itemType: "read_aloud", referenceText: READ_REF, section: "Section A", responseWindowSeconds: 30 },
   {
     itemType: "short_answer",
     promptText: "Would you get water from a bottle or a newspaper?",
     answerSet: ["a bottle", "bottle"],
+    promptAudioUrl: HEARD_AUDIO,
     section: "Section A",
   },
-  { itemType: "dictation", referenceText: DICT_REF, promptText: "Type what you hear.", section: "Section A" },
+  {
+    itemType: "dictation",
+    referenceText: DICT_REF,
+    promptText: "Type what you hear.",
+    promptAudioUrl: HEARD_AUDIO,
+    section: "Section A",
+  },
   {
     itemType: "story_retell",
     promptText: "Retell the story.",
     keyFacts: RETELL_FACTS,
+    promptAudioUrl: HEARD_AUDIO,
     section: "Section A",
   },
   { itemType: "open_topic", promptText: "Talk about healthy eating.", section: "Section B" },
@@ -284,5 +295,50 @@ describe("per-type authoring validation", () => {
       .send({ title: "ok", items: ITEMS });
     expect(res.status).toBe(201);
     expect(res.body.items).toHaveLength(5);
+  });
+
+  it("Step 27: refuses to publish a listen item with no audio; allows it once audio is attached", async () => {
+    const { adminToken } = await setupCollege("pp-audio");
+    const create = await request(app)
+      .post("/api/c/pp-audio/speaking")
+      .set(auth(adminToken))
+      .send({
+        title: "needs audio",
+        items: [
+          { itemType: "repeat", referenceText: "Say this back.", section: "A" },
+        ],
+      });
+    expect(create.status).toBe(201);
+    const id = create.body.id as string;
+
+    // A listen item (repeat) with no prompt/stimulus audio → not publishable.
+    const denied = await request(app)
+      .post(`/api/c/pp-audio/speaking/${id}/publish`)
+      .set(auth(adminToken))
+      .send({ isPublished: true });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error.code).toBe("NOT_PUBLISHABLE");
+
+    // Attach prompt audio → now publishable.
+    await request(app)
+      .patch(`/api/c/pp-audio/speaking/${id}`)
+      .set(auth(adminToken))
+      .send({
+        title: "needs audio",
+        items: [
+          {
+            itemType: "repeat",
+            referenceText: "Say this back.",
+            promptAudioUrl: "https://res.cloudinary.test/a.mp3",
+            section: "A",
+          },
+        ],
+      });
+    const ok = await request(app)
+      .post(`/api/c/pp-audio/speaking/${id}/publish`)
+      .set(auth(adminToken))
+      .send({ isPublished: true });
+    expect(ok.status).toBe(200);
+    expect(ok.body.isPublished).toBe(true);
   });
 });

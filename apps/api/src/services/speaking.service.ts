@@ -21,6 +21,7 @@ import {
   QueueName,
   SpeakingAttemptStatus,
   SpeakingItemType,
+  speakingItemNeedsAudio,
   SpeechJobStatus,
   SpeakingErrorCode,
   CLOUDINARY_UPLOAD_FOLDER,
@@ -169,6 +170,12 @@ function singleItemView(
     promptAudioUrl: it.promptAudioUrl ?? "",
     stimulusAudioUrl: it.stimulusAudioUrl ?? "",
     stimulusPlayLimit: it.stimulusPlayLimit ?? 0,
+    // Instance-level: listen types + sentence_build WITH chunks. The runner reads
+    // this to block recording when the required audio is missing (Step 27).
+    requiresAudio: speakingItemNeedsAudio({
+      itemType: it.itemType,
+      chunks: it.chunks ?? [],
+    }),
     section: it.section ?? "",
     prepSeconds: it.prepSeconds ?? 0,
     responseWindowSeconds: it.responseWindowSeconds ?? 60,
@@ -621,6 +628,7 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
       answerSet: it.answerSet ?? [],
       missingWord: it.missingWord ?? "",
       keyFacts: it.keyFacts ?? [],
+      chunks: it.chunks ?? [],
       section: it.section ?? "",
       prepSeconds: it.prepSeconds ?? 0,
       responseWindowSeconds: it.responseWindowSeconds ?? 60,
@@ -664,6 +672,7 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
   answerSet: string[];
   missingWord: string;
   keyFacts: string[];
+  chunks: string[];
   section: string;
   prepSeconds: number;
   responseWindowSeconds: number;
@@ -684,6 +693,7 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
     answerSet: it.answerSet,
     missingWord: it.missingWord,
     keyFacts: it.keyFacts,
+    chunks: it.chunks,
     section: it.section,
     prepSeconds: it.prepSeconds,
     responseWindowSeconds: it.responseWindowSeconds,
@@ -774,12 +784,31 @@ export async function setCollegeSpeakingPublished(
   isPublished: boolean,
 ): Promise<SpeakingAssessmentDetail> {
   const doc = await loadTenant(collegeId, assessmentId);
-  if (isPublished && doc.items.length === 0) {
-    throw new AppError(
-      "Add at least one item before publishing",
-      400,
-      SpeakingErrorCode.NOT_PUBLISHABLE,
-    );
+  if (isPublished) {
+    if (doc.items.length === 0) {
+      throw new AppError(
+        "Add at least one item before publishing",
+        400,
+        SpeakingErrorCode.NOT_PUBLISHABLE,
+      );
+    }
+    // A listen-based item with no audio prompt is unanswerable (its reference is
+    // withheld) — do not publish a paper that asks a student to repeat silence.
+    // Mirrors the composite's "every part must be launchable" discipline (Step 27).
+    for (let i = 0; i < doc.items.length; i += 1) {
+      const it = doc.items[i]!;
+      if (
+        speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks ?? [] }) &&
+        !it.promptAudioUrl &&
+        !it.stimulusAudioUrl
+      ) {
+        throw new AppError(
+          `Item ${i + 1} (${it.itemType}) needs an audio prompt before publishing — generate or attach it first.`,
+          400,
+          SpeakingErrorCode.NOT_PUBLISHABLE,
+        );
+      }
+    }
   }
   doc.isPublished = isPublished;
   await doc.save();

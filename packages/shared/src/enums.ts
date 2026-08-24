@@ -580,6 +580,55 @@ export type SpeakingItemType =
 export const SPEAKING_ITEM_TYPE_VALUES = Object.values(SpeakingItemType);
 
 /**
+ * Item types whose task is IMPOSSIBLE without hearing an audio stimulus — the
+ * reference is withheld from the student view (ListenSpeakRenderer), so with no
+ * audio there is literally nothing to respond to. The single source of truth for:
+ * the runner (blocks recording + shows an unavailable state when the audio is
+ * missing), the publish guard (a listen item with no audio is not publishable),
+ * and the seed (which item types need prompt audio generated).
+ *
+ * Excluded, and why: `read_aloud` shows its text; `open_topic` carries the topic
+ * in its on-screen prompt; `sentence_build` is treated as self-contained here
+ * (its jumbled words belong on screen) — see the Step-27 note if its CTS prompt
+ * ("you will hear three parts") is reworked into a true listen item.
+ */
+export const SPEAKING_AUDIO_REQUIRED_ITEM_TYPES: ReadonlySet<SpeakingItemType> =
+  new Set<SpeakingItemType>([
+    SpeakingItemType.REPEAT,
+    SpeakingItemType.SHORT_ANSWER,
+    SpeakingItemType.CONVERSATION,
+    SpeakingItemType.PASSAGE_QUESTION,
+    SpeakingItemType.FILL_MISSING_WORD,
+    SpeakingItemType.ERROR_CORRECT,
+    SpeakingItemType.STORY_RETELL,
+    SpeakingItemType.DICTATION,
+  ]);
+
+/** True when an item TYPE always needs audio, regardless of its content. */
+export function speakingItemRequiresAudio(itemType: string): boolean {
+  return SPEAKING_AUDIO_REQUIRED_ITEM_TYPES.has(itemType as SpeakingItemType);
+}
+
+/**
+ * The OPERATIVE, instance-level check: does THIS authored item need an audio
+ * prompt to be answerable? The always-audio types plus `sentence_build` ONLY
+ * when it has scrambled `chunks` to speak (a sentence_build with no chunks is a
+ * plain build task with nothing to hear). Used by the item-view builder (which
+ * surfaces the result to the runner), the publish guard, and the seed — so the
+ * runtime block, the publish refusal, and the audio generation all agree.
+ */
+export function speakingItemNeedsAudio(item: {
+  itemType: string;
+  chunks?: readonly string[] | null;
+}): boolean {
+  if (speakingItemRequiresAudio(item.itemType)) return true;
+  if (item.itemType === SpeakingItemType.SENTENCE_BUILD) {
+    return (item.chunks?.length ?? 0) > 0;
+  }
+  return false;
+}
+
+/**
  * Per-item transcription lifecycle. Mirrors {@link JobStatus} value-for-value
  * (speech rides the same async-job model as code execution + essay grading).
  * A `failed` item is FINALIZED — a failed transcription is not retried over

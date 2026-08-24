@@ -53,6 +53,7 @@ function blankItem(): SpeakingItemUpsert {
     answerSet: [],
     missingWord: "",
     keyFacts: [],
+    chunks: [],
     section: "",
     prepSeconds: 0,
     responseWindowSeconds: 60,
@@ -66,6 +67,7 @@ function fromPreset(spec: ReturnType<typeof buildItemsFromPreset>[number]): Spea
     ...spec,
     answerSet: spec.answerSet ? [...spec.answerSet] : [],
     keyFacts: spec.keyFacts ? [...spec.keyFacts] : [],
+    chunks: spec.chunks ? [...spec.chunks] : [],
   };
 }
 

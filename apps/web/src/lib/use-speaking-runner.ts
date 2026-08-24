@@ -34,6 +34,8 @@ export interface UseSpeakingRunner {
   notePromptPlayed: () => void;
   beginResponse: () => void;
   submitText: (text: string) => void;
+  /** Advance past an unanswerable item (missing audio) without recording. */
+  skipItem: () => void;
   expired: boolean;
   error: string | null;
   finished: boolean;
@@ -209,6 +211,10 @@ export function useSpeakingRunner(opts: {
     notePromptPlayed,
     beginResponse,
     submitText,
+    // Advance past an item WITHOUT a recording (submits silent). Used by the
+    // shell only when an item is unanswerable — a listen item whose audio is
+    // missing — so the student is never stuck on it (Step 27).
+    skipItem: advanceSilent,
     expired: current.expired,
     error,
     finished,

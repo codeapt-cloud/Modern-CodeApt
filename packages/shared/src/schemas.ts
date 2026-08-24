@@ -6148,6 +6148,10 @@ export const speakingItemUpsertSchema = z
     missingWord: z.string().trim().default(""),
     /** Authored key facts a retell should cover (story_retell). */
     keyFacts: z.array(z.string().trim().min(1)).default([]),
+    /** Scrambled sentence chunks the student HEARS (sentence_build): spoken in
+     *  this order, the student says the correctly-ordered sentence. WITHHELD from
+     *  the view (heard, not shown); referenceText stays the scoring answer. */
+    chunks: z.array(z.string().trim().min(1)).default([]),
     /** Optional preset-composition grouping label (e.g. "Section B"). */
     section: z.string().default(""),
     /**
@@ -6254,6 +6258,7 @@ export const speakingAssessmentItemDetailSchema = z.object({
   answerSet: z.array(z.string()),
   missingWord: z.string(),
   keyFacts: z.array(z.string()),
+  chunks: z.array(z.string()),
   section: z.string(),
   prepSeconds: z.number().int().nonnegative(),
   responseWindowSeconds: z.number().int().positive(),
@@ -6306,6 +6311,12 @@ export const speakingItemViewSchema = z.object({
   promptAudioUrl: z.string(),
   stimulusAudioUrl: z.string(),
   stimulusPlayLimit: z.number().int().nonnegative(),
+  /** Server-computed: this item can't be answered without an audio prompt (a
+   *  listen item, or a sentence_build WITH chunks). The runner uses it to block
+   *  recording + show an unavailable state when the audio is missing, instead of
+   *  asking the student to repeat silence (Step 27). Instance-level, so it's
+   *  correct for sentence_build with vs without chunks. */
+  requiresAudio: z.boolean(),
   section: z.string(),
   prepSeconds: z.number().int().nonnegative(),
   responseWindowSeconds: z.number().int().positive(),

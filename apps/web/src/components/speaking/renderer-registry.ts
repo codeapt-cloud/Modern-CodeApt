@@ -21,6 +21,9 @@ const audio = (Renderer: SpeakingItemDefinition["Renderer"]): SpeakingItemDefini
   capture: "audio",
 });
 
+// Whether an item NEEDS audio is decided per-instance on the server and carried
+// on the view (`view.requiresAudio`) — not baked into the registry — because
+// sentence_build depends on whether it has chunks. The runner reads that flag.
 export const SPEAKING_RENDERERS: Partial<
   Record<SpeakingItemType, SpeakingItemDefinition>
 > = {
