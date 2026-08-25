@@ -32,6 +32,17 @@
 #     2. mongo + redis live behind the OPT-IN `local-db` profile, so a bare
 #        `up` in production cannot start (or reconnect to) a local database.
 #     3. local mongo/redis publish to 127.0.0.1 ONLY — never a public interface.
+#     4. api + worker load the WHOLE `.env` via `env_file:`, so every var the
+#        apps read (ENCRYPTION_KEY, ASR_URL, CLOUDINARY_*, ESSAY_LLM_*, …) reaches
+#        the container — no capability silently degrades because a var wasn't
+#        hand-listed in `environment:` (the Step-28 incident: .env had
+#        ENCRYPTION_KEY / ASR_URL / CLOUDINARY_* but NONE reached api).
+#
+#   env_file vs environment — PRECEDENCE (compose): the `environment:` block
+#   WINS over `env_file` for any key it sets. So `env_file: .env` supplies the
+#   long tail, while `environment:` still pins NODE_ENV=production and enforces
+#   the ${VAR:?} guards (fed by compose's own ./.env interpolation) for the
+#   must-never-be-missing vars. Both read the same repo-root .env.
 # ---------------------------------------------------------------------------
 
 services:
@@ -47,6 +58,12 @@ services:
     # via .env), and the local containers are opt-in behind the `local-db`
     # profile — a depends_on would break a bare `up` (dependency not enabled)
     # and is unnecessary (mongoose/ioredis retry the connection on boot).
+    #
+    # Load the WHOLE .env so optional-but-important vars (ENCRYPTION_KEY, ASR_URL,
+    # CLOUDINARY_*, ESSAY_LLM_*) reach the app. `environment:` below still wins
+    # for the keys it sets (precedence: environment > env_file).
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       PORT: "4000"
@@ -65,6 +82,10 @@ services:
       dockerfile: apps/worker/Dockerfile
     container_name: codeapt-worker
     restart: unless-stopped
+    # Same as api: load the whole .env so ENCRYPTION_KEY / ASR_URL / ESSAY_LLM_*
+    # reach the worker; `environment:` still wins for the keys it sets.
+    env_file:
+      - .env
     environment:
       NODE_ENV: production
       MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env (the managed database — NOT a local container)}
@@ -101,6 +122,12 @@ services:
     container_name: codeapt-asr
     restart: unless-stopped
     cpus: "2.0"
+    # NO env_file on purpose. Unlike api/worker, this Python service reads NONE
+    # of the shared .env vars — only ASR_MODEL / ASR_COMPUTE / ASR_THREADS /
+    # PIPER_BIN / TTS_VOICE_* / TTS_MAX_CHARS (Dockerfile ENV defaults, overridden
+    # here). Mounting .env would only leak the DB/JWT/Cloudinary secrets into a
+    # container that ignores them (least privilege). If a TTS voice override is
+    # ever moved into .env, add `env_file: [.env]` here at that point.
     environment:
       ASR_MODEL: small
       ASR_COMPUTE: int8

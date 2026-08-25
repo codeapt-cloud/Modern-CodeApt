@@ -88,6 +88,15 @@ docker compose --profile local-db up -d --build
 > strings, `CORS_ORIGIN`, and the JWT secrets are **required**: a missing value
 > fails the `up` loudly rather than silently falling back to a wrong default. See
 > the header of `docker-compose.yml` for the incident this prevents.
+>
+> The api and worker load the **whole** repo-root `.env` via `env_file:`, so every
+> variable the apps read — `ENCRYPTION_KEY`, `ASR_URL`, `CLOUDINARY_*`,
+> `ESSAY_LLM_*`, … — reaches the container without a hand-maintained
+> `environment:` list (a capability going missing because a var wasn't copied
+> across was its own production incident). The `environment:` block still wins
+> over `env_file` for the keys it pins (`NODE_ENV`, the `${VAR:?}` guards). Keep
+> `.env` complete — `.env.example` is the full inventory, flagging which vars
+> **silently disable a capability** when absent.
 
 ---
 
