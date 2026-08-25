@@ -86,6 +86,24 @@ describe("speakingPromptAudioText — the prompt clip speaks the prompt, never t
     ).toBe("was reading. my mother. her favorite magazine");
   });
 
+  it("an explicit promptAudioText override wins over the prompt and the chunks", () => {
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.SHORT_ANSWER,
+        promptText: "Is milk a solid or a liquid?",
+        promptAudioText: "  Tell me: is milk a solid or a liquid?  ",
+      }),
+    ).toBe("Tell me: is milk a solid or a liquid?");
+    // Even overrides sentence_build's chunks.
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.SENTENCE_BUILD,
+        chunks: ["a", "b"],
+        promptAudioText: "custom spoken wording",
+      }),
+    ).toBe("custom spoken wording");
+  });
+
   it("returns empty when there is nothing to speak yet (Generate stays disabled)", () => {
     expect(speakingPromptAudioText({ itemType: SpeakingItemType.REPEAT })).toBe("");
     expect(

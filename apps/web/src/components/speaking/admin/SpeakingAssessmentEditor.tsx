@@ -44,6 +44,7 @@ function blankItem(): SpeakingItemUpsert {
     itemType: SpeakingItemType.READ_ALOUD,
     referenceText: "",
     promptText: "",
+    promptAudioText: "",
     promptAudioUrl: "",
     promptAudioVoiceId: "",
     promptAudioVoiceVersion: "",
@@ -380,6 +381,14 @@ function ItemForm({
   const ttsText = speakingPromptAudioText({
     itemType: item.itemType,
     promptText: item.promptText,
+    promptAudioText: item.promptAudioText,
+    chunks: item.chunks,
+  });
+  // The text used when the author has NOT overridden it — shown as the textarea's
+  // placeholder so they can see the default and choose to replace it.
+  const ttsDefaultText = speakingPromptAudioText({
+    itemType: item.itemType,
+    promptText: item.promptText,
     chunks: item.chunks,
   });
   const ttsSourceLabel =
@@ -657,25 +666,39 @@ function ItemForm({
               )
             ) : (
               <>
-                {/* What the clip will SAY, shown explicitly so the source is never
-                    a guess (the old control had no text box — you couldn't tell it
-                    synthesised the reference / chunks, not the stimulus box). */}
-                <div className="rounded-md border border-subtle bg-surface-base p-2">
-                  <span className="block text-xs font-medium text-ink-muted">
-                    Audio will say — from {ttsSourceLabel}:
-                  </span>
-                  {ttsText ? (
-                    <span className="block text-sm text-ink">“{ttsText}”</span>
-                  ) : (
-                    <span className="block text-sm text-error-fg">
-                      Nothing to speak yet — fill{" "}
-                      {item.itemType === SpeakingItemType.SENTENCE_BUILD
-                        ? "the scrambled chunks"
-                        : "the prompt / instruction"}{" "}
-                      first.
+                {/* What the clip will SAY — EDITABLE. Empty = speak the default
+                    ({ttsSourceLabel}, shown as the placeholder); type here to
+                    override the spoken wording without changing the on-screen
+                    prompt. sentence_build has no override (it speaks its chunks). */}
+                {item.itemType === SpeakingItemType.SENTENCE_BUILD ? (
+                  <div className="rounded-md border border-subtle bg-surface-base p-2">
+                    <span className="block text-xs font-medium text-ink-muted">
+                      Audio will say — from {ttsSourceLabel}:
                     </span>
-                  )}
-                </div>
+                    {ttsText ? (
+                      <span className="block text-sm text-ink">“{ttsText}”</span>
+                    ) : (
+                      <span className="block text-sm text-error-fg">
+                        Nothing to speak yet — fill the scrambled chunks first.
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <Label>Audio text (defaults to the prompt / instruction)</Label>
+                    <textarea
+                      className="min-h-[60px] w-full rounded-md border border-subtle bg-surface-base p-2 text-sm text-ink"
+                      placeholder={ttsDefaultText || "Type the prompt / instruction to speak…"}
+                      value={item.promptAudioText}
+                      onChange={(e) => onChange({ promptAudioText: e.target.value })}
+                    />
+                    <p className="text-xs text-ink-muted">
+                      {item.promptAudioText.trim()
+                        ? "Overriding the prompt — this exact text is spoken. Clear it to go back to the prompt."
+                        : "Empty: speaks the prompt / instruction above. Type here to change only the audio."}
+                    </p>
+                  </div>
+                )}
                 <p className="text-xs text-ink-muted">
                   Speaks the prompt / instruction, never the reference text (that
                   is the answer key). When the student must HEAR a sentence that

@@ -617,6 +617,7 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
       itemType: it.itemType,
       referenceText: it.referenceText,
       promptText: it.promptText ?? "",
+      promptAudioText: it.promptAudioText ?? "",
       promptAudioUrl: it.promptAudioUrl ?? "",
       promptAudioVoiceId: it.promptAudioVoiceId ?? "",
       promptAudioVoiceVersion: it.promptAudioVoiceVersion ?? "",
@@ -661,6 +662,7 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
   itemType: SpeakingAssessmentUpsert["items"][number]["itemType"];
   referenceText: string;
   promptText: string;
+  promptAudioText: string;
   promptAudioUrl: string;
   promptAudioVoiceId: string;
   promptAudioVoiceVersion: string;
@@ -682,6 +684,7 @@ function buildItems(input: SpeakingAssessmentUpsert): Array<{
     itemType: it.itemType,
     referenceText: it.referenceText,
     promptText: it.promptText,
+    promptAudioText: it.promptAudioText,
     promptAudioUrl: it.promptAudioUrl,
     promptAudioVoiceId: it.promptAudioVoiceId,
     promptAudioVoiceVersion: it.promptAudioVoiceVersion,

@@ -52,6 +52,14 @@ const NORWAY_TUNNEL_FACTS = [
   "about 20 minutes to drive through",
 ] as const;
 
+// The narration the student HEARS for that retell (voiced as the stimulus, never
+// shown). keyFacts above stay the scoring anchors; this is only the audio source.
+const NORWAY_TUNNEL_NARRATION =
+  "The Lærdal Tunnel in Norway is the longest road tunnel in the world, at " +
+  "twenty-four and a half kilometres. It took five years to build and has four " +
+  "large caves along the way where drivers can stop and rest. Driving all the " +
+  "way through takes about twenty minutes.";
+
 /**
  * CTS / Cognizant. Section A = reading + listening item mix; Section B =
  * speaking topics (open_topic). Sections C (grammar MCQ) and D (comprehension)
@@ -168,11 +176,7 @@ const CTS: SpeakingPreset = {
         "Listen to the story about the Norway road tunnel, then retell it in your own words (30 seconds).",
       // The story NARRATION — HEARD, not shown, so it is the STIMULUS (there is
       // no reference answer for a retell; keyFacts are the scoring anchors).
-      stimulusText:
-        "The Lærdal Tunnel in Norway is the longest road tunnel in the world, " +
-        "at twenty-four and a half kilometres. It took five years to build and " +
-        "has four large caves along the way where drivers can stop and rest. " +
-        "Driving all the way through takes about twenty minutes.",
+      stimulusText: NORWAY_TUNNEL_NARRATION,
       keyFacts: [...NORWAY_TUNNEL_FACTS],
       responseWindowSeconds: 30,
     },
@@ -222,6 +226,8 @@ const ACCENTURE: SpeakingPreset = {
       itemType: SpeakingItemType.REPEAT,
       section: "B — Listen & repeat",
       referenceText: "The report is due before the end of the week.",
+      stimulusText: "The report is due before the end of the week.",
+      promptText: "Listen, then say the sentence back exactly.",
       responseWindowSeconds: 20,
     },
     {
@@ -234,13 +240,19 @@ const ACCENTURE: SpeakingPreset = {
     {
       itemType: SpeakingItemType.SENTENCE_BUILD,
       section: "D — Jumbled sentence",
+      // Reference = the correctly-ordered answer (withheld); chunks = the parts
+      // the student HEARS scrambled and must reorder.
       referenceText: "The children played in the park after school.",
+      chunks: ["the children played", "in the park", "after school"],
+      promptText:
+        "You will hear three parts of a sentence. Say the whole sentence in the correct order.",
       responseWindowSeconds: 25,
     },
     {
       itemType: SpeakingItemType.STORY_RETELL,
       section: "E — Story retelling",
       promptText: "Retell the story you just heard (30 seconds).",
+      stimulusText: NORWAY_TUNNEL_NARRATION,
       keyFacts: [...NORWAY_TUNNEL_FACTS],
       responseWindowSeconds: 30,
     },
@@ -256,6 +268,10 @@ const ACCENTURE: SpeakingPreset = {
       itemType: SpeakingItemType.CONVERSATION,
       section: "G — Conversation",
       promptText: "Listen, then answer: what time does the film start?",
+      stimulusText:
+        "Man: What time does the film start tonight? " +
+        "Woman: It starts at eight, but let's get there a little early. " +
+        "Man: Sure, eight o'clock it is.",
       answerSet: ["eight", "8", "eight o'clock", "at eight"],
       responseWindowSeconds: 20,
     },
@@ -263,6 +279,10 @@ const ACCENTURE: SpeakingPreset = {
       itemType: SpeakingItemType.PASSAGE_QUESTION,
       section: "H — Passage comprehension",
       promptText: "Listen to the passage, then answer: where did the family go on holiday?",
+      stimulusText:
+        "Last summer the Patel family wanted a quiet break away from the city. " +
+        "They chose the mountains, where they spent a week walking the trails " +
+        "and breathing the cool, fresh air.",
       answerSet: ["to the mountains", "the mountains", "mountains"],
       responseWindowSeconds: 25,
     },
@@ -298,12 +318,18 @@ const VERSANT_2024: SpeakingPreset = {
       itemType: SpeakingItemType.REPEAT,
       section: "B — Repeat",
       referenceText: "We should leave a little earlier to avoid the traffic.",
+      stimulusText: "We should leave a little earlier to avoid the traffic.",
+      promptText: "Listen, then say the sentence back exactly.",
       responseWindowSeconds: 20,
     },
     {
       itemType: SpeakingItemType.CONVERSATION,
       section: "C — Conversations",
       promptText: "Listen, then answer: why is the speaker calling?",
+      stimulusText:
+        "Hello, this is Sam. I'm calling about my table reservation for Friday. " +
+        "I'm afraid I need to cancel the booking — something has come up. Sorry " +
+        "for the short notice.",
       answerSet: ["to cancel", "to cancel the booking", "cancel the booking"],
       responseWindowSeconds: 20,
     },
@@ -311,6 +337,10 @@ const VERSANT_2024: SpeakingPreset = {
       itemType: SpeakingItemType.PASSAGE_QUESTION,
       section: "D — Passage questions",
       promptText: "Listen to the passage, then answer: what caused the delay?",
+      stimulusText:
+        "The morning flights were running smoothly until midday. Then heavy rain " +
+        "and strong winds moved in, and the bad weather caused a long delay before " +
+        "any planes could take off again.",
       answerSet: ["the weather", "bad weather", "weather"],
       responseWindowSeconds: 20,
     },
@@ -318,6 +348,7 @@ const VERSANT_2024: SpeakingPreset = {
       itemType: SpeakingItemType.STORY_RETELL,
       section: "E — Retell",
       promptText: "Retell the story in your own words (30 seconds).",
+      stimulusText: NORWAY_TUNNEL_NARRATION,
       keyFacts: [...NORWAY_TUNNEL_FACTS],
       responseWindowSeconds: 30,
     },
@@ -353,6 +384,10 @@ const SVAR: SpeakingPreset = {
       itemType: SpeakingItemType.PASSAGE_QUESTION,
       section: "Listening & response",
       promptText: "Listen to the announcement, then answer: which gate has changed?",
+      stimulusText:
+        "Attention passengers on flight BA204 to Delhi. Please note that your " +
+        "boarding gate has changed. The flight will now board from gate twelve. " +
+        "That is gate twelve.",
       answerSet: ["gate twelve", "gate 12", "twelve", "12"],
       responseWindowSeconds: 20,
     },
@@ -374,12 +409,17 @@ const SVAR: SpeakingPreset = {
       itemType: SpeakingItemType.REPEAT,
       section: "Listen & repeat",
       referenceText: "The technician will call you back within the hour.",
+      stimulusText: "The technician will call you back within the hour.",
+      promptText: "Listen, then say the sentence back exactly.",
       responseWindowSeconds: 20,
     },
     {
       itemType: SpeakingItemType.FILL_MISSING_WORD,
       section: "Fill the missing word",
+      // reference = complete ANSWER; student hears the sentence with "online"
+      // gapped (a pause) and supplies it.
       referenceText: "You can pay online or at the counter.",
+      stimulusText: "You can pay ... or at the counter.",
       missingWord: "online",
       promptText: "Say the complete sentence with the missing word.",
       responseWindowSeconds: 20,
@@ -387,7 +427,9 @@ const SVAR: SpeakingPreset = {
     {
       itemType: SpeakingItemType.ERROR_CORRECT,
       section: "Error correction",
+      // reference = CORRECTED answer; student hears the wrong-tense version.
       referenceText: "He has worked here since last year.",
+      stimulusText: "He is working here since last year.",
       promptText: "Say the sentence corrected.",
       responseWindowSeconds: 20,
     },

@@ -6121,6 +6121,11 @@ export const speakingItemUpsertSchema = z
     referenceText: z.string().trim().default(""),
     /** On-screen instructions / the topic prompt (required for open_topic). */
     promptText: z.string().default(""),
+    /** OPTIONAL override for the exact text the prompt clip is synthesised from.
+     *  Empty → the clip speaks the promptText (or sentence_build chunks); set →
+     *  it speaks this instead, so an author can tune the spoken wording without
+     *  changing what's shown on screen. Never the reference (that's the answer). */
+    promptAudioText: z.string().default(""),
     /** TTS-generated spoken prompt (Cloudinary URL; authoring-time). */
     promptAudioUrl: z.string().default(""),
     /** TTS PROVENANCE — the fixed Piper voice + version that produced
@@ -6247,6 +6252,7 @@ export const speakingAssessmentItemDetailSchema = z.object({
   itemType: speakingItemTypeSchema,
   referenceText: z.string(),
   promptText: z.string(),
+  promptAudioText: z.string(),
   promptAudioUrl: z.string(),
   promptAudioVoiceId: z.string(),
   promptAudioVoiceVersion: z.string(),

@@ -651,8 +651,13 @@ export function speakingItemNeedsAudio(item: {
 export function speakingPromptAudioText(item: {
   itemType: string;
   promptText?: string | null;
+  promptAudioText?: string | null;
   chunks?: readonly string[] | null;
 }): string {
+  // An explicit override wins — an author can tune the spoken wording without
+  // changing the on-screen prompt.
+  const override = (item.promptAudioText ?? "").trim();
+  if (override) return override;
   if (item.itemType === SpeakingItemType.SENTENCE_BUILD) {
     return (item.chunks ?? []).map((c) => c.trim()).filter(Boolean).join(". ");
   }

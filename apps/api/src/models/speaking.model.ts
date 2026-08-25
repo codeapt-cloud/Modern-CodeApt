@@ -38,6 +38,10 @@ const speakingItemSchema = new Schema(
     // which item types actually require it.
     referenceText: { type: String, default: "" },
     promptText: { type: String, default: "" },
+    // Optional override for the text the prompt clip is synthesised from (empty =
+    // use promptText / chunks). Lets an author tune the spoken wording without
+    // changing the on-screen prompt; never the reference (that's the answer key).
+    promptAudioText: { type: String, default: "" },
     // TTS-generated spoken prompt (Cloudinary URL), produced at authoring time.
     promptAudioUrl: { type: String, default: "" },
     // TTS provenance — the fixed Piper voice + version that produced promptAudioUrl,

@@ -70,6 +70,7 @@ async function seedSpeaking(): Promise<void> {
       itemType: spec.itemType,
       referenceText: spec.referenceText ?? "",
       promptText: spec.promptText ?? "",
+      promptAudioText: "", // presets don't override; authored per-item in the editor
       promptAudioUrl: spec.promptAudioUrl ?? "",
       stimulusText: spec.stimulusText ?? "",
       stimulusAudioUrl: spec.stimulusAudioUrl ?? "",
@@ -131,6 +132,7 @@ async function seedSpeaking(): Promise<void> {
       const promptText = speakingPromptAudioText({
         itemType: it.itemType,
         promptText: it.promptText,
+        promptAudioText: it.promptAudioText,
         chunks: it.chunks,
       });
       try {
