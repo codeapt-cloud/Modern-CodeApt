@@ -18,7 +18,9 @@ import { collegeExamRouter } from "./college-exam.routes.js";
 import { gameRouter } from "./game.routes.js";
 import { collegeGameRouter } from "./college-game.routes.js";
 import { collegeSpeakingRouter } from "./speaking.routes.js";
+import { speakingOpenRouter } from "./speaking-open.routes.js";
 import { collegeCommunicationRouter } from "./communication.routes.js";
+import { communicationOpenRouter } from "./communication-open.routes.js";
 import { attendanceRouter } from "./attendance.routes.js";
 import { codingProfileRouter } from "./coding-profile.routes.js";
 import { studentAiCreditRouter } from "./student-ai-credit.routes.js";
@@ -91,11 +93,17 @@ apiRouter.use(collegeGameRouter);
 // Communication speech spine (Sections A/B): tenant-scoped speaking assessments
 // behind COMMUNICATION + the `speaking` sub-capability. Read-aloud only (Step 10).
 apiRouter.use(collegeSpeakingRouter);
+// OPEN speaking (Step 29): global enrollment discovery + slug-free engine +
+// platform-admin authoring (/admin/speaking). Makes course-attached / B2C reach real.
+apiRouter.use(speakingOpenRouter);
 
 // Communication ASSESSMENT COMPOSITE (Step 21): an ordered container over
 // exam/essay/speaking artifacts + a unified report. Reads the engines, never
 // modifies them. Behind COMMUNICATION + the `authoring` sub-capability.
 apiRouter.use(collegeCommunicationRouter);
+// OPEN composite (Step 29): global discovery + student view/launch + platform
+// authoring (/admin/communication). Launch routes into the global engines.
+apiRouter.use(communicationOpenRouter);
 
 apiRouter.use(attendanceRouter);
 // Coding profiles (net-new): student handles + stored per-platform stats,

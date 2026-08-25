@@ -89,6 +89,12 @@ function toPayload(d: TopicDraft): AdminTopicUpsert {
       return { topicType: TopicType.EXAM, ...base };
     case TopicType.GAME:
       return { topicType: TopicType.GAME, ...base };
+    case TopicType.SPEAKING:
+      // Bare like GAME — the SpeakingAssessment is authored + attached separately
+      // (platform create with topicId). Full authoring UI is Step 30. (S29)
+      return { topicType: TopicType.SPEAKING, ...base };
+    case TopicType.COMMUNICATION:
+      return { topicType: TopicType.COMMUNICATION, ...base };
     case TopicType.ESSAY:
       // Picker-driven link (nullable) — a real EssayTopic or none.
       return {

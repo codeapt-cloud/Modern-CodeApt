@@ -31,6 +31,7 @@ import {
   scoreDictation,
   speakingAttemptBudgetSeconds,
   SPEAKING_SUBMIT_GRACE_MS,
+  TopicType,
   type SpeakingTtsResponse,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentListResponse,
@@ -613,6 +614,7 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
     isPublished: a.isPublished,
     maxAttempts: a.maxAttempts,
     orgUnitIds: (a.orgUnits ?? []).map((u) => u.toString()),
+    topicId: a.topic ? a.topic.toString() : null,
     items: a.items.map((it) => ({
       itemType: it.itemType,
       referenceText: it.referenceText,
@@ -781,38 +783,41 @@ export async function updateCollegeSpeaking(
   return toDetail(doc);
 }
 
+/** Publish-safety FLOOR, shared by the tenant + platform publish paths (S29):
+ *  at least one item, and no listen-based item left without its audio prompt (an
+ *  item whose reference is withheld would be unanswerable). Same rule the tenant
+ *  path always enforced — extracted verbatim so both surfaces agree. */
+function assertSpeakingPublishable(doc: AssessmentDoc): void {
+  if (doc.items.length === 0) {
+    throw new AppError(
+      "Add at least one item before publishing",
+      400,
+      SpeakingErrorCode.NOT_PUBLISHABLE,
+    );
+  }
+  for (let i = 0; i < doc.items.length; i += 1) {
+    const it = doc.items[i]!;
+    if (
+      speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks ?? [] }) &&
+      !it.promptAudioUrl &&
+      !it.stimulusAudioUrl
+    ) {
+      throw new AppError(
+        `Item ${i + 1} (${it.itemType}) needs an audio prompt before publishing — generate or attach it first.`,
+        400,
+        SpeakingErrorCode.NOT_PUBLISHABLE,
+      );
+    }
+  }
+}
+
 export async function setCollegeSpeakingPublished(
   collegeId: string,
   assessmentId: string,
   isPublished: boolean,
 ): Promise<SpeakingAssessmentDetail> {
   const doc = await loadTenant(collegeId, assessmentId);
-  if (isPublished) {
-    if (doc.items.length === 0) {
-      throw new AppError(
-        "Add at least one item before publishing",
-        400,
-        SpeakingErrorCode.NOT_PUBLISHABLE,
-      );
-    }
-    // A listen-based item with no audio prompt is unanswerable (its reference is
-    // withheld) — do not publish a paper that asks a student to repeat silence.
-    // Mirrors the composite's "every part must be launchable" discipline (Step 27).
-    for (let i = 0; i < doc.items.length; i += 1) {
-      const it = doc.items[i]!;
-      if (
-        speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks ?? [] }) &&
-        !it.promptAudioUrl &&
-        !it.stimulusAudioUrl
-      ) {
-        throw new AppError(
-          `Item ${i + 1} (${it.itemType}) needs an audio prompt before publishing — generate or attach it first.`,
-          400,
-          SpeakingErrorCode.NOT_PUBLISHABLE,
-        );
-      }
-    }
-  }
+  if (isPublished) assertSpeakingPublishable(doc);
   doc.isPublished = isPublished;
   await doc.save();
   return toDetail(doc);
@@ -928,6 +933,201 @@ export async function listAvailableForCollege(
   const items = await Promise.all(
     visible.map(async (a) => ({
       id: a._id.toString(),
+      topicId: a.topic ? a.topic.toString() : null,
+      title: a.title,
+      description: a.description ?? "",
+      itemCount: a.items.length,
+      maxAttempts: a.maxAttempts,
+      attemptsUsed: await SpeakingAttemptModel.countDocuments({
+        user: userId,
+        assessment: a._id,
+      }),
+    })),
+  );
+  return { items };
+}
+
+// ---------------------------------------------------------------------------
+// Course attach (S29) — GAME pattern: entity.topic → Topic, forward + validated
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a curriculum topic for a course-attached SPEAKING assessment: it must
+ * exist, be a SPEAKING topic, and not already own an assessment (1:1). Direct
+ * mirror of `resolveGameTopic` (game-set-admin.service). `excludeId` skips the
+ * assessment being edited so re-saving its own topic isn't a false conflict.
+ */
+export async function resolveSpeakingTopic(
+  topicId: string,
+  excludeId?: Types.ObjectId,
+): Promise<Types.ObjectId> {
+  if (!Types.ObjectId.isValid(topicId)) {
+    throw new AppError("Topic not found", 404, SpeakingErrorCode.TOPIC_NOT_FOUND);
+  }
+  const topic = await TopicModel.findById(topicId).select("topicType");
+  if (!topic || topic.topicType !== TopicType.SPEAKING) {
+    throw new AppError(
+      "A speaking assessment can only attach to a SPEAKING topic",
+      400,
+      SpeakingErrorCode.TOPIC_NOT_SPEAKING,
+    );
+  }
+  const existing = await SpeakingAssessmentModel.findOne({
+    topic: topic._id,
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  }).select("_id");
+  if (existing) {
+    throw new AppError(
+      "That topic already has a speaking assessment",
+      409,
+      SpeakingErrorCode.TOPIC_ALREADY_ATTACHED,
+    );
+  }
+  return topic._id;
+}
+
+// ---------------------------------------------------------------------------
+// Platform authoring (college: null) — mirrors game-set-admin.service
+// ---------------------------------------------------------------------------
+
+/** Load a PLATFORM assessment (college:null) — never a college's, so a platform
+ *  admin can't reach a tenant doc (mirrors requireAdminGameSet's { college:null }). */
+async function loadPlatform(assessmentId: string): Promise<AssessmentDoc> {
+  if (!Types.ObjectId.isValid(assessmentId)) throw NOT_FOUND();
+  const doc = await SpeakingAssessmentModel.findOne({
+    _id: new Types.ObjectId(assessmentId),
+    college: null,
+  });
+  if (!doc) throw NOT_FOUND();
+  return doc;
+}
+
+export async function createPlatformSpeaking(
+  input: SpeakingAssessmentUpsert,
+): Promise<SpeakingAssessmentDetail> {
+  // Platform sets are college:null. An optional topicId makes it course-attached
+  // (still college:null); omitting it yields a platform-internal set. The
+  // college!=null && topic!=null combination is structurally impossible here
+  // (college is always null) — the tenant path likewise never sets a topic.
+  const topic = input.topicId ? await resolveSpeakingTopic(input.topicId) : null;
+  const doc = await SpeakingAssessmentModel.create({
+    college: null,
+    topic,
+    orgUnits: [],
+    title: input.title,
+    description: input.description,
+    items: buildItems(input),
+    maxAttempts: input.maxAttempts,
+    isPublished: false,
+  });
+  return toDetail(doc);
+}
+
+export async function listPlatformSpeaking(): Promise<SpeakingAssessmentListResponse> {
+  const docs = await SpeakingAssessmentModel.find({ college: null }).sort({
+    createdAt: -1,
+    _id: -1,
+  });
+  return {
+    items: docs.map((a) => ({
+      id: a._id.toString(),
+      title: a.title,
+      itemCount: a.items.length,
+      isPublished: a.isPublished,
+      maxAttempts: a.maxAttempts,
+      orgUnitIds: (a.orgUnits ?? []).map((u) => u.toString()),
+      createdAt: a.createdAt.toISOString(),
+    })),
+  };
+}
+
+export async function getPlatformSpeaking(
+  assessmentId: string,
+): Promise<SpeakingAssessmentDetail> {
+  return toDetail(await loadPlatform(assessmentId));
+}
+
+export async function updatePlatformSpeaking(
+  assessmentId: string,
+  input: SpeakingAssessmentUpsert,
+): Promise<SpeakingAssessmentDetail> {
+  const doc = await loadPlatform(assessmentId);
+  doc.topic = input.topicId
+    ? await resolveSpeakingTopic(input.topicId, doc._id)
+    : null;
+  doc.title = input.title;
+  doc.description = input.description;
+  doc.set("items", buildItems(input));
+  doc.maxAttempts = input.maxAttempts;
+  await doc.save();
+  return toDetail(doc);
+}
+
+export async function setPlatformSpeakingPublished(
+  assessmentId: string,
+  isPublished: boolean,
+): Promise<SpeakingAssessmentDetail> {
+  const doc = await loadPlatform(assessmentId);
+  if (isPublished) assertSpeakingPublishable(doc);
+  doc.isPublished = isPublished;
+  await doc.save();
+  return toDetail(doc);
+}
+
+export async function deletePlatformSpeaking(assessmentId: string): Promise<void> {
+  const doc = await loadPlatform(assessmentId);
+  if (doc.isPublished) {
+    throw new AppError(
+      "Unpublish the assessment before deleting it",
+      409,
+      SpeakingErrorCode.NOT_DELETABLE,
+    );
+  }
+  const attempts = await SpeakingAttemptModel.countDocuments({
+    assessment: doc._id,
+    status: { $ne: SpeakingAttemptStatus.EXPIRED },
+  });
+  if (attempts > 0) {
+    throw new AppError(
+      "This assessment has attempts and cannot be deleted",
+      409,
+      SpeakingErrorCode.NOT_DELETABLE,
+    );
+  }
+  await SpeakingAttemptModel.deleteMany({ assessment: doc._id });
+  await SpeakingAssessmentModel.deleteOne({ _id: doc._id });
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment-based discovery (S29) — mirror of listGamesForUser
+// ---------------------------------------------------------------------------
+
+/** Course-attached speaking assessments the user can reach by ENROLLMENT (B2C or
+ *  college student): Enrollment → Subject → Module → Topic{SPEAKING} → assessment.
+ *  Global; carries topicId so the learn player can match it. Mirrors
+ *  listGamesForUser (no publish filter — parity with games). */
+export async function listSpeakingForUser(
+  userId: string,
+): Promise<SpeakingPlayListResponse> {
+  const enrollments = await EnrollmentModel.find({ user: userId }).select(
+    "subject",
+  );
+  const subjectIds = enrollments.map((e) => e.subject);
+  if (subjectIds.length === 0) return { items: [] };
+  const modules = await ModuleModel.find({
+    subject: { $in: subjectIds },
+  }).select("_id");
+  const topics = await TopicModel.find({
+    module: { $in: modules.map((m) => m._id) },
+    topicType: TopicType.SPEAKING,
+  }).select("_id");
+  const topicIds = topics.map((t) => t._id);
+  if (topicIds.length === 0) return { items: [] };
+  const docs = await SpeakingAssessmentModel.find({ topic: { $in: topicIds } });
+  const items = await Promise.all(
+    docs.map(async (a) => ({
+      id: a._id.toString(),
+      topicId: a.topic ? a.topic.toString() : null,
       title: a.title,
       description: a.description ?? "",
       itemCount: a.items.length,

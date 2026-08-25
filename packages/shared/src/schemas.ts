@@ -1414,6 +1414,18 @@ export const adminTopicUpsertSchema = z.discriminatedUnion("topicType", [
     ...adminTopicBase,
   }),
   z.object({
+    // SPEAKING/COMMUNICATION topics are BARE, exactly like GAME — the assessment
+    // is authored + attached separately (platform create with topicId). No
+    // auto-shell: a speaking/communication assessment needs real authored
+    // items/parts, so an empty shell would only be a publish-guard failure. (S29)
+    topicType: z.literal(TopicType.SPEAKING),
+    ...adminTopicBase,
+  }),
+  z.object({
+    topicType: z.literal(TopicType.COMMUNICATION),
+    ...adminTopicBase,
+  }),
+  z.object({
     topicType: z.literal(TopicType.ESSAY),
     ...adminTopicBase,
     // Optional + nullable: an essay topic may exist with no prompt linked yet.
@@ -6242,6 +6254,10 @@ export const speakingAssessmentUpsertSchema = z.object({
   maxAttempts: z.number().int().min(0).default(1),
   /** College-surface org-unit targeting (empty = whole college). */
   orgUnitIds: z.array(z.string()).optional(),
+  /** PLATFORM-surface course attach (college:null sets only): a GAME-pattern
+   *  forward link to a SPEAKING curriculum topic. undefined/"" = platform-internal.
+   *  Ignored by the college (tenant) authoring path, which always sets topic:null. */
+  topicId: z.string().trim().optional(),
 });
 export type SpeakingAssessmentUpsert = z.infer<
   typeof speakingAssessmentUpsertSchema
@@ -6298,6 +6314,9 @@ export const speakingAssessmentDetailSchema = z.object({
   isPublished: z.boolean(),
   maxAttempts: z.number().int().nonnegative(),
   orgUnitIds: z.array(z.string()),
+  /** The attached curriculum SPEAKING topic (platform course-attached sets), or
+   *  null. Always null on the tenant path — additive field, tenant value fixed. */
+  topicId: z.string().nullable(),
   items: z.array(speakingAssessmentItemDetailSchema),
 });
 export type SpeakingAssessmentDetail = z.infer<
@@ -6307,6 +6326,9 @@ export type SpeakingAssessmentDetail = z.infer<
 // --- Student consumption ---
 export const speakingPlayListItemSchema = z.object({
   id: z.string(),
+  /** The owning curriculum topic for a course-attached set (null otherwise), so
+   *  the learn player can match this item to a SPEAKING topic — mirrors games. */
+  topicId: z.string().nullable().default(null),
   title: z.string(),
   description: z.string(),
   itemCount: z.number().int().nonnegative(),
@@ -6530,6 +6552,9 @@ export const communicationAssessmentUpsertSchema = z.object({
   distinctionPercentage: z.number().min(0).max(100).default(60),
   /** College-surface org-unit targeting (empty = whole college). */
   orgUnitIds: z.array(z.string()).optional(),
+  /** PLATFORM-surface course attach (college:null composites only): forward link
+   *  to a COMMUNICATION curriculum topic. Ignored by the college path (topic:null). */
+  topicId: z.string().trim().optional(),
 });
 export type CommunicationAssessmentUpsert = z.infer<
   typeof communicationAssessmentUpsertSchema
@@ -6573,6 +6598,9 @@ export const communicationAssessmentDetailSchema = z.object({
   passPercentage: z.number(),
   distinctionPercentage: z.number(),
   orgUnitIds: z.array(z.string()),
+  /** Attached COMMUNICATION curriculum topic (platform course-attached), or null.
+   *  Always null on the tenant path — additive field, tenant value fixed. */
+  topicId: z.string().nullable(),
   parts: z.array(communicationPartDetailSchema),
 });
 export type CommunicationAssessmentDetail = z.infer<
@@ -6600,6 +6628,9 @@ export type CommunicationAssessmentListResponse = z.infer<
 // --- Student discovery (list the composites their cohort can take) ---
 export const communicationAvailableItemSchema = z.object({
   id: z.string(),
+  /** Owning curriculum topic for a course-attached composite (null otherwise),
+   *  so the learn player can match it to a COMMUNICATION topic — mirrors games. */
+  topicId: z.string().nullable().default(null),
   title: z.string(),
   description: z.string(),
   partCount: z.number().int().nonnegative(),

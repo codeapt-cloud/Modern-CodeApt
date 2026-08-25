@@ -93,7 +93,13 @@ const speakingAssessmentSchema = new Schema(
   { timestamps: true },
 );
 speakingAssessmentSchema.index({ college: 1 });
-speakingAssessmentSchema.index({ topic: 1 });
+// Preserve the 1:1 SpeakingAssessment↔Topic guarantee for course-attached sets
+// WITHOUT constraining topic-less sets — unique only over docs whose `topic` is
+// set. Mirrors the GameSet.topic / Exam.topic partial unique index exactly (S29).
+speakingAssessmentSchema.index(
+  { topic: 1 },
+  { unique: true, partialFilterExpression: { topic: { $type: "objectId" } } },
+);
 export type SpeakingAssessment = InferSchemaType<
   typeof speakingAssessmentSchema
 >;

@@ -738,6 +738,12 @@ export const SpeakingErrorCode = {
   /** Authoring-time TTS could not synthesize/host the clip (service unconfigured
    *  or a Piper/Cloudinary failure). */
   TTS_UNAVAILABLE: "TTS_UNAVAILABLE",
+  /** Course-attach (S29): the topic id is missing/invalid. */
+  TOPIC_NOT_FOUND: "TOPIC_NOT_FOUND",
+  /** Course-attach: the topic exists but is not a SPEAKING topic. */
+  TOPIC_NOT_SPEAKING: "TOPIC_NOT_SPEAKING",
+  /** Course-attach: that SPEAKING topic already owns an assessment (1:1). */
+  TOPIC_ALREADY_ATTACHED: "TOPIC_ALREADY_ATTACHED",
 } as const;
 export type SpeakingErrorCode =
   (typeof SpeakingErrorCode)[keyof typeof SpeakingErrorCode];
@@ -760,6 +766,12 @@ export const CommunicationErrorCode = {
   NOT_PUBLISHABLE: "NOT_PUBLISHABLE",
   /** Delete refused (published). */
   NOT_DELETABLE: "NOT_DELETABLE",
+  /** Course-attach (S29): the topic id is missing/invalid. */
+  TOPIC_NOT_FOUND: "TOPIC_NOT_FOUND",
+  /** Course-attach: the topic exists but is not a COMMUNICATION topic. */
+  TOPIC_NOT_COMMUNICATION: "TOPIC_NOT_COMMUNICATION",
+  /** Course-attach: that COMMUNICATION topic already owns a composite (1:1). */
+  TOPIC_ALREADY_ATTACHED: "TOPIC_ALREADY_ATTACHED",
 } as const;
 export type CommunicationErrorCode =
   (typeof CommunicationErrorCode)[keyof typeof CommunicationErrorCode];

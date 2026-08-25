@@ -222,3 +222,71 @@ export const clearSpeakingAttemptController = asyncHandler(
     res.status(204).send();
   },
 );
+
+// --- Enrollment-based discovery (global, S29) -------------------------------
+
+/** Course-attached speaking assessments the caller can reach by enrollment (B2C
+ *  or college student). No tenant — global GET /speaking. */
+export const listSpeakingForUserController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(200).json(await speaking.listSpeakingForUser(userId(req)));
+  },
+);
+
+// --- Platform authoring (requireAdmin, college:null, S29) -------------------
+
+export const adminListSpeakingController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(await speaking.listPlatformSpeaking());
+  },
+);
+
+export const adminCreateSpeakingController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = speakingAssessmentUpsertSchema.parse(req.body);
+    res.status(201).json(await speaking.createPlatformSpeaking(input));
+  },
+);
+
+export const adminGetSpeakingController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(await speaking.getPlatformSpeaking(req.params.assessmentId ?? ""));
+  },
+);
+
+export const adminUpdateSpeakingController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = speakingAssessmentUpsertSchema.parse(req.body);
+    res
+      .status(200)
+      .json(
+        await speaking.updatePlatformSpeaking(
+          req.params.assessmentId ?? "",
+          input,
+        ),
+      );
+  },
+);
+
+export const adminSetSpeakingPublishController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { isPublished } = setSpeakingPublishSchema.parse(req.body);
+    res
+      .status(200)
+      .json(
+        await speaking.setPlatformSpeakingPublished(
+          req.params.assessmentId ?? "",
+          isPublished,
+        ),
+      );
+  },
+);
+
+export const adminDeleteSpeakingController = asyncHandler(
+  async (req: Request, res: Response) => {
+    await speaking.deletePlatformSpeaking(req.params.assessmentId ?? "");
+    res.status(204).send();
+  },
+);

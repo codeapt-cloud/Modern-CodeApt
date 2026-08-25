@@ -30,6 +30,7 @@ import {
   isPlatformAdmin,
   speakingOverallPercent,
   Role,
+  TopicType,
   UserType,
   type CommunicationAssessmentDetail,
   type CommunicationAssessmentListResponse,
@@ -535,6 +536,7 @@ export async function listAvailableCommunicationForCollege(
   return {
     items: visible.map((a) => ({
       id: a._id.toString(),
+      topicId: a.topic ? a.topic.toString() : null,
       title: a.title,
       description: a.description ?? "",
       partCount: a.parts.length,
@@ -604,17 +606,21 @@ export async function launchCommunicationPart(
 // College authoring (tenant-scoped)
 // ---------------------------------------------------------------------------
 
-/** Confirm a referenced artifact exists AND belongs to THIS college AND matches
- *  the declared type. Cross-tenant or wrong-type refs are rejected at author
- *  time (400 INVALID_PART_REF) — a composite can only bind its own college's
- *  artifacts. Returns the artifact's title + published flag for the detail view. */
-async function resolvePartRefInTenant(
-  collegeId: string,
+/** Confirm a referenced artifact exists AND belongs to the given SCOPE AND
+ *  matches the declared type. Cross-scope or wrong-type refs are rejected at
+ *  author time (400 INVALID_PART_REF) — a composite can only bind artifacts from
+ *  its own scope. `scope` is the college ObjectId for a tenant composite, or
+ *  `null` for a platform composite (which binds `college: null` artifacts). The
+ *  query is `{ _id, college: scope }` in BOTH cases — for the tenant path that is
+ *  byte-identical to the previous `{ _id, college }`; only the value differs.
+ *  Returns the artifact's title + published flag for the detail view. */
+async function resolvePartRef(
+  scope: Types.ObjectId | null,
   partType: PartType,
   ref: string,
 ): Promise<{ title: string; published: boolean } | null> {
   if (!Types.ObjectId.isValid(ref)) return null;
-  const college = new Types.ObjectId(collegeId);
+  const college = scope;
   const _id = new Types.ObjectId(ref);
   if (partType === CommunicationPartType.EXAM) {
     const e = await ExamModel.findOne({ _id, college }).select(
@@ -636,13 +642,13 @@ async function resolvePartRefInTenant(
 
 async function toDetail(
   a: AssessmentDoc,
-  collegeId: string,
+  scope: Types.ObjectId | null,
 ): Promise<CommunicationAssessmentDetail> {
   const ordered = [...a.parts].sort((x, y) => x.order - y.order);
   const parts: CommunicationPartDetail[] = await Promise.all(
     ordered.map(async (p) => {
-      const resolved = await resolvePartRefInTenant(
-        collegeId,
+      const resolved = await resolvePartRef(
+        scope,
         p.partType as PartType,
         p.ref.toString(),
       );
@@ -669,6 +675,7 @@ async function toDetail(
     passPercentage: a.passPercentage,
     distinctionPercentage: a.distinctionPercentage,
     orgUnitIds: (a.orgUnits ?? []).map((u) => u.toString()),
+    topicId: a.topic ? a.topic.toString() : null,
     parts,
   };
 }
@@ -706,16 +713,17 @@ interface PersistedPart {
 /** Validate + shape the parts for persistence. Every ref must resolve in-tenant
  *  and match its declared type, else 400 INVALID_PART_REF (naming the offender). */
 async function buildParts(
-  collegeId: string,
+  scope: Types.ObjectId | null,
   input: CommunicationAssessmentUpsert,
 ): Promise<PersistedPart[]> {
+  const where = scope ? "in this college" : "on the platform";
   const parts: PersistedPart[] = [];
   for (let i = 0; i < input.parts.length; i += 1) {
     const p = input.parts[i]!;
-    const resolved = await resolvePartRefInTenant(collegeId, p.partType, p.ref);
+    const resolved = await resolvePartRef(scope, p.partType, p.ref);
     if (!resolved) {
       throw new AppError(
-        `Part ${i + 1} ("${p.label}") does not reference a ${p.partType} in this college`,
+        `Part ${i + 1} ("${p.label}") does not reference a ${p.partType} ${where}`,
         400,
         CommunicationErrorCode.INVALID_PART_REF,
       );
@@ -739,7 +747,7 @@ export async function createCollegeCommunication(
 ): Promise<CommunicationAssessmentDetail> {
   const scope = createTenantScope(collegeId);
   const orgUnits = await validateOrgUnits(collegeId, input.orgUnitIds);
-  const parts = await buildParts(collegeId, input);
+  const parts = await buildParts(scope.collegeId, input);
   const doc = await CommunicationAssessmentModel.create(
     scope.attach({
       topic: null,
@@ -752,7 +760,7 @@ export async function createCollegeCommunication(
       isPublished: false,
     }),
   );
-  return toDetail(doc, collegeId);
+  return toDetail(doc, scope.collegeId);
 }
 
 export async function listCollegeCommunication(
@@ -792,7 +800,10 @@ export async function getCollegeCommunication(
   collegeId: string,
   assessmentId: string,
 ): Promise<CommunicationAssessmentDetail> {
-  return toDetail(await loadTenant(collegeId, assessmentId), collegeId);
+  return toDetail(
+    await loadTenant(collegeId, assessmentId),
+    new Types.ObjectId(collegeId),
+  );
 }
 
 export async function updateCollegeCommunication(
@@ -802,7 +813,8 @@ export async function updateCollegeCommunication(
 ): Promise<CommunicationAssessmentDetail> {
   const doc = await loadTenant(collegeId, assessmentId);
   const orgUnits = await validateOrgUnits(collegeId, input.orgUnitIds);
-  const parts = await buildParts(collegeId, input);
+  const college = new Types.ObjectId(collegeId);
+  const parts = await buildParts(college, input);
   doc.title = input.title;
   doc.description = input.description;
   doc.set("parts", parts);
@@ -810,7 +822,43 @@ export async function updateCollegeCommunication(
   doc.distinctionPercentage = input.distinctionPercentage;
   doc.set("orgUnits", orgUnits);
   await doc.save();
-  return toDetail(doc, collegeId);
+  return toDetail(doc, college);
+}
+
+/** Publish-safety FLOOR, shared by the tenant + platform publish paths (S29):
+ *  at least one part, and every part must resolve IN SCOPE and be published, so a
+ *  student never meets a dead or draft part. `scope` is the college ObjectId
+ *  (tenant) or null (platform). Extracted verbatim from the tenant path so both
+ *  surfaces enforce identical rules. */
+async function assertCommunicationPublishable(
+  doc: AssessmentDoc,
+  scope: Types.ObjectId | null,
+): Promise<void> {
+  if (doc.parts.length === 0) {
+    throw new AppError(
+      "Add at least one part before publishing",
+      400,
+      CommunicationErrorCode.NOT_PUBLISHABLE,
+    );
+  }
+  for (let i = 0; i < doc.parts.length; i += 1) {
+    const p = doc.parts[i]!;
+    const resolved = await resolvePartRef(scope, p.partType as PartType, p.ref.toString());
+    if (!resolved) {
+      throw new AppError(
+        `Part ${i + 1} ("${p.label}") no longer exists — fix it before publishing`,
+        400,
+        CommunicationErrorCode.NOT_PUBLISHABLE,
+      );
+    }
+    if (!resolved.published) {
+      throw new AppError(
+        `Part ${i + 1} ("${p.label}") is not published — publish it first`,
+        400,
+        CommunicationErrorCode.NOT_PUBLISHABLE,
+      );
+    }
+  }
 }
 
 export async function setCollegeCommunicationPublished(
@@ -819,42 +867,11 @@ export async function setCollegeCommunicationPublished(
   isPublished: boolean,
 ): Promise<CommunicationAssessmentDetail> {
   const doc = await loadTenant(collegeId, assessmentId);
-  if (isPublished) {
-    if (doc.parts.length === 0) {
-      throw new AppError(
-        "Add at least one part before publishing",
-        400,
-        CommunicationErrorCode.NOT_PUBLISHABLE,
-      );
-    }
-    // A published composite must be fully launchable: every part must resolve in
-    // tenant AND be published, so a student never meets a dead or draft part.
-    for (let i = 0; i < doc.parts.length; i += 1) {
-      const p = doc.parts[i]!;
-      const resolved = await resolvePartRefInTenant(
-        collegeId,
-        p.partType as PartType,
-        p.ref.toString(),
-      );
-      if (!resolved) {
-        throw new AppError(
-          `Part ${i + 1} ("${p.label}") no longer exists — fix it before publishing`,
-          400,
-          CommunicationErrorCode.NOT_PUBLISHABLE,
-        );
-      }
-      if (!resolved.published) {
-        throw new AppError(
-          `Part ${i + 1} ("${p.label}") is not published — publish it first`,
-          400,
-          CommunicationErrorCode.NOT_PUBLISHABLE,
-        );
-      }
-    }
-  }
+  const college = new Types.ObjectId(collegeId);
+  if (isPublished) await assertCommunicationPublishable(doc, college);
   doc.isPublished = isPublished;
   await doc.save();
-  return toDetail(doc, collegeId);
+  return toDetail(doc, college);
 }
 
 export async function deleteCollegeCommunication(
@@ -963,5 +980,181 @@ export async function getCommunicationCohortReport(
       weight: p.weight ?? 1,
     })),
     rows,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Course attach (S29) — GAME pattern: entity.topic → Topic, forward + validated
+// ---------------------------------------------------------------------------
+
+/** Validate a curriculum topic for a course-attached composite: exists, is a
+ *  COMMUNICATION topic, not already attached (1:1). Mirror of resolveGameTopic /
+ *  resolveSpeakingTopic. `excludeId` skips the composite being edited. */
+export async function resolveCommunicationTopic(
+  topicId: string,
+  excludeId?: Types.ObjectId,
+): Promise<Types.ObjectId> {
+  if (!Types.ObjectId.isValid(topicId)) {
+    throw new AppError("Topic not found", 404, CommunicationErrorCode.TOPIC_NOT_FOUND);
+  }
+  const topic = await TopicModel.findById(topicId).select("topicType");
+  if (!topic || topic.topicType !== TopicType.COMMUNICATION) {
+    throw new AppError(
+      "A composite can only attach to a COMMUNICATION topic",
+      400,
+      CommunicationErrorCode.TOPIC_NOT_COMMUNICATION,
+    );
+  }
+  const existing = await CommunicationAssessmentModel.findOne({
+    topic: topic._id,
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  }).select("_id");
+  if (existing) {
+    throw new AppError(
+      "That topic already has a communication assessment",
+      409,
+      CommunicationErrorCode.TOPIC_ALREADY_ATTACHED,
+    );
+  }
+  return topic._id;
+}
+
+// ---------------------------------------------------------------------------
+// Platform authoring (college: null) — parts resolve against college:null too
+// ---------------------------------------------------------------------------
+
+/** Load a PLATFORM composite (college:null) — never a college's. */
+async function loadPlatform(assessmentId: string): Promise<AssessmentDoc> {
+  if (!Types.ObjectId.isValid(assessmentId)) throw NOT_FOUND();
+  const doc = await CommunicationAssessmentModel.findOne({
+    _id: new Types.ObjectId(assessmentId),
+    college: null,
+  });
+  if (!doc) throw NOT_FOUND();
+  return doc;
+}
+
+export async function createPlatformCommunication(
+  input: CommunicationAssessmentUpsert,
+): Promise<CommunicationAssessmentDetail> {
+  // Platform composite: college:null. Parts resolve against college:null artifacts
+  // (scope=null), NOT a tenant. Optional topicId makes it course-attached.
+  const topic = input.topicId ? await resolveCommunicationTopic(input.topicId) : null;
+  const parts = await buildParts(null, input);
+  const doc = await CommunicationAssessmentModel.create({
+    college: null,
+    topic,
+    orgUnits: [],
+    title: input.title,
+    description: input.description,
+    parts,
+    passPercentage: input.passPercentage,
+    distinctionPercentage: input.distinctionPercentage,
+    isPublished: false,
+  });
+  return toDetail(doc, null);
+}
+
+export async function listPlatformCommunication(): Promise<CommunicationAssessmentListResponse> {
+  const docs = await CommunicationAssessmentModel.find({ college: null }).sort({
+    createdAt: -1,
+    _id: -1,
+  });
+  return {
+    items: docs.map((a) => ({
+      id: a._id.toString(),
+      title: a.title,
+      partCount: a.parts.length,
+      isPublished: a.isPublished,
+      orgUnitIds: (a.orgUnits ?? []).map((u) => u.toString()),
+      createdAt: a.createdAt.toISOString(),
+    })),
+  };
+}
+
+export async function getPlatformCommunication(
+  assessmentId: string,
+): Promise<CommunicationAssessmentDetail> {
+  return toDetail(await loadPlatform(assessmentId), null);
+}
+
+export async function updatePlatformCommunication(
+  assessmentId: string,
+  input: CommunicationAssessmentUpsert,
+): Promise<CommunicationAssessmentDetail> {
+  const doc = await loadPlatform(assessmentId);
+  doc.topic = input.topicId
+    ? await resolveCommunicationTopic(input.topicId, doc._id)
+    : null;
+  const parts = await buildParts(null, input);
+  doc.title = input.title;
+  doc.description = input.description;
+  doc.set("parts", parts);
+  doc.passPercentage = input.passPercentage;
+  doc.distinctionPercentage = input.distinctionPercentage;
+  await doc.save();
+  return toDetail(doc, null);
+}
+
+export async function setPlatformCommunicationPublished(
+  assessmentId: string,
+  isPublished: boolean,
+): Promise<CommunicationAssessmentDetail> {
+  const doc = await loadPlatform(assessmentId);
+  if (isPublished) await assertCommunicationPublishable(doc, null);
+  doc.isPublished = isPublished;
+  await doc.save();
+  return toDetail(doc, null);
+}
+
+export async function deletePlatformCommunication(
+  assessmentId: string,
+): Promise<void> {
+  const doc = await loadPlatform(assessmentId);
+  if (doc.isPublished) {
+    throw new AppError(
+      "Unpublish the assessment before deleting it",
+      409,
+      CommunicationErrorCode.NOT_DELETABLE,
+    );
+  }
+  await CommunicationAssessmentModel.deleteOne({ _id: doc._id });
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment-based discovery (S29) — mirror of listGamesForUser
+// ---------------------------------------------------------------------------
+
+/** Course-attached composites the user can reach by ENROLLMENT (B2C or college
+ *  student): Enrollment → Subject → Module → Topic{COMMUNICATION} → composite.
+ *  Global; carries topicId for the learn player. Mirrors listGamesForUser. */
+export async function listCommunicationForUser(
+  userId: string,
+): Promise<CommunicationAvailableListResponse> {
+  const enrollments = await EnrollmentModel.find({ user: userId }).select(
+    "subject",
+  );
+  const subjectIds = enrollments.map((e) => e.subject);
+  if (subjectIds.length === 0) return { items: [] };
+  const modules = await ModuleModel.find({
+    subject: { $in: subjectIds },
+  }).select("_id");
+  const topics = await TopicModel.find({
+    module: { $in: modules.map((m) => m._id) },
+    topicType: TopicType.COMMUNICATION,
+  }).select("_id");
+  const topicIds = topics.map((t) => t._id);
+  if (topicIds.length === 0) return { items: [] };
+  const docs = await CommunicationAssessmentModel.find({
+    topic: { $in: topicIds },
+  }).sort({ createdAt: -1 });
+  return {
+    items: docs.map((a) => ({
+      id: a._id.toString(),
+      topicId: a.topic ? a.topic.toString() : null,
+      title: a.title,
+      description: a.description ?? "",
+      partCount: a.parts.length,
+    })),
   };
 }

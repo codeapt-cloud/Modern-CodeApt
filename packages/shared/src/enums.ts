@@ -275,6 +275,12 @@ export const TopicType = {
   ESSAY: "essay",
   /** A curriculum topic that maps 1:1 to a GameSet (mirrors EXAM). */
   GAME: "game",
+  /** A curriculum topic that maps 1:1 to a SpeakingAssessment (mirrors GAME:
+   *  entity.topic → Topic, bare — no auto-created shell). Step 29. */
+  SPEAKING: "speaking",
+  /** A curriculum topic that maps 1:1 to a CommunicationAssessment (composite),
+   *  same bare/forward mechanic as GAME/SPEAKING. Step 29. */
+  COMMUNICATION: "communication",
 } as const;
 export type TopicType = (typeof TopicType)[keyof typeof TopicType];
 export const TOPIC_TYPE_VALUES = Object.values(TopicType);

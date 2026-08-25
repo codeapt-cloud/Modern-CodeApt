@@ -55,7 +55,12 @@ const communicationAssessmentSchema = new Schema(
   { timestamps: true },
 );
 communicationAssessmentSchema.index({ college: 1 });
-communicationAssessmentSchema.index({ topic: 1 });
+// 1:1 CommunicationAssessment↔Topic for course-attached composites, unique only
+// over docs that actually carry a `topic` — mirrors GameSet.topic exactly (S29).
+communicationAssessmentSchema.index(
+  { topic: 1 },
+  { unique: true, partialFilterExpression: { topic: { $type: "objectId" } } },
+);
 export type CommunicationAssessment = InferSchemaType<
   typeof communicationAssessmentSchema
 >;

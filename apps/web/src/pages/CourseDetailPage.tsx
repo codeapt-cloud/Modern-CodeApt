@@ -11,6 +11,8 @@ import {
   FileText,
   Gamepad2,
   Lock,
+  MessagesSquare,
+  Mic,
   PenLine,
   PlayCircle,
   Sparkles,
@@ -44,6 +46,8 @@ const TOPIC_META: Record<TopicType, { icon: LucideIcon; label: string }> = {
   exam: { icon: ClipboardList, label: "Exam" },
   essay: { icon: PenLine, label: "Essay" },
   game: { icon: Gamepad2, label: "Game" },
+  speaking: { icon: Mic, label: "Speaking" },
+  communication: { icon: MessagesSquare, label: "Communication" },
 };
 
 export function CourseDetailPage() {

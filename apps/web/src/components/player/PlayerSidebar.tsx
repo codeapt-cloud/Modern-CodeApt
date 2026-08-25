@@ -5,6 +5,8 @@ import {
   ClipboardList,
   FileText,
   Gamepad2,
+  Mic,
+  MessagesSquare,
   PenLine,
   PlayCircle,
   type LucideIcon,
@@ -20,6 +22,8 @@ const TYPE_ICON: Record<TopicType, LucideIcon> = {
   exam: ClipboardList,
   essay: PenLine,
   game: Gamepad2,
+  speaking: Mic,
+  communication: MessagesSquare,
 };
 
 export function PlayerSidebar({

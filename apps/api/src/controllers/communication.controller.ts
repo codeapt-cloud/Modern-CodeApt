@@ -188,3 +188,79 @@ export const exportCommunicationCohortController = asyncHandler(
     res.status(200).send(buffer);
   },
 );
+
+// --- Enrollment-based discovery (global, S29) -------------------------------
+
+/** Course-attached composites the caller can reach by enrollment (B2C or college
+ *  student). No tenant — global GET /communication. */
+export const listCommunicationForUserController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(await communication.listCommunicationForUser(userId(req)));
+  },
+);
+
+// --- Platform authoring (requireAdmin, college:null, S29) -------------------
+
+export const adminListCommunicationController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(await communication.listPlatformCommunication());
+  },
+);
+
+export const adminCreateCommunicationController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = communicationAssessmentUpsertSchema.parse(req.body);
+    res.status(201).json(await communication.createPlatformCommunication(input));
+  },
+);
+
+export const adminGetCommunicationController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await communication.getPlatformCommunication(
+          req.params.assessmentId ?? "",
+        ),
+      );
+  },
+);
+
+export const adminUpdateCommunicationController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const input = communicationAssessmentUpsertSchema.parse(req.body);
+    res
+      .status(200)
+      .json(
+        await communication.updatePlatformCommunication(
+          req.params.assessmentId ?? "",
+          input,
+        ),
+      );
+  },
+);
+
+export const adminSetCommunicationPublishController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { isPublished } = setCommunicationPublishSchema.parse(req.body);
+    res
+      .status(200)
+      .json(
+        await communication.setPlatformCommunicationPublished(
+          req.params.assessmentId ?? "",
+          isPublished,
+        ),
+      );
+  },
+);
+
+export const adminDeleteCommunicationController = asyncHandler(
+  async (req: Request, res: Response) => {
+    await communication.deletePlatformCommunication(
+      req.params.assessmentId ?? "",
+    );
+    res.status(204).send();
+  },
+);
