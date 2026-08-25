@@ -16,11 +16,16 @@ import {
   type GameSetUpdate,
   type GameSetUpsert,
   type GameSpecInput,
+  type GameTopicListResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
 
 import { AppError } from "../errors/app-error.js";
-import { TopicModel } from "../models/curriculum.model.js";
+import {
+  ModuleModel,
+  SubjectModel,
+  TopicModel,
+} from "../models/curriculum.model.js";
 import {
   GameSetAttemptModel,
   GameSetModel,
@@ -39,6 +44,7 @@ const NOT_FOUND = (): AppError =>
  */
 export async function resolveGameTopic(
   topicId: string,
+  excludeSetId?: Types.ObjectId,
 ): Promise<Types.ObjectId> {
   if (!Types.ObjectId.isValid(topicId)) {
     throw new AppError("Topic not found", 404, GameErrorCode.TOPIC_NOT_FOUND);
@@ -51,7 +57,12 @@ export async function resolveGameTopic(
       GameErrorCode.TOPIC_NOT_GAME,
     );
   }
-  const existing = await GameSetModel.findOne({ topic: topic._id }).select("_id");
+  // The topic may already be attached to ANOTHER set (one set per topic). When
+  // re-saving the set that already owns it, exclude itself so it's not a 409.
+  const existing = await GameSetModel.findOne({
+    topic: topic._id,
+    ...(excludeSetId ? { _id: { $ne: excludeSetId } } : {}),
+  }).select("_id");
   if (existing) {
     throw new AppError(
       "That topic already has a game set",
@@ -60,6 +71,59 @@ export async function resolveGameTopic(
     );
   }
   return topic._id;
+}
+
+/**
+ * Every curriculum GAME topic, for the course-attach picker (platform authoring).
+ * Carries the Subject › Module › Topic path for a readable label and an
+ * `attached` flag so the UI can disable topics that already own a set (the same
+ * rule {@link resolveGameTopic} enforces server-side). Sorted by that path.
+ */
+export async function listGameTopics(): Promise<GameTopicListResponse> {
+  const topics = await TopicModel.find({ topicType: TopicType.GAME })
+    .select("_id name module")
+    .lean();
+  if (topics.length === 0) return { items: [] };
+
+  const modules = await ModuleModel.find({
+    _id: { $in: topics.map((t) => t.module) },
+  })
+    .select("_id name subject")
+    .lean();
+  const moduleById = new Map(modules.map((m) => [m._id.toString(), m]));
+
+  const subjects = await SubjectModel.find({
+    _id: { $in: modules.map((m) => m.subject) },
+  })
+    .select("_id name")
+    .lean();
+  const subjectNameById = new Map(subjects.map((s) => [s._id.toString(), s.name]));
+
+  const attachedSets = await GameSetModel.find({
+    topic: { $in: topics.map((t) => t._id) },
+  })
+    .select("topic")
+    .lean();
+  const attached = new Set(
+    attachedSets.map((g) => g.topic?.toString()).filter(Boolean),
+  );
+
+  const items = topics.map((t) => {
+    const mod = moduleById.get(t.module.toString());
+    return {
+      id: t._id.toString(),
+      name: t.name,
+      moduleName: mod?.name ?? "",
+      subjectName: mod ? (subjectNameById.get(mod.subject.toString()) ?? "") : "",
+      attached: attached.has(t._id.toString()),
+    };
+  });
+  items.sort((a, b) =>
+    `${a.subjectName}${a.moduleName}${a.name}`.localeCompare(
+      `${b.subjectName}${b.moduleName}${b.name}`,
+    ),
+  );
+  return { items };
 }
 
 /** Shared student-facing projection — operator-safe fields only (no seeds, no
@@ -249,6 +313,14 @@ export async function updateGameSet(
   if (input.instantFeedback !== undefined)
     gs.instantFeedback = input.instantFeedback;
   if (input.maxAttempts !== undefined) gs.maxAttempts = input.maxAttempts;
+  // Course-attach on edit: undefined = leave as-is; "" = detach; id = (re)attach.
+  // Without this the topic was never persisted from an edit, so a set attached
+  // after creation never appeared in its course (the reported bug).
+  if (input.topicId !== undefined) {
+    gs.topic = input.topicId
+      ? await resolveGameTopic(input.topicId, gs._id)
+      : null;
+  }
   await gs.save();
   return toGameSetDetail(gs);
 }

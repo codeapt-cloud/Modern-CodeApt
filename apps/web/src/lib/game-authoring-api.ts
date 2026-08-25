@@ -12,6 +12,7 @@ import {
   type GameSetListResponse,
   type GameSetUpdate,
   type GameSetUpsert,
+  type GameTopicListResponse,
 } from "@codeapt/shared";
 
 import { api } from "./api-client.js";
@@ -24,6 +25,9 @@ export interface GameAuthoringApi {
   setPublished(id: string, isPublished: boolean): Promise<GameSetDetail>;
   remove(id: string): Promise<void>;
   aiBuild(brief: string): Promise<AiBuildGameSetResponse>;
+  /** Platform-only: selectable curriculum GAME topics for the course-attach
+   *  picker. Absent on the college surface (which targets org units, not topics). */
+  listTopics?(): Promise<GameTopicListResponse>;
   /** College-only: browse published platform sets to clone as a template. */
   templates?(): Promise<GameSetListResponse>;
   /** College-only: clone a platform set into this college. */
@@ -41,6 +45,7 @@ export function gameAuthoringApi(): GameAuthoringApi {
     setPublished: (id, isPublished) => a.setPublished(id, isPublished),
     remove: (id) => a.remove(id),
     aiBuild: (brief) => a.aiBuild({ brief }),
+    listTopics: () => a.topics(),
   };
 }
 

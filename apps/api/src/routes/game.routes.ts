@@ -14,6 +14,7 @@ import {
   adminDeleteGameSetController,
   adminGetGameSetController,
   adminListGameSetsController,
+  adminListGameTopicsController,
   adminPublishGameSetController,
   adminUpdateGameSetController,
   answerGameItemController,
@@ -110,6 +111,9 @@ gameRouter.post(
 );
 
 // --- Platform-admin authoring (requireAdmin) ---
+// Selectable GAME topics for the course-attach picker (before the parametrised
+// /admin/game-sets/:gameSetId routes — distinct prefix, but kept together).
+gameRouter.get("/admin/game-topics", ...adminGuard, adminListGameTopicsController);
 gameRouter.get("/admin/game-sets", ...adminGuard, adminListGameSetsController);
 gameRouter.post("/admin/game-sets", ...adminGuard, adminCreateGameSetController);
 // AI set-builder (draft only). Literal path — before the "/:gameSetId" routes.

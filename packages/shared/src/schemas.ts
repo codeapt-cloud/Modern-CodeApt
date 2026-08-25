@@ -5502,6 +5502,10 @@ export const gameSetUpdateSchema = z.object({
   perQuestionTimerSeconds: z.number().int().min(0).max(600).optional(),
   instantFeedback: z.boolean().optional(),
   maxAttempts: z.number().int().min(0).max(100).optional(),
+  /** Platform course-attach on EDIT: undefined = leave unchanged; a topic id =
+   *  (re)attach; "" = detach. Without this, attaching a topic to an existing set
+   *  was silently dropped and the set never appeared in a course. */
+  topicId: z.string().trim().optional(),
 });
 export type GameSetUpdate = z.infer<typeof gameSetUpdateSchema>;
 
@@ -5547,6 +5551,24 @@ export const gameSetListResponseSchema = z.object({
   items: z.array(gameSetListItemSchema),
 });
 export type GameSetListResponse = z.infer<typeof gameSetListResponseSchema>;
+
+/** A selectable curriculum GAME topic for the course-attach picker (platform
+ *  authoring). `attached` = the topic already owns a game set, so it can't take
+ *  another (resolveGameTopic rejects it) — the picker shows it disabled. The
+ *  path fields build a readable "Subject › Module › Topic" label. */
+export const gameTopicOptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  moduleName: z.string(),
+  subjectName: z.string(),
+  attached: z.boolean(),
+});
+export type GameTopicOption = z.infer<typeof gameTopicOptionSchema>;
+
+export const gameTopicListResponseSchema = z.object({
+  items: z.array(gameTopicOptionSchema),
+});
+export type GameTopicListResponse = z.infer<typeof gameTopicListResponseSchema>;
 
 /** AI set-builder: a free-text brief in → a reviewable DRAFT config out. The AI
  * composes CONFIGURATION ONLY (which games, timings, difficulty, counts); it

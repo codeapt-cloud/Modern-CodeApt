@@ -183,6 +183,12 @@ export const adminListGameSetsController = asyncHandler(
   },
 );
 
+export const adminListGameTopicsController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(await adminSets.listGameTopics());
+  },
+);
+
 export const adminCreateGameSetController = asyncHandler(
   async (req: Request, res: Response) => {
     const input = gameSetUpsertSchema.parse(req.body);

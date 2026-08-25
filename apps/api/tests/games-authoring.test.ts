@@ -6,13 +6,18 @@
  * in the policy); is gated on gaming.ai_build for colleges; `source` is set on
  * AI drafts and never affects play; publish-safety + draft-only delete.
  */
-import { Role, UserType, registerLlmRouter } from "@codeapt/shared";
+import { Role, TopicType, UserType, registerLlmRouter } from "@codeapt/shared";
 import type { Express } from "express";
 import { Types } from "mongoose";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import {
+  ModuleModel,
+  SubjectModel,
+  TopicModel,
+} from "../src/models/curriculum.model.js";
 import { UserModel } from "../src/models/user.model.js";
 import * as colleges from "../src/services/college.service.js";
 
@@ -283,5 +288,121 @@ describe("authoring safety — source, publish, delete", () => {
       .delete(`/api/admin/game-sets/${id}`)
       .set(auth(token));
     expect(ok.status).toBe(204);
+  });
+});
+
+describe("GAME-topic picker — GET /admin/game-topics", () => {
+  // Build a Subject › Module › (two GAME topics) tree straight through the models.
+  async function seedGameTopics(): Promise<{ freeId: string; takenId: string }> {
+    const subject = await SubjectModel.create({
+      name: "Aptitude",
+      slug: `apt-${n}-${Date.now()}`,
+    });
+    const mod = await ModuleModel.create({
+      subject: subject._id,
+      name: "Reasoning",
+      order: 0,
+    });
+    const free = await TopicModel.create({
+      module: mod._id,
+      name: "Pattern games",
+      topicType: TopicType.GAME,
+      order: 0,
+    });
+    const taken = await TopicModel.create({
+      module: mod._id,
+      name: "Speed games",
+      topicType: TopicType.GAME,
+      order: 1,
+    });
+    return { freeId: free._id.toString(), takenId: taken._id.toString() };
+  }
+
+  it("lists GAME topics with a readable path and flags ones already attached", async () => {
+    const token = await superToken();
+    const { freeId, takenId } = await seedGameTopics();
+
+    // Attach a set to `taken` so it must come back attached=true.
+    await request(app)
+      .post("/api/admin/game-sets")
+      .set(auth(token))
+      .send({
+        title: "Speed set",
+        games: [{ gameKey: "_probe", durationSeconds: 360, maxQuestions: 3 }],
+        selectionMode: "fixed",
+        topicId: takenId,
+      })
+      .expect(201);
+
+    const res = await request(app)
+      .get("/api/admin/game-topics")
+      .set(auth(token));
+    expect(res.status).toBe(200);
+    const items = res.body.items as Array<{
+      id: string;
+      name: string;
+      moduleName: string;
+      subjectName: string;
+      attached: boolean;
+    }>;
+    const free = items.find((i) => i.id === freeId);
+    const taken = items.find((i) => i.id === takenId);
+    expect(free).toMatchObject({
+      name: "Pattern games",
+      moduleName: "Reasoning",
+      subjectName: "Aptitude",
+      attached: false,
+    });
+    expect(taken?.attached).toBe(true);
+  });
+
+  it("is platform-admin only (a plain user is refused)", async () => {
+    const user = await makeUser();
+    const res = await request(app)
+      .get("/api/admin/game-topics")
+      .set(auth(user.token));
+    expect(res.status).toBe(403);
+  });
+
+  it("attaches a topic on EDIT (was silently dropped), re-saves idempotently, and detaches on ''", async () => {
+    const token = await superToken();
+    const { freeId } = await seedGameTopics();
+
+    // Create WITHOUT a topic, then attach it via update — the reported flow.
+    const created = await request(app)
+      .post("/api/admin/game-sets")
+      .set(auth(token))
+      .send({
+        title: "Attach later",
+        games: [{ gameKey: "_probe", durationSeconds: 360, maxQuestions: 3 }],
+        selectionMode: "fixed",
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.topic).toBeNull();
+    const id = created.body.id as string;
+
+    const attached = await request(app)
+      .patch(`/api/admin/game-sets/${id}`)
+      .set(auth(token))
+      .send({ topicId: freeId });
+    expect(attached.status).toBe(200);
+    expect(attached.body.topic).toBe(freeId); // now persisted
+
+    // Re-saving other fields (topicId undefined) leaves the topic in place, and
+    // re-sending the SAME topic doesn't 409 on itself.
+    const resaved = await request(app)
+      .patch(`/api/admin/game-sets/${id}`)
+      .set(auth(token))
+      .send({ title: "Attach later (edited)", topicId: freeId });
+    expect(resaved.status).toBe(200);
+    expect(resaved.body.topic).toBe(freeId);
+
+    // "" detaches.
+    const detached = await request(app)
+      .patch(`/api/admin/game-sets/${id}`)
+      .set(auth(token))
+      .send({ topicId: "" });
+    expect(detached.status).toBe(200);
+    expect(detached.body.topic).toBeNull();
   });
 });

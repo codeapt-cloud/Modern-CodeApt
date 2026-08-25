@@ -219,6 +219,7 @@ import {
   type GameSetListResponse,
   type GameSetUpdate,
   type GameSetUpsert,
+  type GameTopicListResponse,
   type ProbeGameItemResponse,
   type RecordGameWarningResponse,
   type StartGameSetResponse,
@@ -3961,6 +3962,13 @@ export const api = {
     list: async (): Promise<GameSetListResponse> => {
       const { data } = await http.get<GameSetListResponse>(
         `${API_PREFIX}/admin/game-sets`,
+      );
+      return data;
+    },
+    /** Selectable curriculum GAME topics for the course-attach picker. */
+    topics: async (): Promise<GameTopicListResponse> => {
+      const { data } = await http.get<GameTopicListResponse>(
+        `${API_PREFIX}/admin/game-topics`,
       );
       return data;
     },

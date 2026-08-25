@@ -15,6 +15,7 @@ import {
   type GameKey,
   type GameSetUpsert,
   type GameSpecInput,
+  type GameTopicOption,
   type OrgUnitTreeNode,
   type Role,
 } from "@codeapt/shared";
@@ -99,7 +100,25 @@ export function GameSetEditor({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState<string | null>(null);
 
+  // Course-attach picker (platform only): the selectable GAME topics.
+  const [topics, setTopics] = useState<GameTopicOption[] | null>(null);
+  const [topicQuery, setTopicQuery] = useState("");
+  const [topicOpen, setTopicOpen] = useState(false);
+
   const options = useMemo(() => gamePickerOptions(), []);
+
+  // Load the GAME-topic options once, for the platform course-attach picker.
+  useEffect(() => {
+    if (surface !== "platform" || !authApi.listTopics) return;
+    let live = true;
+    void authApi
+      .listTopics()
+      .then((r) => live && setTopics(r.items))
+      .catch(() => live && setTopics([]));
+    return () => {
+      live = false;
+    };
+  }, [surface, authApi]);
 
   useEffect(() => {
     if (gameSetId === null) return;
@@ -210,10 +229,9 @@ export function GameSetEditor({
           ? draft.pickCount
           : undefined,
       orgUnitIds: surface === "college" ? draft.orgUnitIds : [],
-      topicId:
-        surface === "platform" && draft.topicId.trim()
-          ? draft.topicId.trim()
-          : undefined,
+      // Platform: always send the topic id (a value attaches; "" detaches on
+      // edit and is a no-op on create). College sets don't course-attach.
+      topicId: surface === "platform" ? draft.topicId.trim() : undefined,
       perQuestionTimerSeconds: draft.perQuestionTimerSeconds,
       instantFeedback: draft.instantFeedback,
       maxAttempts: draft.maxAttempts,
@@ -233,6 +251,20 @@ export function GameSetEditor({
   }
 
   if (loading) return <p className="p-6 text-ink-muted">Loading…</p>;
+
+  // --- Course-attach picker derived values (platform) ---
+  const topicLabel = (t: GameTopicOption): string =>
+    [t.subjectName, t.moduleName, t.name].filter(Boolean).join(" › ");
+  const selectedTopic = topics?.find((t) => t.id === draft.topicId) ?? null;
+  const q = topicQuery.trim().toLowerCase();
+  const filteredTopics = (topics ?? []).filter((t) =>
+    q ? topicLabel(t).toLowerCase().includes(q) : true,
+  );
+  const pickTopic = (id: string): void => {
+    setDraft((d) => ({ ...d, topicId: id }));
+    setTopicOpen(false);
+    setTopicQuery("");
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4">
@@ -429,16 +461,107 @@ export function GameSetEditor({
         </label>
       </div>
 
-      {/* Platform: attach to a curriculum GAME topic */}
+      {/* Platform: attach to a curriculum GAME topic (searchable picker) */}
       {surface === "platform" ? (
         <div className="space-y-1">
-          <Label htmlFor="gs-topic">Curriculum topic id (optional — course-attached set)</Label>
-          <Input
-            id="gs-topic"
-            value={draft.topicId}
-            placeholder="A GAME topic id, or leave blank"
-            onChange={(e) => setDraft((d) => ({ ...d, topicId: e.target.value }))}
-          />
+          <Label htmlFor="gs-topic">Curriculum topic (optional — course-attached set)</Label>
+          {topics === null ? (
+            <p className="text-sm text-ink-muted">Loading topics…</p>
+          ) : (
+            <div className="relative">
+              <div className="flex items-center gap-2">
+                <Input
+                  id="gs-topic"
+                  autoComplete="off"
+                  value={
+                    topicOpen
+                      ? topicQuery
+                      : selectedTopic
+                        ? topicLabel(selectedTopic)
+                        : ""
+                  }
+                  placeholder={
+                    topics.length === 0
+                      ? "No GAME topics exist yet — create one in a course"
+                      : "Search game topics, or leave blank (not course-attached)"
+                  }
+                  disabled={topics.length === 0}
+                  onFocus={() => {
+                    setTopicOpen(true);
+                    setTopicQuery("");
+                  }}
+                  onBlur={() => window.setTimeout(() => setTopicOpen(false), 120)}
+                  onChange={(e) => setTopicQuery(e.target.value)}
+                />
+                {draft.topicId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => pickTopic("")}
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+              {selectedTopic === null && draft.topicId ? (
+                // Attached topic whose set was deleted, or an id we couldn't
+                // resolve — surface it rather than showing a blank field.
+                <p className="mt-1 text-xs text-warning-fg">
+                  Attached to topic {draft.topicId} (not in the current list).
+                </p>
+              ) : null}
+              {topicOpen && topics.length > 0 ? (
+                <ul className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-subtle bg-surface-base shadow-lg">
+                  <li>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 text-left text-sm text-ink-muted hover:bg-surface"
+                      // onMouseDown (not onClick) so it fires before the input blur closes us.
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        pickTopic("");
+                      }}
+                    >
+                      None — not course-attached
+                    </button>
+                  </li>
+                  {filteredTopics.length === 0 ? (
+                    <li className="px-3 py-2 text-sm text-ink-muted">
+                      No topics match “{topicQuery}”.
+                    </li>
+                  ) : (
+                    filteredTopics.map((t) => {
+                      const isCurrent = t.id === draft.topicId;
+                      const disabled = t.attached && !isCurrent;
+                      return (
+                        <li key={t.id}>
+                          <button
+                            type="button"
+                            disabled={disabled}
+                            className={`w-full px-3 py-2 text-left text-sm ${
+                              disabled
+                                ? "cursor-not-allowed text-ink-muted/60"
+                                : "text-ink hover:bg-surface"
+                            } ${isCurrent ? "bg-surface" : ""}`}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              if (!disabled) pickTopic(t.id);
+                            }}
+                          >
+                            {topicLabel(t)}
+                            {disabled ? (
+                              <span className="ml-2 text-xs">(already has a set)</span>
+                            ) : null}
+                          </button>
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+              ) : null}
+            </div>
+          )}
         </div>
       ) : null}
 
