@@ -629,15 +629,35 @@ export function speakingItemNeedsAudio(item: {
 }
 
 /**
+ * Item types whose `referenceText` is the WITHHELD CORRECT ANSWER — the complete
+ * sentence the student must produce (fill_missing_word) or the corrected form
+ * (error_correct). Speaking the reference would read the answer aloud, so the
+ * prompt clip must NEVER be synthesised from it. The sentence the student
+ * actually hears (with the word gapped / with the grammar error) is a different
+ * string the author supplies as the STIMULUS — which the runner plays in
+ * preference to the prompt clip anyway.
+ */
+const SPEAKING_REFERENCE_IS_ANSWER: ReadonlySet<SpeakingItemType> =
+  new Set<SpeakingItemType>([
+    SpeakingItemType.FILL_MISSING_WORD,
+    SpeakingItemType.ERROR_CORRECT,
+  ]);
+
+/**
  * The EXACT text a needs-audio item's prompt clip is synthesised from — the ONE
  * source of truth for the seed and the authoring UI, so the generated clip and
- * the preview the operator sees always agree. `sentence_build` speaks its
- * scrambled `chunks` (NEVER `referenceText`, which is the withheld answer);
- * every other type speaks the reference sentence, falling back to the on-screen
- * prompt. Returns "" when there is nothing to speak yet (Generate stays
- * disabled). Callers should first check {@link speakingItemNeedsAudio}: a
- * `read_aloud`/`open_topic` item has no prompt clip regardless of what this
- * would return.
+ * the preview the operator sees always agree.
+ *
+ *   - `sentence_build` speaks its scrambled `chunks` (never the reference).
+ *   - `fill_missing_word` / `error_correct` speak the on-screen prompt: their
+ *     reference is the withheld ANSWER, so speaking it would give the game away;
+ *     the real gapped/erroneous sentence is authored as the stimulus.
+ *   - every other type speaks the reference sentence (the thing to repeat / type
+ *     / retell), falling back to the prompt when there is no reference.
+ *
+ * Returns "" when there is nothing to speak yet (Generate stays disabled).
+ * Callers should first check {@link speakingItemNeedsAudio}: a
+ * `read_aloud`/`open_topic` item has no prompt clip regardless of this result.
  */
 export function speakingPromptAudioText(item: {
   itemType: string;
@@ -647,6 +667,9 @@ export function speakingPromptAudioText(item: {
 }): string {
   if (item.itemType === SpeakingItemType.SENTENCE_BUILD) {
     return (item.chunks ?? []).map((c) => c.trim()).filter(Boolean).join(". ");
+  }
+  if (SPEAKING_REFERENCE_IS_ANSWER.has(item.itemType as SpeakingItemType)) {
+    return (item.promptText ?? "").trim();
   }
   return ((item.referenceText ?? "").trim() || (item.promptText ?? "").trim());
 }

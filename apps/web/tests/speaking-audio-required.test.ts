@@ -88,6 +88,25 @@ describe("speakingPromptAudioText — what the prompt clip synthesises", () => {
     ).toBe("Is milk a solid or a liquid?");
   });
 
+  it("fill_missing_word / error_correct NEVER speak the reference (it is the answer)", () => {
+    // fill_missing_word: reference holds the missing word → speak the prompt.
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.FILL_MISSING_WORD,
+        referenceText: "The meeting has been moved to Friday afternoon.",
+        promptText: "You will hear a sentence with one word missing. Say the complete sentence.",
+      }),
+    ).toBe("You will hear a sentence with one word missing. Say the complete sentence.");
+    // error_correct: reference is the CORRECTED sentence → speak the prompt.
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.ERROR_CORRECT,
+        referenceText: "She goes to work by train every day.",
+        promptText: "The sentence you hear has one grammar mistake. Say it corrected.",
+      }),
+    ).toBe("The sentence you hear has one grammar mistake. Say it corrected.");
+  });
+
   it("returns empty when there is nothing to speak yet (Generate stays disabled)", () => {
     expect(
       speakingPromptAudioText({ itemType: SpeakingItemType.REPEAT }),

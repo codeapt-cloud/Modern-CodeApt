@@ -383,12 +383,19 @@ function ItemForm({
     promptText: item.promptText,
     chunks: item.chunks,
   });
+  // fill_missing_word / error_correct hold the ANSWER in referenceText, so their
+  // clip is synthesised from the prompt instead — mirrors the shared helper.
+  const referenceIsAnswer =
+    item.itemType === SpeakingItemType.FILL_MISSING_WORD ||
+    item.itemType === SpeakingItemType.ERROR_CORRECT;
   const ttsSourceLabel =
     item.itemType === SpeakingItemType.SENTENCE_BUILD
       ? "the scrambled chunks (in order)"
-      : item.referenceText.trim()
-        ? "the reference text"
-        : "the prompt / instruction";
+      : referenceIsAnswer
+        ? "the prompt / instruction"
+        : item.referenceText.trim()
+          ? "the reference text"
+          : "the prompt / instruction";
   const onGenerate = async (): Promise<void> => {
     setTtsError(null);
     setGenerating(true);
@@ -674,11 +681,27 @@ function ItemForm({
                       Nothing to speak yet — fill{" "}
                       {item.itemType === SpeakingItemType.SENTENCE_BUILD
                         ? "the scrambled chunks"
-                        : "the reference text or prompt"}{" "}
+                        : referenceIsAnswer
+                          ? "the prompt / instruction"
+                          : "the reference text or prompt"}{" "}
                       first.
                     </span>
                   )}
                 </div>
+                {referenceIsAnswer ? (
+                  // The reference here is the ANSWER, never spoken. The sentence
+                  // the student HEARS (with the word gapped / with the error) is
+                  // authored as the stimulus on the left, which the runner plays
+                  // in preference to this clip.
+                  <p className="text-xs text-ink-muted">
+                    The reference is the withheld answer, so it is never spoken.
+                    Put the sentence the student actually hears —{" "}
+                    {item.itemType === SpeakingItemType.FILL_MISSING_WORD
+                      ? "with the word gapped"
+                      : "with the grammar error"}{" "}
+                    — in the Stimulus box on the left; it plays first.
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Generate with server-side Piper (fixed voice) OR upload a clip.
                       Both set promptAudioUrl; playback below can't tell them apart. */}

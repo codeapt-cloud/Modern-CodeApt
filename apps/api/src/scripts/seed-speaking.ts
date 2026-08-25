@@ -120,10 +120,11 @@ async function seedSpeaking(): Promise<void> {
       ) {
         continue;
       }
-      // The spoken stimulus per type (sentence_build speaks the SCRAMBLED CHUNKS,
-      // never the reference answer; everything else speaks its read-only
-      // reference or its question/turn) — derived by the shared helper so the
-      // seed and the authoring-UI preview always synthesise the SAME text.
+      // The spoken stimulus per type (sentence_build speaks the SCRAMBLED CHUNKS;
+      // fill_missing_word / error_correct speak the prompt, NEVER their reference
+      // answer; everything else speaks its read-only reference or question/turn)
+      // — derived by the shared helper so the seed and the authoring-UI preview
+      // always synthesise the SAME text.
       const text = speakingPromptAudioText({
         itemType: it.itemType,
         referenceText: it.referenceText,
