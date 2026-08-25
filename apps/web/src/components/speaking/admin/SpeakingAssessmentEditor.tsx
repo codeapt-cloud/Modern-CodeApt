@@ -373,29 +373,19 @@ function ItemForm({
   // the bug: a read_aloud with a 4s clip of its own reference sentence). Gate
   // the whole control on the shared predicate the runner + publish guard obey.
   const needsAudio = speakingItemNeedsAudio({ itemType: item.itemType, chunks: item.chunks });
-  // The EXACT text the clip will say — derived by the shared helper (sentence_build
-  // speaks its scrambled chunks, never the reference answer), so the preview below
-  // and the seed generate identical audio. Shown read-only, NOT an editable field:
-  // the spoken prompt must stay equal to what is scored (Step 27 invariant).
+  // The EXACT text the prompt clip will say — the on-screen prompt/instruction
+  // (or the scrambled chunks for sentence_build), derived by the shared helper so
+  // the preview below and the seed generate identical audio. It NEVER speaks the
+  // reference text (that is the answer key, used only for verification).
   const ttsText = speakingPromptAudioText({
     itemType: item.itemType,
-    referenceText: item.referenceText,
     promptText: item.promptText,
     chunks: item.chunks,
   });
-  // fill_missing_word / error_correct hold the ANSWER in referenceText, so their
-  // clip is synthesised from the prompt instead — mirrors the shared helper.
-  const referenceIsAnswer =
-    item.itemType === SpeakingItemType.FILL_MISSING_WORD ||
-    item.itemType === SpeakingItemType.ERROR_CORRECT;
   const ttsSourceLabel =
     item.itemType === SpeakingItemType.SENTENCE_BUILD
       ? "the scrambled chunks (in order)"
-      : referenceIsAnswer
-        ? "the prompt / instruction"
-        : item.referenceText.trim()
-          ? "the reference text"
-          : "the prompt / instruction";
+      : "the prompt / instruction";
   const onGenerate = async (): Promise<void> => {
     setTtsError(null);
     setGenerating(true);
@@ -681,27 +671,18 @@ function ItemForm({
                       Nothing to speak yet — fill{" "}
                       {item.itemType === SpeakingItemType.SENTENCE_BUILD
                         ? "the scrambled chunks"
-                        : referenceIsAnswer
-                          ? "the prompt / instruction"
-                          : "the reference text or prompt"}{" "}
+                        : "the prompt / instruction"}{" "}
                       first.
                     </span>
                   )}
                 </div>
-                {referenceIsAnswer ? (
-                  // The reference here is the ANSWER, never spoken. The sentence
-                  // the student HEARS (with the word gapped / with the error) is
-                  // authored as the stimulus on the left, which the runner plays
-                  // in preference to this clip.
-                  <p className="text-xs text-ink-muted">
-                    The reference is the withheld answer, so it is never spoken.
-                    Put the sentence the student actually hears —{" "}
-                    {item.itemType === SpeakingItemType.FILL_MISSING_WORD
-                      ? "with the word gapped"
-                      : "with the grammar error"}{" "}
-                    — in the Stimulus box on the left; it plays first.
-                  </p>
-                ) : null}
+                <p className="text-xs text-ink-muted">
+                  Speaks the prompt / instruction, never the reference text (that
+                  is the answer key). When the student must HEAR a sentence that
+                  stays off the screen — the one to repeat, a dialogue or passage,
+                  the gapped or erroneous sentence — put it in the Stimulus box on
+                  the left; the runner plays that in preference to this clip.
+                </p>
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Generate with server-side Piper (fixed voice) OR upload a clip.
                       Both set promptAudioUrl; playback below can't tell them apart. */}

@@ -23,6 +23,7 @@ import {
   SPEAKING_PRESETS,
   speakingItemNeedsAudio,
   speakingPromptAudioText,
+  speakingStimulusAudioText,
   UserType,
 } from "@codeapt/shared";
 import { Types } from "mongoose";
@@ -70,6 +71,7 @@ async function seedSpeaking(): Promise<void> {
       referenceText: spec.referenceText ?? "",
       promptText: spec.promptText ?? "",
       promptAudioUrl: spec.promptAudioUrl ?? "",
+      stimulusText: spec.stimulusText ?? "",
       stimulusAudioUrl: spec.stimulusAudioUrl ?? "",
       stimulusPlayLimit: spec.stimulusPlayLimit ?? 0,
       answerSet: spec.answerSet ? [...spec.answerSet] : [],
@@ -114,35 +116,42 @@ async function seedSpeaking(): Promise<void> {
     let skipped = 0;
     for (let i = 0; i < doc.items.length; i += 1) {
       const it = doc.items[i]!;
-      if (
-        !speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks }) ||
-        it.promptAudioUrl
-      ) {
+      if (!speakingItemNeedsAudio({ itemType: it.itemType, chunks: it.chunks })) {
         continue;
       }
-      // The spoken stimulus per type (sentence_build speaks the SCRAMBLED CHUNKS;
-      // fill_missing_word / error_correct speak the prompt, NEVER their reference
-      // answer; everything else speaks its read-only reference or question/turn)
-      // — derived by the shared helper so the seed and the authoring-UI preview
-      // always synthesise the SAME text.
-      const text = speakingPromptAudioText({
+      // TWO independent audio slots, matching the authoring rule:
+      //   - STIMULUS: the sentence/dialogue/passage the student HEARS but never
+      //     sees (repeat sentence, gapped/erroneous sentence, dialogue, passage,
+      //     narration). Authored as stimulusText; the runner plays it FIRST.
+      //   - PROMPT: the on-screen prompt/instruction (or sentence_build chunks).
+      // referenceText is NEVER spoken — it is the answer key for verification.
+      // Generate the stimulus when one is authored, otherwise the prompt clip;
+      // either satisfies the publish guard and gives the item something to hear.
+      const stimulusText = speakingStimulusAudioText({ stimulusText: it.stimulusText });
+      const promptText = speakingPromptAudioText({
         itemType: it.itemType,
-        referenceText: it.referenceText,
         promptText: it.promptText,
         chunks: it.chunks,
       });
-      if (!text) continue;
       try {
-        const tts = await generateSpeakingPromptAudio(collegeId, text);
-        it.promptAudioUrl = tts.audioUrl;
-        it.promptAudioVoiceId = tts.voiceId;
-        it.promptAudioVoiceVersion = tts.voiceVersion;
-        generated += 1;
+        if (stimulusText && !it.stimulusAudioUrl) {
+          const tts = await generateSpeakingPromptAudio(collegeId, stimulusText);
+          it.stimulusAudioUrl = tts.audioUrl;
+          it.stimulusAudioVoiceId = tts.voiceId;
+          it.stimulusAudioVoiceVersion = tts.voiceVersion;
+          generated += 1;
+        } else if (!stimulusText && promptText && !it.promptAudioUrl) {
+          const tts = await generateSpeakingPromptAudio(collegeId, promptText);
+          it.promptAudioUrl = tts.audioUrl;
+          it.promptAudioVoiceId = tts.voiceId;
+          it.promptAudioVoiceVersion = tts.voiceVersion;
+          generated += 1;
+        }
       } catch (err) {
         skipped += 1;
         logger.warn(
           { itemType: it.itemType, err: (err as Error).message },
-          "seed:speaking — prompt audio skipped (TTS/Cloudinary unavailable); text kept",
+          "seed:speaking — audio skipped (TTS/Cloudinary unavailable); text kept",
         );
       }
     }

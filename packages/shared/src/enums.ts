@@ -629,31 +629,20 @@ export function speakingItemNeedsAudio(item: {
 }
 
 /**
- * Item types whose `referenceText` is the WITHHELD CORRECT ANSWER — the complete
- * sentence the student must produce (fill_missing_word) or the corrected form
- * (error_correct). Speaking the reference would read the answer aloud, so the
- * prompt clip must NEVER be synthesised from it. The sentence the student
- * actually hears (with the word gapped / with the grammar error) is a different
- * string the author supplies as the STIMULUS — which the runner plays in
- * preference to the prompt clip anyway.
- */
-const SPEAKING_REFERENCE_IS_ANSWER: ReadonlySet<SpeakingItemType> =
-  new Set<SpeakingItemType>([
-    SpeakingItemType.FILL_MISSING_WORD,
-    SpeakingItemType.ERROR_CORRECT,
-  ]);
-
-/**
- * The EXACT text a needs-audio item's prompt clip is synthesised from — the ONE
- * source of truth for the seed and the authoring UI, so the generated clip and
- * the preview the operator sees always agree.
+ * The EXACT text an item's PROMPT clip is synthesised from — the ONE source of
+ * truth for the seed and the authoring UI, so the generated clip and the preview
+ * the operator sees always agree.
  *
- *   - `sentence_build` speaks its scrambled `chunks` (never the reference).
- *   - `fill_missing_word` / `error_correct` speak the on-screen prompt: their
- *     reference is the withheld ANSWER, so speaking it would give the game away;
- *     the real gapped/erroneous sentence is authored as the stimulus.
- *   - every other type speaks the reference sentence (the thing to repeat / type
- *     / retell), falling back to the prompt when there is no reference.
+ * The prompt clip speaks the on-screen PROMPT / INSTRUCTION (the question, or the
+ * task wording) — `sentence_build` is the sole exception, speaking its scrambled
+ * `chunks`. It NEVER speaks `referenceText`: the reference is the answer key used
+ * only for verification (e.g. the completed sentence for fill_missing_word, the
+ * corrected sentence for error_correct), and reading it aloud would give the
+ * answer away. When the student must HEAR a sentence that stays hidden from the
+ * screen — the sentence to repeat/type, a dialogue, a passage, the gapped or
+ * erroneous sentence — that text is authored as the STIMULUS and voiced by
+ * {@link speakingStimulusAudioText}; the runner plays the stimulus clip in
+ * preference to the prompt clip.
  *
  * Returns "" when there is nothing to speak yet (Generate stays disabled).
  * Callers should first check {@link speakingItemNeedsAudio}: a
@@ -661,17 +650,25 @@ const SPEAKING_REFERENCE_IS_ANSWER: ReadonlySet<SpeakingItemType> =
  */
 export function speakingPromptAudioText(item: {
   itemType: string;
-  referenceText?: string | null;
   promptText?: string | null;
   chunks?: readonly string[] | null;
 }): string {
   if (item.itemType === SpeakingItemType.SENTENCE_BUILD) {
     return (item.chunks ?? []).map((c) => c.trim()).filter(Boolean).join(". ");
   }
-  if (SPEAKING_REFERENCE_IS_ANSWER.has(item.itemType as SpeakingItemType)) {
-    return (item.promptText ?? "").trim();
-  }
-  return ((item.referenceText ?? "").trim() || (item.promptText ?? "").trim());
+  return (item.promptText ?? "").trim();
+}
+
+/**
+ * The text an item's STIMULUS (hidden listening clip) is synthesised from — the
+ * sentence/dialogue/passage the student HEARS but never sees. Just the authored
+ * stimulus text; separate from {@link speakingPromptAudioText} so the two audio
+ * slots stay independent. "" when none is authored.
+ */
+export function speakingStimulusAudioText(item: {
+  stimulusText?: string | null;
+}): string {
+  return (item.stimulusText ?? "").trim();
 }
 
 /**

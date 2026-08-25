@@ -20,6 +20,10 @@ export interface PresetItemSpec {
   readonly section: string;
   readonly referenceText?: string;
   readonly promptText?: string;
+  /** The sentence/dialogue/passage the student HEARS but never sees — voiced as
+   *  the stimulus clip (played in preference to the prompt clip). Kept separate
+   *  from referenceText, which is the answer key used only for verification. */
+  readonly stimulusText?: string;
   readonly promptAudioUrl?: string;
   readonly stimulusAudioUrl?: string;
   readonly stimulusPlayLimit?: number;
@@ -71,7 +75,11 @@ const CTS: SpeakingPreset = {
     {
       itemType: SpeakingItemType.REPEAT,
       section: "Section A — Reading & Listening",
+      // The reference (answer key) and the heard stimulus are the SAME sentence
+      // here — repeat scores what it plays — but they live in separate fields so
+      // the reference is never shown and the audio comes from the stimulus.
       referenceText: "She left her umbrella on the train this morning.",
+      stimulusText: "She left her umbrella on the train this morning.",
       promptText: "Listen, then say the sentence back exactly.",
       responseWindowSeconds: 20,
     },
@@ -108,7 +116,12 @@ const CTS: SpeakingPreset = {
       section: "Section A — Reading & Listening",
       promptText:
         "Listen to the short conversation, then answer: where are they planning to meet?",
-      stimulusAudioUrl: "",
+      // The dialogue is HEARD, not shown — voiced as the stimulus. The prompt is
+      // the on-screen question; the answer key is the answerSet.
+      stimulusText:
+        "Anna: Should we meet at the coffee shop before the talk? " +
+        "Ben: Let's meet at the library instead — it's quieter and we can find seats. " +
+        "Anna: Good idea. The library it is.",
       answerSet: ["at the library", "the library", "library"],
       responseWindowSeconds: 20,
     },
@@ -117,7 +130,10 @@ const CTS: SpeakingPreset = {
       section: "Section A — Reading & Listening",
       promptText:
         "Listen to the passage, then answer: what did the shop run out of?",
-      stimulusAudioUrl: "",
+      stimulusText:
+        "The corner shop had a busy morning. They sold the last of the milk by " +
+        "nine o'clock, and not long after, they ran out of bread completely. By " +
+        "noon only a few tins of soup were left on the shelves.",
       stimulusPlayLimit: 1,
       answerSet: ["bread", "the bread"],
       responseWindowSeconds: 20,
@@ -125,7 +141,10 @@ const CTS: SpeakingPreset = {
     {
       itemType: SpeakingItemType.FILL_MISSING_WORD,
       section: "Section A — Reading & Listening",
+      // reference = the complete ANSWER (verification); the student HEARS the
+      // sentence with the word gapped (a pause), and must supply "moved".
       referenceText: "The meeting has been moved to Friday afternoon.",
+      stimulusText: "The meeting has been ... to Friday afternoon.",
       missingWord: "moved",
       promptText:
         "You will hear a sentence with one word missing. Say the complete sentence.",
@@ -134,7 +153,10 @@ const CTS: SpeakingPreset = {
     {
       itemType: SpeakingItemType.ERROR_CORRECT,
       section: "Section A — Reading & Listening",
+      // reference = the CORRECTED answer (verification); the student HEARS the
+      // version with the grammar mistake and must say it corrected.
       referenceText: "She goes to work by train every day.",
+      stimulusText: "She go to work by train every day.",
       promptText:
         "The sentence you hear has one grammar mistake. Say it corrected.",
       responseWindowSeconds: 20,
@@ -144,15 +166,13 @@ const CTS: SpeakingPreset = {
       section: "Section A — Reading & Listening",
       promptText:
         "Listen to the story about the Norway road tunnel, then retell it in your own words (30 seconds).",
-      // The story NARRATION — the seed synthesises this to prompt audio; the
-      // student HEARS it and it is withheld from the on-screen view (only
-      // read_aloud shows its reference). keyFacts remain the scoring anchors.
-      referenceText:
+      // The story NARRATION — HEARD, not shown, so it is the STIMULUS (there is
+      // no reference answer for a retell; keyFacts are the scoring anchors).
+      stimulusText:
         "The Lærdal Tunnel in Norway is the longest road tunnel in the world, " +
         "at twenty-four and a half kilometres. It took five years to build and " +
         "has four large caves along the way where drivers can stop and rest. " +
         "Driving all the way through takes about twenty minutes.",
-      stimulusAudioUrl: "",
       keyFacts: [...NORWAY_TUNNEL_FACTS],
       responseWindowSeconds: 30,
     },
