@@ -500,6 +500,26 @@ function ItemForm({
           </div>
         ) : null}
 
+        {item.itemType === SpeakingItemType.SENTENCE_BUILD ? (
+          <div className="space-y-1">
+            <Label>
+              Scrambled chunks the student hears (one per line, in play order)
+            </Label>
+            <textarea
+              className="min-h-[72px] w-full rounded-lg border border-subtle bg-surface p-2 text-ink"
+              placeholder={"was reading\nmy mother\nher favorite magazine"}
+              value={item.chunks.join("\n")}
+              onChange={(e) => onChange({ chunks: linesToArray(e.target.value) })}
+            />
+            <p className="text-xs text-ink-muted">
+              These are synthesised (in this order) into the prompt clip the
+              student hears — never the reference above, which is the withheld
+              correct answer. With chunks, this becomes a listen item and needs
+              audio to publish; leave empty for an on-screen jumble instead.
+            </p>
+          </div>
+        ) : null}
+
         {item.itemType === "fill_missing_word" ? (
           <div className="space-y-1">
             <Label>Missing word</Label>
@@ -624,10 +644,20 @@ function ItemForm({
               // read_aloud / open_topic have nothing to hear — the student reads
               // the on-screen text. No Generate/upload here (attaching a clip was
               // the reported bug), so it can't be confused with a listen item.
-              <p className="text-xs text-ink-muted">
-                This item type plays no prompt audio — the student reads the
-                on-screen text.
-              </p>
+              // sentence_build is the one type where the operator can flip this on
+              // by authoring chunks, so point them there instead of dead-ending.
+              item.itemType === SpeakingItemType.SENTENCE_BUILD ? (
+                <p className="text-xs text-ink-muted">
+                  No prompt audio yet — add scrambled chunks above and a clip of
+                  them (in order) becomes the spoken prompt. With no chunks this
+                  is an on-screen jumble the student reads.
+                </p>
+              ) : (
+                <p className="text-xs text-ink-muted">
+                  This item type plays no prompt audio — the student reads the
+                  on-screen text.
+                </p>
+              )
             ) : (
               <>
                 {/* What the clip will SAY, shown explicitly so the source is never
