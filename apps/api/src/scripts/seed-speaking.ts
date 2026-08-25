@@ -22,7 +22,7 @@ import {
   Role,
   SPEAKING_PRESETS,
   speakingItemNeedsAudio,
-  SpeakingItemType,
+  speakingPromptAudioText,
   UserType,
 } from "@codeapt/shared";
 import { Types } from "mongoose";
@@ -120,14 +120,16 @@ async function seedSpeaking(): Promise<void> {
       ) {
         continue;
       }
-      // The spoken stimulus per type: sentence_build speaks the SCRAMBLED CHUNKS
-      // (never the reference answer); everything else speaks its read-only
-      // reference (repeat/fill/error/story narration) or its question/turn
-      // (short_answer/conversation/passage).
-      const text =
-        it.itemType === SpeakingItemType.SENTENCE_BUILD
-          ? it.chunks.join(". ")
-          : (it.referenceText || it.promptText || "").trim();
+      // The spoken stimulus per type (sentence_build speaks the SCRAMBLED CHUNKS,
+      // never the reference answer; everything else speaks its read-only
+      // reference or its question/turn) — derived by the shared helper so the
+      // seed and the authoring-UI preview always synthesise the SAME text.
+      const text = speakingPromptAudioText({
+        itemType: it.itemType,
+        referenceText: it.referenceText,
+        promptText: it.promptText,
+        chunks: it.chunks,
+      });
       if (!text) continue;
       try {
         const tts = await generateSpeakingPromptAudio(collegeId, text);

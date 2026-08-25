@@ -629,6 +629,29 @@ export function speakingItemNeedsAudio(item: {
 }
 
 /**
+ * The EXACT text a needs-audio item's prompt clip is synthesised from — the ONE
+ * source of truth for the seed and the authoring UI, so the generated clip and
+ * the preview the operator sees always agree. `sentence_build` speaks its
+ * scrambled `chunks` (NEVER `referenceText`, which is the withheld answer);
+ * every other type speaks the reference sentence, falling back to the on-screen
+ * prompt. Returns "" when there is nothing to speak yet (Generate stays
+ * disabled). Callers should first check {@link speakingItemNeedsAudio}: a
+ * `read_aloud`/`open_topic` item has no prompt clip regardless of what this
+ * would return.
+ */
+export function speakingPromptAudioText(item: {
+  itemType: string;
+  referenceText?: string | null;
+  promptText?: string | null;
+  chunks?: readonly string[] | null;
+}): string {
+  if (item.itemType === SpeakingItemType.SENTENCE_BUILD) {
+    return (item.chunks ?? []).map((c) => c.trim()).filter(Boolean).join(". ");
+  }
+  return ((item.referenceText ?? "").trim() || (item.promptText ?? "").trim());
+}
+
+/**
  * Per-item transcription lifecycle. Mirrors {@link JobStatus} value-for-value
  * (speech rides the same async-job model as code execution + essay grading).
  * A `failed` item is FINALIZED — a failed transcription is not retried over

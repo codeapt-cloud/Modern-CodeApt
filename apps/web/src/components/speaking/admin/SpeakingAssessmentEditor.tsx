@@ -13,6 +13,8 @@ import {
   SPEAKING_PRESET_KEYS,
   SpeakingItemType,
   buildItemsFromPreset,
+  speakingItemNeedsAudio,
+  speakingPromptAudioText,
   type OrgUnitTreeNode,
   type Role,
   type SpeakingItemType as SpeakingItemTypeName,
@@ -366,9 +368,27 @@ function ItemForm({
     }
   };
 
-  // The spoken prompt IS the reference sentence for listen-based items (repeat /
-  // dictation / etc.); fall back to the instruction text otherwise.
-  const ttsText = (item.referenceText.trim() || item.promptText.trim());
+  // Does THIS item play a spoken prompt at all? read_aloud / open_topic show
+  // their text on screen — synthesising a clip for them is meaningless (it was
+  // the bug: a read_aloud with a 4s clip of its own reference sentence). Gate
+  // the whole control on the shared predicate the runner + publish guard obey.
+  const needsAudio = speakingItemNeedsAudio({ itemType: item.itemType, chunks: item.chunks });
+  // The EXACT text the clip will say — derived by the shared helper (sentence_build
+  // speaks its scrambled chunks, never the reference answer), so the preview below
+  // and the seed generate identical audio. Shown read-only, NOT an editable field:
+  // the spoken prompt must stay equal to what is scored (Step 27 invariant).
+  const ttsText = speakingPromptAudioText({
+    itemType: item.itemType,
+    referenceText: item.referenceText,
+    promptText: item.promptText,
+    chunks: item.chunks,
+  });
+  const ttsSourceLabel =
+    item.itemType === SpeakingItemType.SENTENCE_BUILD
+      ? "the scrambled chunks (in order)"
+      : item.referenceText.trim()
+        ? "the reference text"
+        : "the prompt / instruction";
   const onGenerate = async (): Promise<void> => {
     setTtsError(null);
     setGenerating(true);
@@ -600,46 +620,77 @@ function ItemForm({
           </div>
           <div className="space-y-1">
             <Label>Prompt audio</Label>
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Generate with server-side Piper (fixed voice) OR upload a clip.
-                  Both set promptAudioUrl; playback below can't tell them apart. */}
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={generating || uploading || ttsText.length === 0}
-                onClick={() => void onGenerate()}
-              >
-                {generating ? "Generating…" : "Generate audio"}
-              </Button>
-              <label className="text-sm text-ink-muted">
-                or upload:{" "}
-                <input
-                  type="file"
-                  accept="audio/*"
-                  className="text-sm text-ink-muted"
-                  onChange={(e) => void onPickAudio(e.target.files?.[0])}
-                />
-              </label>
-            </div>
-            {uploading ? (
-              <span className="text-xs text-ink-muted">Uploading…</span>
-            ) : null}
-            {ttsError ? (
-              <span className="text-xs text-error-fg">{ttsError}</span>
-            ) : null}
-            {item.promptAudioUrl ? (
-              <div className="space-y-1">
-                {/* Hear it before saving — same control regardless of source. */}
-                <audio controls src={item.promptAudioUrl} className="h-8 w-full max-w-sm" />
-                <span className="block text-xs text-success-fg">
-                  Prompt audio attached ✓
-                  {item.promptAudioVoiceId
-                    ? ` — voice ${item.promptAudioVoiceId} (${item.promptAudioVoiceVersion})`
-                    : " — uploaded"}
-                </span>
-              </div>
-            ) : null}
+            {!needsAudio ? (
+              // read_aloud / open_topic have nothing to hear — the student reads
+              // the on-screen text. No Generate/upload here (attaching a clip was
+              // the reported bug), so it can't be confused with a listen item.
+              <p className="text-xs text-ink-muted">
+                This item type plays no prompt audio — the student reads the
+                on-screen text.
+              </p>
+            ) : (
+              <>
+                {/* What the clip will SAY, shown explicitly so the source is never
+                    a guess (the old control had no text box — you couldn't tell it
+                    synthesised the reference / chunks, not the stimulus box). */}
+                <div className="rounded-md border border-subtle bg-surface-base p-2">
+                  <span className="block text-xs font-medium text-ink-muted">
+                    Audio will say — from {ttsSourceLabel}:
+                  </span>
+                  {ttsText ? (
+                    <span className="block text-sm text-ink">“{ttsText}”</span>
+                  ) : (
+                    <span className="block text-sm text-error-fg">
+                      Nothing to speak yet — fill{" "}
+                      {item.itemType === SpeakingItemType.SENTENCE_BUILD
+                        ? "the scrambled chunks"
+                        : "the reference text or prompt"}{" "}
+                      first.
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Generate with server-side Piper (fixed voice) OR upload a clip.
+                      Both set promptAudioUrl; playback below can't tell them apart. */}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={generating || uploading || ttsText.length === 0}
+                    onClick={() => void onGenerate()}
+                  >
+                    {generating ? "Generating…" : "Generate audio"}
+                  </Button>
+                  <label className="text-sm text-ink-muted">
+                    or upload:{" "}
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="text-sm text-ink-muted"
+                      onChange={(e) => void onPickAudio(e.target.files?.[0])}
+                    />
+                  </label>
+                </div>
+                {uploading ? (
+                  <span className="text-xs text-ink-muted">Uploading…</span>
+                ) : null}
+                {ttsError ? (
+                  <span className="text-xs text-error-fg">{ttsError}</span>
+                ) : null}
+                {item.promptAudioUrl ? (
+                  <div className="space-y-1">
+                    {/* Hear it before saving — same control regardless of source. */}
+                    <audio controls src={item.promptAudioUrl} className="h-8 w-full max-w-sm" />
+                    <span className="block text-xs text-success-fg">
+                      Prompt audio attached ✓
+                      {item.promptAudioVoiceId
+                        ? ` — voice ${item.promptAudioVoiceId} (${item.promptAudioVoiceVersion})`
+                        : " — uploaded"}
+                    </span>
+                  </div>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
       </CardContent>

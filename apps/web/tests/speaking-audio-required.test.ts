@@ -8,6 +8,7 @@ import {
   SpeakingItemType,
   speakingItemNeedsAudio,
   speakingItemRequiresAudio,
+  speakingPromptAudioText,
 } from "@codeapt/shared";
 import { describe, expect, it } from "vitest";
 
@@ -53,5 +54,49 @@ describe("speaking audio-required classification", () => {
     expect(
       speakingItemNeedsAudio({ itemType: SpeakingItemType.SENTENCE_BUILD }),
     ).toBe(false);
+  });
+});
+
+describe("speakingPromptAudioText — what the prompt clip synthesises", () => {
+  it("sentence_build speaks the SCRAMBLED CHUNKS, never the reference answer", () => {
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.SENTENCE_BUILD,
+        // The answer is deliberately present — it must NOT be spoken.
+        referenceText: "My mother was reading her favorite magazine.",
+        chunks: ["was reading", "my mother", "her favorite magazine"],
+      }),
+    ).toBe("was reading. my mother. her favorite magazine");
+  });
+
+  it("non-sentence_build speaks the reference, falling back to the prompt", () => {
+    // repeat / dictation / story narration → the reference sentence.
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.REPEAT,
+        referenceText: "She left her umbrella on the train.",
+        promptText: "Listen, then say it back.",
+      }),
+    ).toBe("She left her umbrella on the train.");
+    // short_answer has no reference → the on-screen question is spoken.
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.SHORT_ANSWER,
+        referenceText: "",
+        promptText: "Is milk a solid or a liquid?",
+      }),
+    ).toBe("Is milk a solid or a liquid?");
+  });
+
+  it("returns empty when there is nothing to speak yet (Generate stays disabled)", () => {
+    expect(
+      speakingPromptAudioText({ itemType: SpeakingItemType.REPEAT }),
+    ).toBe("");
+    expect(
+      speakingPromptAudioText({
+        itemType: SpeakingItemType.SENTENCE_BUILD,
+        chunks: [],
+      }),
+    ).toBe("");
   });
 });
