@@ -85,9 +85,24 @@ export function moduleCounts(
 }
 
 /**
- * A deep link to review an entry, or null when the module has no standalone
- * review route (exam/speaking/game scores are shown inline). `surface`/`slug`
- * pick the college vs B2C URL — the essay writer keys the tenant off `?c=`.
+ * Whether an entry opens its result IN PLACE (a drawer on the history page,
+ * reusing the module's per-attempt result read) vs NAVIGATES to a dedicated
+ * page. Exam / speaking / game have no standalone result route, so they open in
+ * place; essay + communication have rich dedicated pages, so they navigate
+ * (see historyEntryHref). Every row is therefore openable.
+ */
+export function historyOpensInPlace(module: HistoryEntry["module"]): boolean {
+  return (
+    module === HistoryModule.EXAM ||
+    module === HistoryModule.SPEAKING ||
+    module === HistoryModule.GAME
+  );
+}
+
+/**
+ * A deep link to review an entry, or null when the module opens in place
+ * (historyOpensInPlace). `surface`/`slug` pick the college vs B2C URL — the
+ * essay writer keys the tenant off `?c=`.
  */
 export function historyEntryHref(
   entry: HistoryEntry,

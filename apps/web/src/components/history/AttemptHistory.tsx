@@ -20,10 +20,19 @@ import {
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { AttemptResultDetail } from "./AttemptResultDetail.js";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
+import { Button } from "../ui/button.js";
 import { Card } from "../ui/card.js";
 import { EmptyState } from "../ui/empty-state.js";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "../ui/sheet.js";
 import { Skeleton } from "../ui/skeleton.js";
 import { Stagger, StaggerItem } from "../motion/index.js";
 import {
@@ -32,6 +41,7 @@ import {
   filterLabel,
   historyDate,
   historyEntryHref,
+  historyOpensInPlace,
   moduleCounts,
   moduleLabel,
   statusBadge,
@@ -62,6 +72,8 @@ export function AttemptHistory({
   slug,
 }: Props): JSX.Element {
   const [filter, setFilter] = useState<HistoryFilter>("all");
+  // The row whose result is open in the in-place drawer (exam/speaking/game).
+  const [open, setOpen] = useState<HistoryEntry | null>(null);
 
   if (loading) {
     return (
@@ -145,12 +157,20 @@ export function AttemptHistory({
                       </span>
                     ) : null}
                     <Badge variant={badge.variant}>{badge.label}</Badge>
-                    {href ? (
+                    {historyOpensInPlace(entry.module) ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setOpen(entry)}
+                      >
+                        View
+                      </Button>
+                    ) : href ? (
                       <Link
                         to={href}
                         className="text-sm font-medium text-primary hover:underline"
                       >
-                        Review
+                        View
                       </Link>
                     ) : null}
                   </div>
@@ -160,6 +180,33 @@ export function AttemptHistory({
           })}
         </Stagger>
       )}
+
+      {/* In-place result viewer for exam / speaking / game rows. */}
+      <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
+        <SheetContent className="w-full max-w-lg overflow-y-auto">
+          {open ? (
+            <>
+              <SheetHeader>
+                <SheetTitle>{open.title}</SheetTitle>
+                <SheetDescription>
+                  {moduleLabel(open.module)}
+                  {historyDate(open.completedAt ?? open.startedAt)
+                    ? ` · ${historyDate(open.completedAt ?? open.startedAt)}`
+                    : ""}
+                </SheetDescription>
+              </SheetHeader>
+              <div className="mt-4">
+                <AttemptResultDetail
+                  entry={open}
+                  surface={surface}
+                  slug={slug}
+                  onClose={() => setOpen(null)}
+                />
+              </div>
+            </>
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

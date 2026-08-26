@@ -11,6 +11,7 @@ import {
   filterEntries,
   historyDate,
   historyEntryHref,
+  historyOpensInPlace,
   moduleCounts,
   moduleLabel,
   statusBadge,
@@ -93,10 +94,29 @@ describe("historyEntryHref", () => {
       "/c/acme/communication/assessments/cmp3",
     );
   });
-  it("has no standalone review route for exam/speaking/game (score shown inline)", () => {
+  it("has no standalone review route for exam/speaking/game (they open in place)", () => {
     expect(historyEntryHref(entry({ module: "exam" }), "b2c")).toBeNull();
     expect(historyEntryHref(entry({ module: "speaking" }), "b2c")).toBeNull();
     expect(historyEntryHref(entry({ module: "game" }), "b2c")).toBeNull();
+  });
+});
+
+describe("historyOpensInPlace", () => {
+  it("exam/speaking/game open in the in-place drawer; essay/communication navigate", () => {
+    expect(historyOpensInPlace("exam")).toBe(true);
+    expect(historyOpensInPlace("speaking")).toBe(true);
+    expect(historyOpensInPlace("game")).toBe(true);
+    expect(historyOpensInPlace("essay")).toBe(false);
+    expect(historyOpensInPlace("communication")).toBe(false);
+  });
+
+  it("every module is openable — in place OR via a navigate link", () => {
+    for (const m of ["exam", "speaking", "game", "essay", "communication"] as const) {
+      const e = entry({ module: m, assessmentId: "x" });
+      const openable =
+        historyOpensInPlace(m) || historyEntryHref(e, "b2c") !== null;
+      expect(openable).toBe(true);
+    }
   });
 });
 
