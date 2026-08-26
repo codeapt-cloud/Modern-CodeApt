@@ -25,6 +25,8 @@
  */
 import { useCallback, useEffect, useRef } from "react";
 
+import { isBlockedKey } from "./proctoring-keys.js";
+
 export type ProctoringReason =
   | "tab-switch"
   | "fullscreen-exit"
@@ -40,6 +42,11 @@ export interface ProctoringBlockOptions {
   drag?: boolean;
   /** Block Ctrl/Cmd + A/C/X/V keyboard shortcuts. */
   shortcuts?: boolean;
+  /** Step 32: block F12 / Ctrl+Shift+I/J/C / Cmd+Opt+I/J/C (DevTools openers).
+   *  FRICTION + evidence, NOT prevention — see proctoring-keys.ts. */
+  devtools?: boolean;
+  /** Step 32: block text selection (selectstart) — Communication profile. */
+  selection?: boolean;
 }
 
 export interface UseProctoringArgs {
@@ -99,6 +106,8 @@ export function useProctoring({
   const blockContext = block?.contextmenu ?? false;
   const blockDrag = block?.drag ?? false;
   const blockShortcuts = block?.shortcuts ?? false;
+  const blockDevtools = block?.devtools ?? false;
+  const blockSelection = block?.selection ?? false;
 
   useEffect(() => {
     if (!active) return;
@@ -116,11 +125,16 @@ export function useProctoring({
       if (warnOnPaste) warn("blocked-paste");
     };
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === "c" || k === "x" || k === "v" || k === "a") {
-        e.preventDefault();
-        if (k === "v" && warnOnPaste) warn("blocked-paste");
+      const kind = isBlockedKey(e, {
+        shortcuts: blockShortcuts,
+        devtools: blockDevtools,
+      });
+      if (!kind) return;
+      e.preventDefault();
+      // A blocked clipboard-PASTE optionally counts as a warning (essay + the
+      // Communication profile); DevTools-key blocks are friction only.
+      if (kind === "clipboard" && e.key.toLowerCase() === "v" && warnOnPaste) {
+        warn("blocked-paste");
       }
     };
     const onBeforeUnload = (e: BeforeUnloadEvent): void => {
@@ -139,7 +153,9 @@ export function useProctoring({
       document.addEventListener("dragstart", prevent);
       document.addEventListener("drop", prevent);
     }
-    if (blockShortcuts) document.addEventListener("keydown", onKeyDown);
+    if (blockShortcuts || blockDevtools)
+      document.addEventListener("keydown", onKeyDown);
+    if (blockSelection) document.addEventListener("selectstart", prevent);
     if (guardUnload) window.addEventListener("beforeunload", onBeforeUnload);
 
     return () => {
@@ -153,6 +169,7 @@ export function useProctoring({
       document.removeEventListener("dragstart", prevent);
       document.removeEventListener("drop", prevent);
       document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("selectstart", prevent);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
   }, [
@@ -166,6 +183,8 @@ export function useProctoring({
     blockContext,
     blockDrag,
     blockShortcuts,
+    blockDevtools,
+    blockSelection,
   ]);
 
   return { requestFullscreen, exitFullscreen };

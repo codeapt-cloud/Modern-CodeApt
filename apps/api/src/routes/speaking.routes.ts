@@ -17,6 +17,9 @@ import {
   listAvailableSpeakingController,
   listCollegeSpeakingController,
   listSpeakingAttemptsController,
+  recordSpeakingWarningController,
+  rescoreCollegeSpeakingAttemptController,
+  rescoreCollegeSpeakingCohortController,
   setCollegeSpeakingPublishController,
   speakingCurrentController,
   speakingInProgressAttemptController,
@@ -91,6 +94,12 @@ collegeSpeakingRouter.get(
   ...member,
   speakingResultController,
 );
+// Step 32: a proctoring warning on the student's own attempt (member).
+collegeSpeakingRouter.post(
+  "/c/:collegeSlug/speaking/attempts/:attemptId/warning",
+  ...member,
+  recordSpeakingWarningController,
+);
 // C5: the student's current in-progress attempt on an assessment (or null), for
 // the composite deep link to RESUME. Member-gated; deeper than "/:assessmentId"
 // (the author GET) so never captured as an id, and distinct from "/attempts".
@@ -129,6 +138,17 @@ collegeSpeakingRouter.delete(
   "/c/:collegeSlug/speaking/:assessmentId/attempts/:attemptId",
   ...author,
   clearSpeakingAttemptController,
+);
+// Step 32 tier-2: re-score through Whisper — one attempt, or the whole cohort.
+collegeSpeakingRouter.post(
+  "/c/:collegeSlug/speaking/:assessmentId/attempts/:attemptId/rescore",
+  ...author,
+  rescoreCollegeSpeakingAttemptController,
+);
+collegeSpeakingRouter.post(
+  "/c/:collegeSlug/speaking/:assessmentId/rescore-cohort",
+  ...author,
+  rescoreCollegeSpeakingCohortController,
 );
 collegeSpeakingRouter.get(
   "/c/:collegeSlug/speaking/:assessmentId",

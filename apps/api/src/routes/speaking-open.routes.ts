@@ -12,15 +12,18 @@
 import { Router } from "express";
 
 import {
+  adminBulkRescoreSpeakingController,
   adminCreateSpeakingController,
   adminDeleteSpeakingController,
   adminGetSpeakingController,
   adminListSpeakingController,
   adminListSpeakingTopicsController,
+  adminRescoreSpeakingAttemptController,
   adminSetSpeakingPublishController,
   adminSpeakingTtsController,
   adminUpdateSpeakingController,
   listSpeakingForUserController,
+  recordSpeakingWarningController,
   speakingCurrentController,
   speakingInProgressAttemptController,
   speakingResultController,
@@ -71,6 +74,12 @@ speakingOpenRouter.get(
   ...authed,
   speakingResultController,
 );
+// Step 32: a proctoring warning on the caller's own attempt (server-authoritative).
+speakingOpenRouter.post(
+  "/speaking/attempts/:attemptId/warning",
+  ...authed,
+  recordSpeakingWarningController,
+);
 speakingOpenRouter.post(
   "/speaking/:assessmentId/attempts",
   ...authed,
@@ -96,6 +105,18 @@ speakingOpenRouter.post(
   ...adminGuard,
   uploadSignatureRateLimiter,
   adminSpeakingTtsController,
+);
+// Step 32 tier-2: platform re-score (one attempt, or a bulk id list). Literal
+// /rescore-bulk + /attempts before the parametrised /admin/speaking/:id routes.
+speakingOpenRouter.post(
+  "/admin/speaking/rescore-bulk",
+  ...adminGuard,
+  adminBulkRescoreSpeakingController,
+);
+speakingOpenRouter.post(
+  "/admin/speaking/attempts/:attemptId/rescore",
+  ...adminGuard,
+  adminRescoreSpeakingAttemptController,
 );
 speakingOpenRouter.get("/admin/speaking", ...adminGuard, adminListSpeakingController);
 speakingOpenRouter.post("/admin/speaking", ...adminGuard, adminCreateSpeakingController);

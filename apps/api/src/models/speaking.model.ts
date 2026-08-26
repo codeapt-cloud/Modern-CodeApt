@@ -19,9 +19,11 @@ import { Schema, model, type InferSchemaType } from "mongoose";
 import {
   SPEAKING_ATTEMPT_STATUS_VALUES,
   SPEAKING_ITEM_TYPE_VALUES,
+  SPEECH_ENGINE_VALUES,
   SPEECH_JOB_STATUS_VALUES,
   SpeakingAttemptStatus,
   SpeakingItemType,
+  SpeechEngine,
   SpeechJobStatus,
 } from "@codeapt/shared";
 
@@ -87,6 +89,15 @@ const speakingAssessmentSchema = new Schema(
     title: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
     items: { type: [speakingItemSchema], default: [] },
+    // Scoring engine (Step 32): whisper (server, authoritative) | browser (client
+    // Web Speech, instant screening). Default whisper so existing sets are
+    // unchanged; the create path defaults it from the platform setting when the
+    // author omits it. See SpeechEngine.
+    speechEngine: {
+      type: String,
+      enum: SPEECH_ENGINE_VALUES,
+      default: SpeechEngine.WHISPER,
+    },
     // Attempt cap; 0 = unlimited.
     maxAttempts: { type: Number, default: 1, min: 0 },
   },
@@ -135,6 +146,14 @@ const speakingAttemptItemSchema = new Schema(
     // fluency). Mixed so Step 11's item scores can extend it.
     subScores: { type: Schema.Types.Mixed, default: null },
     error: { type: String, default: "" },
+    // The engine that produced THIS item's score (Step 32). Stored per-item so a
+    // score stays attributable after the assessment's setting changes or a
+    // Whisper re-score flips a browser item to whisper. Default whisper.
+    engine: {
+      type: String,
+      enum: SPEECH_ENGINE_VALUES,
+      default: SpeechEngine.WHISPER,
+    },
   },
   { _id: false },
 );
@@ -164,6 +183,15 @@ const speakingAttemptSchema = new Schema(
     startedAt: { type: Date },
     submittedAt: { type: Date },
     scoredAt: { type: Date },
+    // Proctoring (Step 32) — SERVER-AUTHORITATIVE warning count for a scored
+    // Communication attempt; a refreshed page cannot reset it. When it reaches
+    // COMMUNICATION_MAX_WARNINGS the attempt is TERMINATED: the score committed so
+    // far stands and `terminated` is flagged with a human reason.
+    warnings: { type: Number, default: 0, min: 0 },
+    terminated: { type: Boolean, default: false },
+    terminatedReason: { type: String, default: "" },
+    // Tier-2 (Step 32): when a browser-STT attempt was re-scored through Whisper.
+    rescoredAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

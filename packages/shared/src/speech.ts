@@ -31,6 +31,7 @@
  * legitimately checks them. The result reports THREE categories (exact /
  * phonetic / error) so an operator can see what the tolerance did.
  */
+import { SpeakingItemType } from "./enums.js";
 import { phoneticMatch } from "./phonetics.js";
 
 // ---------------------------------------------------------------------------
@@ -910,4 +911,221 @@ export function blendOpenTopic(
     total,
     approximate: true,
   };
+}
+
+// ===========================================================================
+// Step 32 — BROWSER STT engine: audio-derived fluency + client-fluency
+// validation + the browser scoring dispatch. Web Speech gives a transcript but
+// NO word timings, so fluency comes from the recorded AUDIO (an RMS envelope the
+// client computes via Web Audio) — never invented from the transcript. All PURE
+// so the server reuses them and they unit-test. The FluencyResult shape is
+// IDENTICAL to the Whisper path so downstream scoring + display are unchanged.
+// ===========================================================================
+
+/**
+ * Fluency from an audio RMS ENVELOPE (one amplitude per short frame, 0..1) — the
+ * Web-Speech counterpart of fluencyMetrics (which needs word timestamps). A frame
+ * counts as VOICED when its rms is at/above silenceThreshold; an interior run of
+ * silent frames longer than the pause threshold is a pause (leading/trailing
+ * silence is NOT a pause, mirroring "gaps between words"). Pure.
+ *
+ *   - durationSeconds = voiced SPAN (first voiced frame to last voiced frame);
+ *   - speechRate      = wordCount / SPOKEN seconds (total voiced time), per spec;
+ *   - pauseCount / longestPauseSeconds from interior silent runs;
+ *   - fillerCount / fillerRate from the TRANSCRIPT (weaker under Web Speech, which
+ *     often drops fillers; an honest lower bound, never inflated).
+ */
+export function fluencyFromEnvelope(
+  envelope: readonly number[],
+  frameSeconds: number,
+  transcript: string,
+  opts: { pauseThresholdSeconds?: number; silenceThreshold?: number } = {},
+): FluencyResult {
+  const threshold = opts.pauseThresholdSeconds ?? PAUSE_THRESHOLD_SECONDS;
+  const silenceThreshold = opts.silenceThreshold ?? 0.02;
+  const words = normalizeWords(transcript);
+  const wordCount = words.length;
+  const fillerCount = words.filter((w) => FILLER_WORDS.has(w)).length;
+
+  if (envelope.length === 0 || frameSeconds <= 0) {
+    return {
+      wordCount,
+      durationSeconds: 0,
+      speechRate: 0,
+      pauseCount: 0,
+      longestPauseSeconds: 0,
+      fillerCount,
+      fillerRate: wordCount > 0 ? round2(fillerCount / wordCount) : 0,
+    };
+  }
+
+  const voiced = envelope.map((v) => v >= silenceThreshold);
+  const firstVoiced = voiced.indexOf(true);
+  const lastVoiced = voiced.lastIndexOf(true);
+  const voicedFrames = voiced.filter(Boolean).length;
+  const spokenSeconds = voicedFrames * frameSeconds;
+  const durationSeconds =
+    firstVoiced === -1 ? 0 : (lastVoiced - firstVoiced + 1) * frameSeconds;
+
+  // Interior silent runs only (between the first and last voiced frame).
+  let pauseCount = 0;
+  let longestPause = 0;
+  if (firstVoiced !== -1) {
+    let run = 0;
+    for (let i = firstVoiced + 1; i < lastVoiced; i++) {
+      if (!voiced[i]) {
+        run += 1;
+      } else {
+        const secs = run * frameSeconds;
+        if (secs > threshold) pauseCount += 1;
+        if (secs > longestPause) longestPause = secs;
+        run = 0;
+      }
+    }
+  }
+
+  const speechRate =
+    wordCount >= 2 && spokenSeconds > 0 ? round2(wordCount / spokenSeconds) : 0;
+  return {
+    wordCount,
+    durationSeconds: round2(durationSeconds),
+    speechRate,
+    pauseCount,
+    longestPauseSeconds: round2(Math.max(0, longestPause)),
+    fillerCount,
+    fillerRate: wordCount > 0 ? round2(fillerCount / wordCount) : 0,
+  };
+}
+
+/** Upper bound on a believable speaking rate (words/sec). Fast auctioneers top
+ *  out ~4-5 wps; past this from a client is nonsense and is rejected. */
+export const MAX_BELIEVABLE_SPEECH_RATE = 12;
+
+/**
+ * Validate + clamp CLIENT-reported fluency before it is trusted (Step 32). The
+ * server does NOT trust the browser blindly: wordCount and fillerCount are
+ * RE-DERIVED from the transcript (which the server has), so the client cannot
+ * inflate them; the audio-only bits (durationSeconds, speechRate, pauseCount,
+ * longestPauseSeconds) are range-checked against the known audio duration and a
+ * sane rate band, and IMPOSSIBLE input is rejected (returns null, caller falls
+ * back). Returns a normalized FluencyResult or null.
+ */
+export function sanitizeClientFluency(
+  raw: unknown,
+  audioDurationSeconds: number,
+  transcript: string,
+): FluencyResult | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+
+  const durationSeconds = num(r.durationSeconds);
+  const speechRate = num(r.speechRate);
+  const pauseCount = num(r.pauseCount);
+  const longestPauseSeconds = num(r.longestPauseSeconds);
+  if (
+    durationSeconds === null ||
+    speechRate === null ||
+    pauseCount === null ||
+    longestPauseSeconds === null
+  ) {
+    return null;
+  }
+  // Impossible: negatives, a pause longer than the clip, or a superhuman rate.
+  // A little slack (1.15x) absorbs frame quantisation.
+  const cap = Math.max(0, audioDurationSeconds) * 1.15 + 1;
+  if (
+    durationSeconds < 0 ||
+    speechRate < 0 ||
+    pauseCount < 0 ||
+    longestPauseSeconds < 0 ||
+    durationSeconds > cap ||
+    longestPauseSeconds > cap ||
+    speechRate > MAX_BELIEVABLE_SPEECH_RATE
+  ) {
+    return null;
+  }
+
+  // Transcript is authoritative for word + filler counts.
+  const words = normalizeWords(transcript);
+  const wordCount = words.length;
+  const fillerCount = words.filter((w) => FILLER_WORDS.has(w)).length;
+  return {
+    wordCount,
+    durationSeconds: round2(durationSeconds),
+    speechRate: round2(speechRate),
+    pauseCount: Math.round(pauseCount),
+    longestPauseSeconds: round2(longestPauseSeconds),
+    fillerCount,
+    fillerRate: wordCount > 0 ? round2(fillerCount / wordCount) : 0,
+  };
+}
+
+/**
+ * Score ONE browser-STT item from its transcript + audio-derived fluency — the
+ * browser-engine counterpart of the worker's post-ASR dispatch. It REUSES the
+ * exact same pure scorers (no new accuracy logic); the only differences are that
+ * fluency comes from the audio envelope (injected) rather than word timings, and
+ * the LLM-hybrid types get their DETERMINISTIC FLOOR only (tier-2 Whisper
+ * re-score adds the AI blend). Dictation is typed and never routed here.
+ */
+export function scoreSpeechItemFromClient(
+  item: {
+    itemType: string;
+    referenceText: string;
+    promptText: string;
+    missingWord: string;
+    answerSet: readonly string[];
+    keyFacts: readonly string[];
+  },
+  transcript: string,
+  fluency: FluencyResult,
+): Record<string, unknown> {
+  const NO_TIMINGS: readonly WordTiming[] = [];
+  switch (item.itemType) {
+    case SpeakingItemType.SHORT_ANSWER:
+    case SpeakingItemType.CONVERSATION:
+    case SpeakingItemType.PASSAGE_QUESTION:
+      return matchAnswerSet(transcript, item.answerSet) as unknown as Record<
+        string,
+        unknown
+      >;
+    case SpeakingItemType.FILL_MISSING_WORD:
+      return {
+        ...scoreFillMissingWord(
+          item.referenceText,
+          item.missingWord,
+          transcript,
+          NO_TIMINGS,
+        ),
+        fluency,
+      };
+    case SpeakingItemType.STORY_RETELL:
+      return {
+        ...scoreStoryRetellFloor(item.keyFacts, transcript, NO_TIMINGS),
+        fluency,
+      };
+    case SpeakingItemType.OPEN_TOPIC: {
+      const fScore = fluencyScore(fluency);
+      return {
+        kind: "open_topic",
+        source: "deterministic_floor",
+        fluency,
+        fluencyScore: fScore,
+        latencySeconds: 0,
+        aiRelevance: null,
+        aiGrammar: null,
+        total: fScore,
+        approximate: false,
+      };
+    }
+    case SpeakingItemType.DICTATION:
+      throw new Error("dictation is typed — never browser-STT scored");
+    default:
+      return {
+        ...scoreReadAloud(item.referenceText, transcript, NO_TIMINGS),
+        fluency,
+      };
+  }
 }

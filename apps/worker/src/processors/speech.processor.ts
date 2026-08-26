@@ -14,6 +14,7 @@
 import {
   SpeakingAttemptStatus,
   SpeakingItemType,
+  SpeechEngine,
   SpeechJobStatus,
   JobStatus,
   matchAnswerSet,
@@ -220,6 +221,9 @@ export const speechProcessor: Processor = async (
           [`items.${itemIndex}.subScores`]: score,
           [`items.${itemIndex}.jobStatus`]: SpeechJobStatus.COMPLETED,
           [`items.${itemIndex}.error`]: "",
+          // Step 32: the Whisper path (initial score OR a tier-2 re-score of a
+          // browser attempt) attributes the item to whisper.
+          [`items.${itemIndex}.engine`]: SpeechEngine.WHISPER,
         },
       },
     );

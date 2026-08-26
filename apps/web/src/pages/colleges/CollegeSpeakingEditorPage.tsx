@@ -91,9 +91,30 @@ export function CollegeSpeakingEditorPage() {
                     {a.itemCount} item{a.itemCount === 1 ? "" : "s"}
                   </p>
                 </div>
-                <Button variant="secondary" size="sm" onClick={() => setEditing(a.id)}>
-                  Edit
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => setEditing(a.id)}>
+                    Edit
+                  </Button>
+                  {/* Step 32 tier-2: re-verify the whole cohort on Whisper. */}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void api.collegeSpeaking
+                        .rescoreCohort(slug, a.id)
+                        .then((r) =>
+                          alert(
+                            `Re-scoring on Whisper: ${r.requeued} attempt(s), ${r.itemsQueued} clip(s) queued.`,
+                          ),
+                        )
+                        .catch((e) =>
+                          alert(e instanceof Error ? e.message : "Re-score failed"),
+                        );
+                    }}
+                  >
+                    Re-score cohort
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

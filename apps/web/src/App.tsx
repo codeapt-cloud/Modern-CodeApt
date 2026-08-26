@@ -45,6 +45,7 @@ const DashboardPage = named(
   () => import("./pages/DashboardPage.js"),
   "DashboardPage",
 );
+const HistoryPage = named(() => import("./pages/HistoryPage.js"), "HistoryPage");
 const ChangePasswordPage = named(
   () => import("./pages/ChangePasswordPage.js"),
   "ChangePasswordPage",
@@ -570,6 +571,7 @@ export function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/app" element={<DashboardPage />} />
+            <Route path="/history" element={<HistoryPage />} />
             <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/challenge" element={<DailyChallengePage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />

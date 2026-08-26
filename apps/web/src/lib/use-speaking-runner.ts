@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   SpeakingItemType,
+  type FluencyResult,
   type SpeakingCurrentResponse,
   type StartSpeakingResponse,
 } from "@codeapt/shared";
@@ -45,8 +46,20 @@ export function useSpeakingRunner(opts: {
   engine: SpeakingEngine;
   attempt: StartSpeakingResponse;
   onFinished: () => void;
+  /** BROWSER engine (Step 32): resolve the recorded blob to a Web Speech
+   *  transcript + audio-derived fluency, submitted alongside the audio. Absent on
+   *  the whisper path → the submit stays exactly { audioUrl } as before. */
+  captureBrowserResult?: (
+    blob: Blob,
+  ) => Promise<{
+    transcript: string;
+    fluency: FluencyResult;
+    recognitionFailed: boolean;
+  } | null>;
 }): UseSpeakingRunner {
-  const { engine, attempt, onFinished } = opts;
+  const { engine, attempt, onFinished, captureBrowserResult } = opts;
+  const captureRef = useRef(captureBrowserResult);
+  captureRef.current = captureBrowserResult;
   const [current, setCurrent] = useState<SpeakingCurrentResponse>(attempt);
   const [phase, setPhase] = useState<ItemPhase>(INITIAL_ITEM_PHASE);
   const [prepRemaining, setPrepRemaining] = useState(0);
@@ -66,9 +79,21 @@ export function useSpeakingRunner(opts: {
     onUpload: useCallback(
       async (blob: Blob) => {
         advancingRef.current = true;
+        // Audio ALWAYS uploads (both engines) — a browser item must stay Whisper
+        // re-scorable (Step 32).
         const url = await uploadAudioToCloudinary(engine.uploadSignature, blob);
+        const capture = captureRef.current
+          ? await captureRef.current(blob)
+          : null;
         const res = await engine.submitItem(attempt.attemptId, indexRef.current, {
           audioUrl: url,
+          ...(capture
+            ? {
+                transcript: capture.transcript,
+                fluency: capture.fluency,
+                recognitionFailed: capture.recognitionFailed,
+              }
+            : {}),
         });
         pendingRef.current = res.current;
       },

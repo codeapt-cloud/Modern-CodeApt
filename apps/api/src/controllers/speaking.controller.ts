@@ -7,6 +7,7 @@
  */
 import { AuthErrorCode, TenantErrorCode } from "@codeapt/shared";
 import {
+  bulkRescoreRequestSchema,
   setSpeakingPublishSchema,
   speakingAssessmentUpsertSchema,
   speakingTtsRequestSchema,
@@ -118,6 +119,21 @@ export const speakingResultController = asyncHandler(
   },
 );
 
+/** Step 32: record ONE proctoring warning (server-authoritative; the owner's
+ *  attempt). Reaching COMMUNICATION_MAX_WARNINGS terminates + commits the score. */
+export const recordSpeakingWarningController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(200)
+      .json(
+        await speaking.recordSpeakingWarning(
+          userId(req),
+          req.params.attemptId ?? "",
+        ),
+      );
+  },
+);
+
 // --- College authoring ------------------------------------------------------
 
 export const listCollegeSpeakingController = asyncHandler(
@@ -220,6 +236,52 @@ export const clearSpeakingAttemptController = asyncHandler(
       req.params.attemptId ?? "",
     );
     res.status(204).send();
+  },
+);
+
+// --- Step 32: Whisper re-score (tier 2) — operator actions ---
+
+/** College faculty: re-score ONE attempt (tenant-safe). */
+export const rescoreCollegeSpeakingAttemptController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(202).json(
+      await speaking.rescoreCollegeAttempt(
+        tenantId(req),
+        req.params.assessmentId ?? "",
+        req.params.attemptId ?? "",
+      ),
+    );
+  },
+);
+
+/** College faculty: re-score every attempt on one assessment (the cohort). */
+export const rescoreCollegeSpeakingCohortController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(202)
+      .json(
+        await speaking.rescoreCollegeAssessment(
+          tenantId(req),
+          req.params.assessmentId ?? "",
+        ),
+      );
+  },
+);
+
+/** Platform admin: re-score ONE attempt by id. */
+export const adminRescoreSpeakingAttemptController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res
+      .status(202)
+      .json(await speaking.rescoreSpeakingAttempt(req.params.attemptId ?? ""));
+  },
+);
+
+/** Platform admin: BULK re-score a set of attempt ids ("re-verify the top 200"). */
+export const adminBulkRescoreSpeakingController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { attemptIds } = bulkRescoreRequestSchema.parse(req.body);
+    res.status(202).json(await speaking.bulkRescoreSpeaking(attemptIds));
   },
 );
 

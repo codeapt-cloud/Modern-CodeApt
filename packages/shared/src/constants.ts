@@ -440,6 +440,18 @@ export const CODING_REFRESH_MAX_PER_MINUTE = 20;
 /** Assessments: malpractice flag raised when warnings exceed this count. */
 export const EXAM_MAX_WARNINGS = 2;
 
+/**
+ * Communication scored attempts (Step 32) get their OWN, stricter threshold: the
+ * attempt is TERMINATED (scored so far is committed, marked "unauthorised actions
+ * detected") once the warning count reaches this. Set to 3 (vs the exam's
+ * exceeds-2, i.e. the 3rd is fatal there too) so a student gets two visible
+ * warnings and the third ends it — Communication is a proctored placement gate
+ * where a hardened profile fires more readily (fullscreen exit, key blocks), so a
+ * small, explicit budget before termination is fairer than the exam's implicit
+ * one while still ending casual cheating. `warnings >= this` terminates.
+ */
+export const COMMUNICATION_MAX_WARNINGS = 3;
+
 /** Default score awarded for a correct daily/quiz MCQ. */
 export const MCQ_CORRECT_MARKS = 5;
 

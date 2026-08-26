@@ -5,6 +5,7 @@
  * This is the mounting the `surface: "platform"` prop was built for (Step 13 left
  * it unmounted). A thin per-surface wrapper, exactly like AdminGameSetsPage.
  */
+import { SpeechEngine } from "@codeapt/shared";
 import { useMemo, useState } from "react";
 
 import { SpeakingAssessmentEditor } from "../../../components/speaking/admin/SpeakingAssessmentEditor.js";
@@ -13,9 +14,10 @@ import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent } from "../../../components/ui/card.js";
 import { EmptyState } from "../../../components/ui/empty-state.js";
+import { Label } from "../../../components/ui/label.js";
 import { PageHeader } from "../../../components/layout/PageHeader.js";
 import { Skeleton } from "../../../components/ui/skeleton.js";
-import { parseApiError } from "../../../lib/api-client.js";
+import { api, parseApiError } from "../../../lib/api-client.js";
 import { platformSpeakingAuthoringApi } from "../../../lib/speaking-authoring-api.js";
 import { useQuery } from "../../../lib/use-query.js";
 
@@ -25,6 +27,18 @@ export function AdminSpeakingPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const list = useQuery(() => authApi.list(), [authApi, reloadTick]);
+
+  // Step 32: the platform DEFAULT engine a new assessment inherits.
+  const settings = useQuery(() => api.platformSettings.get(), []);
+  const setDefaultEngine = async (engine: SpeechEngine): Promise<void> => {
+    setActionError(null);
+    try {
+      await api.platformSettings.update({ defaultSpeechEngine: engine });
+      settings.refetch();
+    } catch (err) {
+      setActionError(parseApiError(err).message);
+    }
+  };
 
   // Publish refusal (NOT_PUBLISHABLE names the offending item / empty case) and
   // delete refusal (published, or has attempts) must surface the SERVER's reason.
@@ -77,6 +91,26 @@ export function AdminSpeakingPage() {
       </div>
 
       {actionError ? <Alert variant="error">{actionError}</Alert> : null}
+
+      {/* Step 32: platform default engine for NEW speaking assessments. */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+          <Label htmlFor="default-engine">Default engine for new assessments</Label>
+          <select
+            id="default-engine"
+            className="rounded-lg border border-subtle bg-surface px-3 py-2 text-sm text-ink"
+            disabled={settings.loading || !settings.data}
+            value={settings.data?.defaultSpeechEngine ?? SpeechEngine.WHISPER}
+            onChange={(e) => void setDefaultEngine(e.target.value as SpeechEngine)}
+          >
+            <option value={SpeechEngine.WHISPER}>Whisper (authoritative)</option>
+            <option value={SpeechEngine.BROWSER}>Browser (instant screening)</option>
+          </select>
+          <span className="text-xs text-ink-muted">
+            Authors can override per assessment; existing assessments are unaffected.
+          </span>
+        </CardContent>
+      </Card>
 
       {list.loading ? (
         <Skeleton className="h-24 w-full" />

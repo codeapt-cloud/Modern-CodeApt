@@ -12,6 +12,7 @@ import {
   SPEAKING_PRESETS,
   SPEAKING_PRESET_KEYS,
   SpeakingItemType,
+  SpeechEngine,
   buildItemsFromPreset,
   speakingItemNeedsAudio,
   speakingPromptAudioText,
@@ -85,6 +86,8 @@ interface Draft {
   orgUnitIds: string[];
   /** Platform course-attach (S30): the SPEAKING topic id, "" = platform-internal. */
   topicId: string;
+  /** Step 32: scoring engine. "" = inherit the platform default on create. */
+  speechEngine: "" | SpeechEngine;
   items: SpeakingItemUpsert[];
 }
 
@@ -111,6 +114,7 @@ export function SpeakingAssessmentEditor({
     maxAttempts: 1,
     orgUnitIds: [],
     topicId: "",
+    speechEngine: "",
     items: [],
   });
   const [presetKey, setPresetKey] = useState<string>("cts");
@@ -133,6 +137,7 @@ export function SpeakingAssessmentEditor({
           maxAttempts: d.maxAttempts,
           orgUnitIds: d.orgUnitIds,
           topicId: d.topicId ?? "",
+          speechEngine: d.speechEngine,
           items: d.items.map((it) => ({ ...blankItem(), ...it })),
         });
         setPublished(d.isPublished);
@@ -170,6 +175,9 @@ export function SpeakingAssessmentEditor({
         description: draft.description,
         maxAttempts: draft.maxAttempts,
         items: draft.items,
+        // Step 32: send the engine only when the author picked one; "" inherits
+        // the platform default on the server (create).
+        ...(draft.speechEngine ? { speechEngine: draft.speechEngine } : {}),
         ...(surface === "college"
           ? { orgUnitIds: draft.orgUnitIds }
           : { topicId: draft.topicId.trim() }),
@@ -270,6 +278,32 @@ export function SpeakingAssessmentEditor({
               setDraft((d) => ({ ...d, description: e.target.value }))
             }
           />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label>Scoring engine</Label>
+          <select
+            className="w-full rounded-lg border border-subtle bg-surface px-3 py-2 text-ink"
+            value={draft.speechEngine}
+            onChange={(e) =>
+              setDraft((d) => ({
+                ...d,
+                speechEngine: e.target.value as "" | SpeechEngine,
+              }))
+            }
+          >
+            <option value="">Platform default</option>
+            <option value={SpeechEngine.WHISPER}>
+              Whisper (server, authoritative)
+            </option>
+            <option value={SpeechEngine.BROWSER}>
+              Browser (instant screening — re-score later on Whisper)
+            </option>
+          </select>
+          <p className="text-xs text-ink-muted">
+            Browser scoring is free + instant (Chrome/Edge/Safari) for bulk
+            screening; the audio still uploads so you can re-verify a shortlist on
+            Whisper without retesting.
+          </p>
         </div>
       </div>
 

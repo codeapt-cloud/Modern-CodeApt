@@ -7,7 +7,9 @@
  * start, attempt ownership thereafter) — identical for both.
  */
 import type {
+  RecordSpeakingWarningResponse,
   SpeakingAttemptResult,
+  SubmitSpeakingItemRequest,
   SubmitSpeakingItemResponse,
   UploadSignatureResponse,
 } from "@codeapt/shared";
@@ -18,10 +20,12 @@ export interface SpeakingEngine {
   submitItem(
     attemptId: string,
     itemIndex: number,
-    payload: { audioUrl?: string; text?: string; silent?: boolean },
+    payload: SubmitSpeakingItemRequest,
   ): Promise<SubmitSpeakingItemResponse>;
   uploadSignature(): Promise<UploadSignatureResponse>;
   result(attemptId: string): Promise<SpeakingAttemptResult>;
+  /** Step 32: record one proctoring warning; server says if now terminated. */
+  recordWarning(attemptId: string): Promise<RecordSpeakingWarningResponse>;
 }
 
 /** College surface: bind the tenant slug onto every engine call. */
@@ -31,6 +35,8 @@ export function collegeSpeakingEngine(slug: string): SpeakingEngine {
       api.collegeSpeaking.submitItem(slug, attemptId, itemIndex, payload),
     uploadSignature: () => api.collegeSpeaking.uploadSignature(slug),
     result: (attemptId) => api.collegeSpeaking.result(slug, attemptId),
+    recordWarning: (attemptId) =>
+      api.collegeSpeaking.recordWarning(slug, attemptId),
   };
 }
 
@@ -41,5 +47,6 @@ export function globalSpeakingEngine(): SpeakingEngine {
       api.speaking.submitItem(attemptId, itemIndex, payload),
     uploadSignature: () => api.speaking.uploadSignature(),
     result: (attemptId) => api.speaking.result(attemptId),
+    recordWarning: (attemptId) => api.speaking.recordWarning(attemptId),
   };
 }

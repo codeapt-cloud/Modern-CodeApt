@@ -41,10 +41,12 @@ import { examRouter } from "./exam.routes.js";
 import { paymentRouter } from "./payment.routes.js";
 import { executionRouter } from "./execution.routes.js";
 import { healthRouter } from "./health.routes.js";
+import { historyRouter } from "./history.routes.js";
 import { meRouter } from "./me.routes.js";
 import { orderAdminRouter } from "./order-admin.routes.js";
 import { publicRouter } from "./public.routes.js";
 import { uploadAdminRouter } from "./upload-admin.routes.js";
+import { platformSettingsRouter } from "./platform-settings.routes.js";
 import { uploadCollegeRouter } from "./upload-college.routes.js";
 import { userAdminRouter } from "./user-admin.routes.js";
 
@@ -55,6 +57,7 @@ apiRouter.use(healthRouter);
 apiRouter.use(publicRouter);
 apiRouter.use(authRouter);
 apiRouter.use(meRouter);
+apiRouter.use(historyRouter);
 apiRouter.use(curriculumRouter);
 apiRouter.use(executionRouter);
 apiRouter.use(challengeRouter);
@@ -69,6 +72,9 @@ apiRouter.use(couponRouter);
 apiRouter.use(userAdminRouter);
 apiRouter.use(orderAdminRouter);
 apiRouter.use(uploadAdminRouter);
+// Platform settings singleton (Step 32): super-admin deploy-free config (default
+// speech engine today). requireAdmin.
+apiRouter.use(platformSettingsRouter);
 apiRouter.use(adminRouter);
 // Multi-tenant colleges (Phase 0 foundation).
 apiRouter.use(collegeAdminRouter);

@@ -29,9 +29,16 @@ import {
   isCourseGranted,
   isPlatformAdmin,
   scoreDictation,
+  scoreSpeechItemFromClient,
+  sanitizeClientFluency,
+  fluencyFromEnvelope,
+  SpeechEngine,
+  COMMUNICATION_MAX_WARNINGS,
   speakingAttemptBudgetSeconds,
   SPEAKING_SUBMIT_GRACE_MS,
   TopicType,
+  type RecordSpeakingWarningResponse,
+  type RescoreResponse,
   type SpeakingTtsResponse,
   type SpeakingAssessmentDetail,
   type SpeakingAssessmentListResponse,
@@ -74,6 +81,7 @@ import {
 } from "../models/speaking.model.js";
 import { UserModel } from "../models/user.model.js";
 import { normalizeEntitlements } from "./college.service.js";
+import { getDefaultSpeechEngine } from "./platform-settings.service.js";
 
 type AssessmentDoc = HydratedDocument<SpeakingAssessment>;
 type AttemptDoc = HydratedDocument<SpeakingAttempt>;
@@ -163,6 +171,7 @@ export async function assertCanTakeSpeakingAssessment(
 function singleItemView(
   it: AssessmentDoc["items"][number],
   index: number,
+  speechEngine: SpeechEngine,
 ): SpeakingItemView {
   return {
     index,
@@ -179,6 +188,8 @@ function singleItemView(
       itemType: it.itemType,
       chunks: it.chunks ?? [],
     }),
+    // Step 32: the runner reads this to choose browser Web Speech vs whisper.
+    speechEngine,
     section: it.section ?? "",
     prepSeconds: it.prepSeconds ?? 0,
     responseWindowSeconds: it.responseWindowSeconds ?? 60,
@@ -219,8 +230,9 @@ function buildCurrent(
   const idx = attempt.currentIndex;
   const done = idx >= total;
   const authored = assessment?.items[idx];
+  const engine = (assessment?.speechEngine as SpeechEngine) ?? SpeechEngine.WHISPER;
   const item =
-    !expired && !done && authored ? singleItemView(authored, idx) : null;
+    !expired && !done && authored ? singleItemView(authored, idx, engine) : null;
   return {
     attemptId: attempt._id.toString(),
     status: attempt.status as SpeakingAttemptStatus,
@@ -472,27 +484,72 @@ export async function submitSpeakingItem(
     set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.COMPLETED;
     itemStatus = SpeechJobStatus.COMPLETED;
   } else if (answeredSpoken) {
-    // Spoken → enqueue an async transcription job.
-    const jobId = randomUUID();
-    await ExecutionJobModel.create({
-      jobId,
-      user: new Types.ObjectId(userId),
-      submissionRef: `${attemptId}:${itemIndex}`,
-      queue: QueueName.SPEECH,
-      status: JobStatus.QUEUED,
-    });
+    const engine = (assessment?.speechEngine as SpeechEngine) ?? SpeechEngine.WHISPER;
+    // The AUDIO IS ALWAYS STORED on BOTH engines (Step 32) — a browser-scored item
+    // must remain Whisper re-scorable (tier 2). The engine is recorded per-item.
     set[`items.${itemIndex}.audioUrl`] = body.audioUrl;
-    set[`items.${itemIndex}.jobId`] = jobId;
-    set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.QUEUED;
-    itemStatus = SpeechJobStatus.QUEUED;
-    await enqueueSpeechJob({
-      jobId,
-      attemptId,
-      itemIndex,
-      audioUrl: body.audioUrl!,
-      collegeId: attempt.college ? attempt.college.toString() : undefined,
-      userId,
-    });
+    set[`items.${itemIndex}.engine`] = engine;
+    if (engine === SpeechEngine.BROWSER) {
+      // Tier 1: score the Web Speech transcript INLINE through the SAME pure
+      // scorers (no new scoring logic; only the transcript's provenance differs).
+      const transcript = (body.transcript ?? "").trim();
+      if (body.recognitionFailed || transcript === "") {
+        // Recognition failed but audio recorded — do NOT score an empty transcript
+        // as a real 0 (that would penalise the student for a browser weakness).
+        // Store the audio, finalize the item unscored; tier-2 re-score grades it.
+        set[`items.${itemIndex}.transcript`] = "";
+        set[`items.${itemIndex}.subScores`] = null;
+        set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.COMPLETED;
+        set[`items.${itemIndex}.error`] =
+          "Recognition produced no transcript — re-score through Whisper to grade.";
+      } else {
+        // Validate + clamp client fluency (audio can't exceed the response window);
+        // if it's nonsense, fall back to a measurable-nothing fluency (word count
+        // only) rather than reject the submit.
+        const audioCap = authored.responseWindowSeconds ?? 60;
+        const fluency =
+          sanitizeClientFluency(body.fluency, audioCap, transcript) ??
+          fluencyFromEnvelope([], 0, transcript);
+        const score = scoreSpeechItemFromClient(
+          {
+            itemType: authored.itemType,
+            referenceText: authored.referenceText ?? "",
+            promptText: authored.promptText ?? "",
+            missingWord: authored.missingWord ?? "",
+            answerSet: authored.answerSet ?? [],
+            keyFacts: authored.keyFacts ?? [],
+          },
+          transcript,
+          fluency,
+        );
+        set[`items.${itemIndex}.transcript`] = transcript;
+        set[`items.${itemIndex}.subScores`] = score;
+        set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.COMPLETED;
+        set[`items.${itemIndex}.error`] = "";
+      }
+      itemStatus = SpeechJobStatus.COMPLETED;
+    } else {
+      // Whisper (async) → enqueue a transcription job (unchanged behaviour).
+      const jobId = randomUUID();
+      await ExecutionJobModel.create({
+        jobId,
+        user: new Types.ObjectId(userId),
+        submissionRef: `${attemptId}:${itemIndex}`,
+        queue: QueueName.SPEECH,
+        status: JobStatus.QUEUED,
+      });
+      set[`items.${itemIndex}.jobId`] = jobId;
+      set[`items.${itemIndex}.jobStatus`] = SpeechJobStatus.QUEUED;
+      itemStatus = SpeechJobStatus.QUEUED;
+      await enqueueSpeechJob({
+        jobId,
+        attemptId,
+        itemIndex,
+        audioUrl: body.audioUrl!,
+        collegeId: attempt.college ? attempt.college.toString() : undefined,
+        userId,
+      });
+    }
   } else {
     // Silent / skipped — no answer. Finalize the item so it stops blocking and
     // the attempt can reach a terminal state. Every item goes through submit so
@@ -507,13 +564,23 @@ export async function submitSpeakingItem(
   // currentIndex stays put so no new prompt is ever disclosed — and closes the
   // attempt EXPIRED.
   const nextIndex = pastDeadline ? itemIndex : itemIndex + 1;
-  const finalStatus = pastDeadline
-    ? SpeakingAttemptStatus.EXPIRED
-    : SpeakingAttemptStatus.SUBMITTED;
+  const totalItems = assessment?.items.length ?? attempt.items.length;
+  const browserEngine =
+    (assessment?.speechEngine as SpeechEngine) === SpeechEngine.BROWSER;
+  // A browser attempt is scored INLINE (no worker), so on the last item it is
+  // already fully scored → SCORED. Whisper attempts stay SUBMITTED and the worker
+  // rolls them up to SCORED when the async jobs finish.
+  let finalStatus: SpeakingAttemptStatus;
+  if (pastDeadline) finalStatus = SpeakingAttemptStatus.EXPIRED;
+  else if (browserEngine && nextIndex >= totalItems)
+    finalStatus = SpeakingAttemptStatus.SCORED;
+  else finalStatus = SpeakingAttemptStatus.SUBMITTED;
   set.currentIndex = nextIndex;
   set.status = finalStatus;
   set.submittedAt = now;
-  if (pastDeadline) set.scoredAt = now;
+  if (pastDeadline || finalStatus === SpeakingAttemptStatus.SCORED) {
+    set.scoredAt = now;
+  }
   await SpeakingAttemptModel.updateOne({ _id: attempt._id }, { $set: set });
 
   attempt.currentIndex = nextIndex;
@@ -537,6 +604,7 @@ function toItemResult(
     transcript: it.transcript ? it.transcript : null,
     score: (it.subScores as SpeakingItemScoreDto | null) ?? null,
     error: it.error ? it.error : null,
+    engine: (it.engine as SpeechEngine) ?? SpeechEngine.WHISPER,
   };
 }
 
@@ -563,6 +631,8 @@ export async function getSpeakingAttemptResult(
     status: attempt.status as SpeakingAttemptStatus,
     complete,
     items: attempt.items.map((it) => toItemResult(it, typeAt(it.itemIndex))),
+    terminated: !!attempt.terminated,
+    terminatedReason: attempt.terminatedReason ? attempt.terminatedReason : null,
   };
 }
 
@@ -617,6 +687,7 @@ function toDetail(a: AssessmentDoc): SpeakingAssessmentDetail {
     maxAttempts: a.maxAttempts,
     orgUnitIds: (a.orgUnits ?? []).map((u) => u.toString()),
     topicId: a.topic ? a.topic.toString() : null,
+    speechEngine: (a.speechEngine as SpeechEngine) ?? SpeechEngine.WHISPER,
     items: a.items.map((it) => ({
       itemType: it.itemType,
       referenceText: it.referenceText,
@@ -714,6 +785,8 @@ export async function createCollegeSpeaking(
 ): Promise<SpeakingAssessmentDetail> {
   const scope = createTenantScope(collegeId);
   const orgUnits = await validateOrgUnits(collegeId, input.orgUnitIds);
+  // Step 32: author choice, else the platform default (whisper today).
+  const speechEngine = input.speechEngine ?? (await getDefaultSpeechEngine());
   const doc = await SpeakingAssessmentModel.create(
     scope.attach({
       topic: null,
@@ -722,6 +795,7 @@ export async function createCollegeSpeaking(
       items: buildItems(input),
       maxAttempts: input.maxAttempts,
       orgUnits,
+      speechEngine,
       isPublished: false,
     }),
   );
@@ -781,6 +855,7 @@ export async function updateCollegeSpeaking(
   doc.set("items", buildItems(input));
   doc.maxAttempts = input.maxAttempts;
   doc.set("orgUnits", orgUnits);
+  if (input.speechEngine !== undefined) doc.speechEngine = input.speechEngine;
   await doc.save();
   return toDetail(doc);
 }
@@ -940,6 +1015,7 @@ export async function listAvailableForCollege(
       description: a.description ?? "",
       itemCount: a.items.length,
       maxAttempts: a.maxAttempts,
+      speechEngine: (a.speechEngine as SpeechEngine) ?? SpeechEngine.WHISPER,
       attemptsUsed: await SpeakingAttemptModel.countDocuments({
         user: userId,
         assessment: a._id,
@@ -1058,6 +1134,7 @@ export async function createPlatformSpeaking(
   // college!=null && topic!=null combination is structurally impossible here
   // (college is always null) — the tenant path likewise never sets a topic.
   const topic = input.topicId ? await resolveSpeakingTopic(input.topicId) : null;
+  const speechEngine = input.speechEngine ?? (await getDefaultSpeechEngine());
   const doc = await SpeakingAssessmentModel.create({
     college: null,
     topic,
@@ -1066,6 +1143,7 @@ export async function createPlatformSpeaking(
     description: input.description,
     items: buildItems(input),
     maxAttempts: input.maxAttempts,
+    speechEngine,
     isPublished: false,
   });
   return toDetail(doc);
@@ -1107,6 +1185,7 @@ export async function updatePlatformSpeaking(
   doc.description = input.description;
   doc.set("items", buildItems(input));
   doc.maxAttempts = input.maxAttempts;
+  if (input.speechEngine !== undefined) doc.speechEngine = input.speechEngine;
   await doc.save();
   return toDetail(doc);
 }
@@ -1184,6 +1263,7 @@ export async function listSpeakingForUser(
       description: a.description ?? "",
       itemCount: a.items.length,
       maxAttempts: a.maxAttempts,
+      speechEngine: (a.speechEngine as SpeechEngine) ?? SpeechEngine.WHISPER,
       attemptsUsed: await SpeakingAttemptModel.countDocuments({
         user: userId,
         assessment: a._id,
@@ -1191,4 +1271,155 @@ export async function listSpeakingForUser(
     })),
   );
   return { items };
+}
+
+// ---------------------------------------------------------------------------
+// Step 32: proctoring termination + Whisper re-score (tier 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Record ONE proctoring warning on a scored Communication attempt (Step 32). The
+ * server is authoritative — the count lives on the attempt, so a page refresh
+ * cannot reset it. Reaching COMMUNICATION_MAX_WARNINGS TERMINATES the attempt:
+ * whatever was scored is committed (COMPLETED items keep their scores; unanswered
+ * items simply stay unanswered and don't block completeness), the attempt is set
+ * terminal (SCORED) and flagged with a human reason. Idempotent once terminated.
+ */
+export async function recordSpeakingWarning(
+  userId: string,
+  attemptId: string,
+): Promise<RecordSpeakingWarningResponse> {
+  const attempt = await loadOwnedAttempt(userId, attemptId);
+  if (attempt.terminated) {
+    return { warnings: attempt.warnings ?? 0, terminated: true };
+  }
+  const warnings = (attempt.warnings ?? 0) + 1;
+  const terminated = warnings >= COMMUNICATION_MAX_WARNINGS;
+  const set: Record<string, unknown> = { warnings };
+  if (terminated) {
+    set.terminated = true;
+    set.terminatedReason = "unauthorised actions detected";
+    // Force-finish: commit what is scored. We do NOT rewrite item statuses — a
+    // COMPLETED item keeps its score, an unanswered item stays unanswered (the
+    // completeness check treats a never-answered item as non-blocking). This
+    // mirrors the exam force-finish intent: commit, never lose the score.
+    set.status = SpeakingAttemptStatus.SCORED;
+    set.scoredAt = new Date();
+  }
+  await SpeakingAttemptModel.updateOne({ _id: attempt._id }, { $set: set });
+  return { warnings, terminated };
+}
+
+/** Load an attempt by id for an OPERATOR action (re-score) — access is gated at
+ *  the route (platform admin / college faculty), not by attempt ownership. */
+async function loadAttemptById(attemptId: string): Promise<AttemptDoc> {
+  if (!Types.ObjectId.isValid(attemptId)) throw ATTEMPT_NOT_FOUND();
+  const a = await SpeakingAttemptModel.findById(attemptId);
+  if (!a) throw ATTEMPT_NOT_FOUND();
+  return a;
+}
+
+/**
+ * TIER 2 (Step 32): re-score a (browser-STT) attempt through Whisper by enqueuing
+ * its STORED audio onto the EXISTING `speech` queue — the same processor, no fork.
+ * Every audio-bearing item is reset to QUEUED (so the worker's guarded write can
+ * overwrite it) and re-enqueued; the worker re-transcribes, re-scores, and stamps
+ * the item engine = whisper. Idempotent: re-running simply re-queues again. The
+ * attempt goes back to SUBMITTED so the worker rolls it up to SCORED when done,
+ * and `rescoredAt` records that a re-score happened. Returns how much was queued.
+ */
+export async function rescoreSpeakingAttempt(
+  attemptId: string,
+): Promise<{ itemsQueued: number }> {
+  const attempt = await loadAttemptById(attemptId);
+  let itemsQueued = 0;
+  for (let i = 0; i < attempt.items.length; i += 1) {
+    const it = attempt.items[i]!;
+    if (!it.audioUrl) continue; // nothing to re-transcribe (unanswered / dictation)
+    const jobId = randomUUID();
+    await ExecutionJobModel.create({
+      jobId,
+      user: attempt.user,
+      submissionRef: `${attemptId}:${i}:rescore`,
+      queue: QueueName.SPEECH,
+      status: JobStatus.QUEUED,
+    });
+    await SpeakingAttemptModel.updateOne(
+      { _id: attempt._id },
+      {
+        $set: {
+          [`items.${i}.jobId`]: jobId,
+          [`items.${i}.jobStatus`]: SpeechJobStatus.QUEUED,
+          [`items.${i}.error`]: "",
+        },
+      },
+    );
+    await enqueueSpeechJob({
+      jobId,
+      attemptId,
+      itemIndex: i,
+      audioUrl: it.audioUrl,
+      collegeId: attempt.college ? attempt.college.toString() : undefined,
+      userId: attempt.user.toString(),
+    });
+    itemsQueued += 1;
+  }
+  await SpeakingAttemptModel.updateOne(
+    { _id: attempt._id },
+    {
+      $set: {
+        status: SpeakingAttemptStatus.SUBMITTED,
+        rescoredAt: new Date(),
+      },
+    },
+  );
+  return { itemsQueued };
+}
+
+/** Bulk re-score (Step 32) — "re-verify the top 200". Per-attempt idempotent. */
+export async function bulkRescoreSpeaking(
+  attemptIds: readonly string[],
+): Promise<RescoreResponse> {
+  let requeued = 0;
+  let itemsQueued = 0;
+  for (const id of attemptIds) {
+    try {
+      const r = await rescoreSpeakingAttempt(id);
+      requeued += 1;
+      itemsQueued += r.itemsQueued;
+    } catch {
+      // A bad id in a bulk list must not abort the rest.
+    }
+  }
+  return { requeued, itemsQueued };
+}
+
+/** College-scoped re-score of ONE attempt — verifies the attempt belongs to an
+ *  assessment IN THIS COLLEGE (tenant-safe) before enqueuing (Step 32). */
+export async function rescoreCollegeAttempt(
+  collegeId: string,
+  assessmentId: string,
+  attemptId: string,
+): Promise<{ itemsQueued: number }> {
+  const assessment = await loadTenant(collegeId, assessmentId);
+  if (!Types.ObjectId.isValid(attemptId)) throw ATTEMPT_NOT_FOUND();
+  const attempt = await SpeakingAttemptModel.findOne({
+    _id: new Types.ObjectId(attemptId),
+    assessment: assessment._id,
+  }).select("_id");
+  if (!attempt) throw ATTEMPT_NOT_FOUND();
+  return rescoreSpeakingAttempt(attemptId);
+}
+
+/** College-scoped BULK re-score of every attempt on one of the college's
+ *  assessments — the tenant form of "re-verify the cohort" (Step 32). */
+export async function rescoreCollegeAssessment(
+  collegeId: string,
+  assessmentId: string,
+): Promise<RescoreResponse> {
+  const assessment = await loadTenant(collegeId, assessmentId);
+  const attempts = await SpeakingAttemptModel.find({
+    assessment: assessment._id,
+  }).select("_id");
+  return bulkRescoreSpeaking(attempts.map((a) => a._id.toString()));
 }

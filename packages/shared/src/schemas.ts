@@ -74,6 +74,12 @@ import {
   COMMUNICATION_PART_STATUS_VALUES,
   SPEAKING_ATTEMPT_STATUS_VALUES,
   SPEAKING_ITEM_TYPE_VALUES,
+  SPEECH_ENGINE_VALUES,
+  type SpeechEngine,
+  HISTORY_MODULE_VALUES,
+  type HistoryModule,
+  HISTORY_STATUS_VALUES,
+  type HistoryStatus,
   SPEECH_JOB_STATUS_VALUES,
   TOPIC_TYPE_VALUES,
   TopicType,
@@ -5975,6 +5981,21 @@ export const speakingAttemptStatusSchema = z.enum(
     ...SpeakingAttemptStatus[],
   ],
 );
+export const speechEngineSchema = z.enum(
+  SPEECH_ENGINE_VALUES as [SpeechEngine, ...SpeechEngine[]],
+);
+
+/** Client-reported fluency (browser STT). Validated + clamped server-side by
+ *  sanitizeClientFluency before use — this only shapes the payload. */
+export const fluencyResultInputSchema = z.object({
+  wordCount: z.number(),
+  durationSeconds: z.number(),
+  speechRate: z.number(),
+  pauseCount: z.number(),
+  longestPauseSeconds: z.number(),
+  fillerCount: z.number(),
+  fillerRate: z.number(),
+});
 
 /** One transcribed word with start/end offsets in seconds (mirrors WordTiming). */
 export const wordTimingSchema = z.object({
@@ -6258,6 +6279,9 @@ export const speakingAssessmentUpsertSchema = z.object({
    *  forward link to a SPEAKING curriculum topic. undefined/"" = platform-internal.
    *  Ignored by the college (tenant) authoring path, which always sets topic:null. */
   topicId: z.string().trim().optional(),
+  /** Speech engine (Step 32). Omitted on create → service defaults it from the
+   *  platform setting; author may override to whisper|browser. */
+  speechEngine: speechEngineSchema.optional(),
 });
 export type SpeakingAssessmentUpsert = z.infer<
   typeof speakingAssessmentUpsertSchema
@@ -6317,6 +6341,8 @@ export const speakingAssessmentDetailSchema = z.object({
   /** The attached curriculum SPEAKING topic (platform course-attached sets), or
    *  null. Always null on the tenant path — additive field, tenant value fixed. */
   topicId: z.string().nullable(),
+  /** Scoring engine for this assessment (Step 32). */
+  speechEngine: speechEngineSchema,
   items: z.array(speakingAssessmentItemDetailSchema),
 });
 export type SpeakingAssessmentDetail = z.infer<
@@ -6334,6 +6360,9 @@ export const speakingPlayListItemSchema = z.object({
   itemCount: z.number().int().nonnegative(),
   maxAttempts: z.number().int().nonnegative(),
   attemptsUsed: z.number().int().nonnegative(),
+  /** Step 32: engine, so the list can compat-gate a browser assessment before
+   *  the student starts (Firefox has no Web Speech). */
+  speechEngine: speechEngineSchema.default("whisper"),
 });
 export type SpeakingPlayListItem = z.infer<typeof speakingPlayListItemSchema>;
 export const speakingPlayListResponseSchema = z.object({
@@ -6367,6 +6396,9 @@ export const speakingItemViewSchema = z.object({
    *  asking the student to repeat silence (Step 27). Instance-level, so it's
    *  correct for sentence_build with vs without chunks. */
   requiresAudio: z.boolean(),
+  /** The assessment's speech engine (Step 32) — the runner picks its capture:
+   *  `browser` runs Web Speech alongside the recorder; `whisper` records only. */
+  speechEngine: speechEngineSchema,
   section: z.string(),
   prepSeconds: z.number().int().nonnegative(),
   responseWindowSeconds: z.number().int().positive(),
@@ -6429,13 +6461,22 @@ export type SpeakingCurrentAttemptResponse = z.infer<
 
 export const submitSpeakingItemRequestSchema = z.object({
   /** Cloudinary URL of the recorded audio (spoken items; only the URL reaches
-   *  the API). Absent for dictation and for a silent/skipped item. */
+   *  the API). Absent for dictation and for a silent/skipped item. On the BROWSER
+   *  engine the audio STILL uploads (Step 32) so the item is Whisper re-scorable. */
   audioUrl: z.string().min(1).optional(),
   /** The TYPED sentence for a dictation item — scored inline, no ASR. */
   text: z.string().optional(),
   /** No audio was captured (a silent take) — advance without scoring. Every item
    *  transition goes through submit so the server's current index stays in sync. */
   silent: z.boolean().optional(),
+  /** BROWSER engine (Step 32): the Web Speech transcript, scored inline through
+   *  the same pure scorers. Absent → the whisper (async) path. */
+  transcript: z.string().optional(),
+  /** BROWSER engine: audio-derived fluency (validated + clamped server-side). */
+  fluency: fluencyResultInputSchema.optional(),
+  /** BROWSER engine: recognition produced nothing but audio recorded fine — store
+   *  the audio for re-score, do NOT score an empty transcript as a real 0. */
+  recognitionFailed: z.boolean().optional(),
 });
 export type SubmitSpeakingItemRequest = z.infer<
   typeof submitSpeakingItemRequestSchema
@@ -6452,6 +6493,10 @@ export const speakingItemResultSchema = z.object({
   /** The item's score in its type's shape (union across all item types). */
   score: speakingItemScoreSchema.nullable(),
   error: z.string().nullable(),
+  /** The engine that produced THIS item's score (Step 32). Data only — attributes
+   *  a stored score after a re-score or an assessment setting change; not shown
+   *  to students as a caveat. */
+  engine: speechEngineSchema,
 });
 export type SpeakingItemResult = z.infer<typeof speakingItemResultSchema>;
 
@@ -6461,6 +6506,10 @@ export const speakingAttemptResultSchema = z.object({
   /** True once every item is finalized (completed or failed). */
   complete: z.boolean(),
   items: z.array(speakingItemResultSchema),
+  /** Proctoring (Step 32): the attempt was ended for unauthorised actions. The
+   *  score committed so far still stands; the UI labels it. */
+  terminated: z.boolean(),
+  terminatedReason: z.string().nullable(),
 });
 export type SpeakingAttemptResult = z.infer<
   typeof speakingAttemptResultSchema
@@ -6478,6 +6527,47 @@ export const submitSpeakingItemResponseSchema = z.object({
 });
 export type SubmitSpeakingItemResponse = z.infer<
   typeof submitSpeakingItemResponseSchema
+>;
+
+// --- Step 32: proctoring warning, re-score, platform settings ---
+
+/** Record one proctoring warning on a scored Communication attempt. The server
+ *  is authoritative: it increments + persists the count and reports whether the
+ *  attempt is now TERMINATED (committing whatever was scored). */
+export const recordSpeakingWarningResponseSchema = z.object({
+  warnings: z.number().int().nonnegative(),
+  terminated: z.boolean(),
+});
+export type RecordSpeakingWarningResponse = z.infer<
+  typeof recordSpeakingWarningResponseSchema
+>;
+
+/** Tier-2 (Step 32): re-score a browser-STT attempt through Whisper. Per-attempt
+ *  needs no body; the bulk form takes attempt ids (the "re-verify the top 200"). */
+export const bulkRescoreRequestSchema = z.object({
+  attemptIds: z.array(z.string().min(1)).min(1).max(1000),
+});
+export type BulkRescoreRequest = z.infer<typeof bulkRescoreRequestSchema>;
+
+export const rescoreResponseSchema = z.object({
+  /** Attempts for which re-score jobs were enqueued. */
+  requeued: z.number().int().nonnegative(),
+  /** Speech jobs enqueued (one per audio-bearing item). */
+  itemsQueued: z.number().int().nonnegative(),
+});
+export type RescoreResponse = z.infer<typeof rescoreResponseSchema>;
+
+/** Platform settings singleton (Step 32). Extensible; today just the default
+ *  speech engine a new speaking assessment inherits. */
+export const platformSettingsSchema = z.object({
+  defaultSpeechEngine: speechEngineSchema,
+});
+export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
+export const platformSettingsUpdateSchema = z.object({
+  defaultSpeechEngine: speechEngineSchema.optional(),
+});
+export type PlatformSettingsUpdate = z.infer<
+  typeof platformSettingsUpdateSchema
 >;
 
 /** Admin/operator row for one attempt on an assessment — status incl. expired,
@@ -6759,3 +6849,54 @@ export const communicationCohortReportSchema = z.object({
 export type CommunicationCohortReport = z.infer<
   typeof communicationCohortReportSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Unified student attempt HISTORY — one date-sorted list across every module
+// (exam / speaking / communication / essay / game). A read-only projection; it
+// reuses each module's existing score math (no new scoring). `scorePercent` is
+// null while a result is pending OR deliberately withheld (e.g. an exam whose
+// results the operator has hidden) — never a fake 0. Speaking rows carry the
+// engine + whether a browser attempt was re-scored through Whisper, so a student
+// sees their attempt flip to the authoritative grade without a new page.
+// ---------------------------------------------------------------------------
+export const historyModuleSchema = z.enum(
+  HISTORY_MODULE_VALUES as [HistoryModule, ...HistoryModule[]],
+);
+export const historyStatusSchema = z.enum(
+  HISTORY_STATUS_VALUES as [HistoryStatus, ...HistoryStatus[]],
+);
+
+export const historyEntrySchema = z.object({
+  module: historyModuleSchema,
+  /** The attempt id (exam/speaking/essay/game). For COMMUNICATION this is the
+   *  composite id (the composite stores no attempt of its own). */
+  attemptId: z.string(),
+  /** The parent artifact id, for building a deep link back into the module. */
+  assessmentId: z.string(),
+  title: z.string(),
+  status: historyStatusSchema,
+  /** 0..100 headline, or null when pending / withheld. */
+  scorePercent: z.number().nullable(),
+  /** Human label for the score cell ("72%", "Passed", "Band: pass", "Result hidden"). */
+  scoreLabel: z.string(),
+  /** Pass/fail where the module has an explicit notion of it; null otherwise. */
+  passed: z.boolean().nullable(),
+  /** Communication/speaking band where meaningful; null otherwise. */
+  band: communicationBandSchema.nullable(),
+  startedAt: z.string().nullable(),
+  /** submittedAt / scoredAt / gradedAt / completedAt — the sort key. */
+  completedAt: z.string().nullable(),
+  gradingPending: z.boolean(),
+  /** Speaking only: the effective engine of the attempt (whisper|browser). */
+  engine: speechEngineSchema.nullable(),
+  /** Speaking only: a browser attempt was re-scored through Whisper (tier 2). */
+  rescored: z.boolean(),
+  /** The attempt was ended for a proctoring violation / flagged malpractice. */
+  flagged: z.boolean(),
+});
+export type HistoryEntry = z.infer<typeof historyEntrySchema>;
+
+export const historyResponseSchema = z.object({
+  entries: z.array(historyEntrySchema),
+});
+export type HistoryResponse = z.infer<typeof historyResponseSchema>;

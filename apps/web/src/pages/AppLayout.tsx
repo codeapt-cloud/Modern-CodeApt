@@ -13,6 +13,7 @@ import {
   Gamepad2,
   Flame,
   FolderTree,
+  History,
   IndianRupee,
   LayoutDashboard,
   Library,
@@ -41,6 +42,7 @@ import { useAuth } from "../providers/AuthProvider.js";
 
 const baseNav: NavItem[] = [
   { label: "Dashboard", to: "/app", icon: LayoutDashboard, end: true },
+  { label: "My history", to: "/history", icon: History },
   { label: "Courses", to: "/courses", icon: BookOpen },
   { label: "Daily challenge", to: "/challenge", icon: Flame },
   { label: "Exams", to: "/exams", icon: ClipboardCheck },

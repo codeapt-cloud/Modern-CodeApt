@@ -113,6 +113,7 @@ import {
   type Faculty,
   type FacultyListResponse,
   type GrantCoursesInput,
+  type HistoryResponse,
   type MyCollegeResponse,
   type OrgUnit,
   type OrgUnitTreeResponse,
@@ -227,7 +228,12 @@ import {
   type StartSpeakingResponse,
   type SpeakingCurrentResponse,
   type SpeakingCurrentAttemptResponse,
+  type SubmitSpeakingItemRequest,
   type SubmitSpeakingItemResponse,
+  type RecordSpeakingWarningResponse,
+  type RescoreResponse,
+  type PlatformSettings,
+  type PlatformSettingsUpdate,
   type SpeakingAttemptResult,
   type SpeakingAttemptAdminList,
   type SpeakingAssessmentListResponse,
@@ -491,6 +497,23 @@ export const api = {
     college: async (): Promise<MyCollegeResponse> => {
       const { data } = await http.get<MyCollegeResponse>(
         `${API_PREFIX}/me/college`,
+      );
+      return data;
+    },
+    /** Unified attempt history across every module (B2C / non-college surface). */
+    history: async (): Promise<HistoryResponse> => {
+      const { data } = await http.get<HistoryResponse>(
+        `${API_PREFIX}/me/history`,
+      );
+      return data;
+    },
+  },
+
+  /** Unified attempt history for a college student (tenant surface). */
+  collegeHistory: {
+    get: async (slug: string): Promise<HistoryResponse> => {
+      const { data } = await http.get<HistoryResponse>(
+        `${API_PREFIX}/c/${slug}/history`,
       );
       return data;
     },
@@ -3733,13 +3756,43 @@ export const api = {
       slug: string,
       attemptId: string,
       itemIndex: number,
-      // Spoken items send { audioUrl }; dictation sends { text }; a silent/
-      // skipped item sends { silent: true } so the server advances disclosure.
-      payload: { audioUrl?: string; text?: string; silent?: boolean },
+      // Spoken items send { audioUrl }; dictation { text }; silent { silent:true };
+      // browser STT adds { transcript, fluency, recognitionFailed } (Step 32).
+      payload: SubmitSpeakingItemRequest,
     ): Promise<SubmitSpeakingItemResponse> => {
       const { data } = await http.post<SubmitSpeakingItemResponse>(
         `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/items/${itemIndex}`,
         payload,
+      );
+      return data;
+    },
+    /** Step 32: record a proctoring warning on the student's own attempt. */
+    recordWarning: async (
+      slug: string,
+      attemptId: string,
+    ): Promise<RecordSpeakingWarningResponse> => {
+      const { data } = await http.post<RecordSpeakingWarningResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/attempts/${attemptId}/warning`,
+      );
+      return data;
+    },
+    /** Step 32 tier-2: re-score one attempt / a whole cohort through Whisper. */
+    rescoreAttempt: async (
+      slug: string,
+      assessmentId: string,
+      attemptId: string,
+    ): Promise<{ itemsQueued: number }> => {
+      const { data } = await http.post<{ itemsQueued: number }>(
+        `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/attempts/${attemptId}/rescore`,
+      );
+      return data;
+    },
+    rescoreCohort: async (
+      slug: string,
+      assessmentId: string,
+    ): Promise<RescoreResponse> => {
+      const { data } = await http.post<RescoreResponse>(
+        `${API_PREFIX}/c/${slug}/speaking/${assessmentId}/rescore-cohort`,
       );
       return data;
     },
@@ -3990,11 +4043,20 @@ export const api = {
     submitItem: async (
       attemptId: string,
       itemIndex: number,
-      payload: { audioUrl?: string; text?: string; silent?: boolean },
+      payload: SubmitSpeakingItemRequest,
     ): Promise<SubmitSpeakingItemResponse> => {
       const { data } = await http.post<SubmitSpeakingItemResponse>(
         `${API_PREFIX}/speaking/attempts/${attemptId}/items/${itemIndex}`,
         payload,
+      );
+      return data;
+    },
+    /** Step 32: proctoring warning on the caller's own attempt. */
+    recordWarning: async (
+      attemptId: string,
+    ): Promise<RecordSpeakingWarningResponse> => {
+      const { data } = await http.post<RecordSpeakingWarningResponse>(
+        `${API_PREFIX}/speaking/attempts/${attemptId}/warning`,
       );
       return data;
     },
@@ -4034,6 +4096,40 @@ export const api = {
     ): Promise<CommunicationLaunchResponse> => {
       const { data } = await http.post<CommunicationLaunchResponse>(
         `${API_PREFIX}/communication/${id}/parts/${order}/launch`,
+      );
+      return data;
+    },
+  },
+
+  /** Platform settings singleton (Step 32) — super-admin, deploy-free config. */
+  platformSettings: {
+    get: async (): Promise<PlatformSettings> => {
+      const { data } = await http.get<PlatformSettings>(
+        `${API_PREFIX}/admin/platform-settings`,
+      );
+      return data;
+    },
+    update: async (body: PlatformSettingsUpdate): Promise<PlatformSettings> => {
+      const { data } = await http.patch<PlatformSettings>(
+        `${API_PREFIX}/admin/platform-settings`,
+        body,
+      );
+      return data;
+    },
+  },
+
+  /** Platform-admin re-score (Step 32 tier-2): one attempt, or a bulk id list. */
+  adminSpeakingRescore: {
+    attempt: async (attemptId: string): Promise<{ itemsQueued: number }> => {
+      const { data } = await http.post<{ itemsQueued: number }>(
+        `${API_PREFIX}/admin/speaking/attempts/${attemptId}/rescore`,
+      );
+      return data;
+    },
+    bulk: async (attemptIds: string[]): Promise<RescoreResponse> => {
+      const { data } = await http.post<RescoreResponse>(
+        `${API_PREFIX}/admin/speaking/rescore-bulk`,
+        { attemptIds },
       );
       return data;
     },

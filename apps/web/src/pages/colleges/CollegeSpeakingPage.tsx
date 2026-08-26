@@ -28,6 +28,10 @@ import { Card, CardContent } from "../../components/ui/card.js";
 import { EmptyState } from "../../components/ui/empty-state.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
 import { api, parseApiError } from "../../lib/api-client.js";
+import {
+  SUPPORTED_BROWSERS_MESSAGE,
+  speechRecognitionSupported,
+} from "../../lib/browser-stt.js";
 import { safeReturnPath } from "../../lib/return-to.js";
 import { collegeSpeakingEngine } from "../../lib/speaking-engine.js";
 import { useQuery } from "../../lib/use-query.js";
@@ -158,12 +162,24 @@ export function CollegeSpeakingPage() {
                           : `${a.attemptsUsed}/${a.maxAttempts} attempts used`}
                       </p>
                     </div>
-                    <Button
-                      disabled={a.maxAttempts > 0 && a.attemptsUsed >= a.maxAttempts}
-                      onClick={() => void startAttempt(a.id)}
-                    >
-                      Start
-                    </Button>
+                    {/* Step 32 compat gate: a browser-engine assessment needs Web
+                        Speech (Chrome/Edge/Safari) — block the start on Firefox. */}
+                    {a.speechEngine === "browser" &&
+                    !speechRecognitionSupported(window as never) ? (
+                      <span
+                        className="max-w-xs text-right text-xs text-error-fg"
+                        title={SUPPORTED_BROWSERS_MESSAGE}
+                      >
+                        Unsupported browser — use Chrome, Edge, or Safari
+                      </span>
+                    ) : (
+                      <Button
+                        disabled={a.maxAttempts > 0 && a.attemptsUsed >= a.maxAttempts}
+                        onClick={() => void startAttempt(a.id)}
+                      >
+                        Start
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               ))}

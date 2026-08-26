@@ -586,6 +586,56 @@ export type SpeakingItemType =
 export const SPEAKING_ITEM_TYPE_VALUES = Object.values(SpeakingItemType);
 
 /**
+ * The speech engine a speaking assessment is scored with (Step 32). A two-tier
+ * pipeline: `browser` = the client's Web Speech API transcribes in-browser (free,
+ * instant, zero server compute) for bulk placement SCREENING; `whisper` = the
+ * server-side faster-whisper path (authoritative). CRITICAL: a `browser` attempt
+ * STILL uploads its audio, so it can be RE-SCORED through Whisper later without
+ * retesting — that re-score is tier 2. Recorded per-attempt-item so a stored
+ * score stays attributable even after the assessment's setting changes.
+ */
+export const SpeechEngine = {
+  WHISPER: "whisper",
+  BROWSER: "browser",
+} as const;
+export type SpeechEngine = (typeof SpeechEngine)[keyof typeof SpeechEngine];
+export const SPEECH_ENGINE_VALUES = Object.values(SpeechEngine);
+
+/**
+ * The assessment families a student's attempt history spans — one row per taken
+ * attempt (or, for COMMUNICATION, one roll-up row per composite the student has
+ * engaged). Used only by the unified "my history" read; it never gates access.
+ */
+export const HistoryModule = {
+  EXAM: "exam",
+  SPEAKING: "speaking",
+  COMMUNICATION: "communication",
+  ESSAY: "essay",
+  GAME: "game",
+} as const;
+export type HistoryModule = (typeof HistoryModule)[keyof typeof HistoryModule];
+export const HISTORY_MODULE_VALUES = Object.values(HistoryModule);
+
+/**
+ * A single normalized attempt status across all history modules. Each module's
+ * own status enum maps into this small set so one UI can render every row:
+ *   in_progress — started, not submitted; grading — submitted, score not ready;
+ *   graded — a score is available (or was withheld); expired — abandoned past a
+ *   deadline; abandoned — explicitly given up (games); terminated — ended for a
+ *   proctoring violation.
+ */
+export const HistoryStatus = {
+  IN_PROGRESS: "in_progress",
+  GRADING: "grading",
+  GRADED: "graded",
+  EXPIRED: "expired",
+  ABANDONED: "abandoned",
+  TERMINATED: "terminated",
+} as const;
+export type HistoryStatus = (typeof HistoryStatus)[keyof typeof HistoryStatus];
+export const HISTORY_STATUS_VALUES = Object.values(HistoryStatus);
+
+/**
  * Item types whose task is IMPOSSIBLE without hearing an audio stimulus — the
  * reference is withheld from the student view (ListenSpeakRenderer), so with no
  * audio there is literally nothing to respond to. The single source of truth for:
