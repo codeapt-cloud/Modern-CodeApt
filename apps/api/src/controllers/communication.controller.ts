@@ -209,6 +209,12 @@ export const adminListCommunicationController = asyncHandler(
   },
 );
 
+export const adminListCommunicationTopicsController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(await communication.listCommunicationTopics());
+  },
+);
+
 export const adminCreateCommunicationController = asyncHandler(
   async (req: Request, res: Response) => {
     const input = communicationAssessmentUpsertSchema.parse(req.body);

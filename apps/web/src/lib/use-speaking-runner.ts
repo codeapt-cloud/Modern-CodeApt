@@ -17,8 +17,8 @@ import {
   type StartSpeakingResponse,
 } from "@codeapt/shared";
 
-import { api } from "./api-client.js";
 import { uploadAudioToCloudinary } from "./audio-upload.js";
+import type { SpeakingEngine } from "./speaking-engine.js";
 import { INITIAL_ITEM_PHASE, nextItemPhase, nextTick, type ItemPhase } from "./speaking-runner.js";
 import { useAudioRecorder, type UseAudioRecorder } from "./use-audio-recorder.js";
 
@@ -42,11 +42,11 @@ export interface UseSpeakingRunner {
 }
 
 export function useSpeakingRunner(opts: {
-  slug: string;
+  engine: SpeakingEngine;
   attempt: StartSpeakingResponse;
   onFinished: () => void;
 }): UseSpeakingRunner {
-  const { slug, attempt, onFinished } = opts;
+  const { engine, attempt, onFinished } = opts;
   const [current, setCurrent] = useState<SpeakingCurrentResponse>(attempt);
   const [phase, setPhase] = useState<ItemPhase>(INITIAL_ITEM_PHASE);
   const [prepRemaining, setPrepRemaining] = useState(0);
@@ -66,16 +66,13 @@ export function useSpeakingRunner(opts: {
     onUpload: useCallback(
       async (blob: Blob) => {
         advancingRef.current = true;
-        const url = await uploadAudioToCloudinary(slug, blob);
-        const res = await api.collegeSpeaking.submitItem(
-          slug,
-          attempt.attemptId,
-          indexRef.current,
-          { audioUrl: url },
-        );
+        const url = await uploadAudioToCloudinary(engine.uploadSignature, blob);
+        const res = await engine.submitItem(attempt.attemptId, indexRef.current, {
+          audioUrl: url,
+        });
         pendingRef.current = res.current;
       },
-      [slug, attempt.attemptId],
+      [engine, attempt.attemptId],
     ),
   });
 
@@ -108,18 +105,15 @@ export function useSpeakingRunner(opts: {
     if (advancingRef.current) return;
     advancingRef.current = true;
     try {
-      const res = await api.collegeSpeaking.submitItem(
-        slug,
-        attempt.attemptId,
-        indexRef.current,
-        { silent: true },
-      );
+      const res = await engine.submitItem(attempt.attemptId, indexRef.current, {
+        silent: true,
+      });
       applyCurrent(res.current);
     } catch {
       setError("Could not record that answer. Please try the next item.");
       advancingRef.current = false;
     }
-  }, [slug, attempt.attemptId, applyCurrent]);
+  }, [engine, attempt.attemptId, applyCurrent]);
 
   // React to terminal recorder states: an audible take already submitted inside
   // onUpload (advance with its `current`); a silent take submits a skip here.
@@ -180,8 +174,8 @@ export function useSpeakingRunner(opts: {
       if (advancingRef.current) return;
       advancingRef.current = true;
       setPhase("submitted");
-      void api.collegeSpeaking
-        .submitItem(slug, attempt.attemptId, indexRef.current, { text })
+      void engine
+        .submitItem(attempt.attemptId, indexRef.current, { text })
         .then((res) => applyCurrent(res.current))
         .catch(() => {
           // The server did not accept the submission (rejection or a network
@@ -193,7 +187,7 @@ export function useSpeakingRunner(opts: {
           void advanceSilent();
         });
     },
-    [slug, attempt.attemptId, applyCurrent, advanceSilent],
+    [engine, attempt.attemptId, applyCurrent, advanceSilent],
   );
 
   const limit = item?.stimulusPlayLimit ?? 0;

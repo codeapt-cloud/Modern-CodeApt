@@ -143,6 +143,22 @@ const AdminGameSetEditorPage = named(
   () => import("./pages/game/admin/AdminGameSetEditorPage.js"),
   "AdminGameSetEditorPage",
 );
+const AdminSpeakingPage = named(
+  () => import("./pages/speaking/admin/AdminSpeakingPage.js"),
+  "AdminSpeakingPage",
+);
+const AdminCommunicationPage = named(
+  () => import("./pages/communication/admin/AdminCommunicationPage.js"),
+  "AdminCommunicationPage",
+);
+const SpeakingRunnerPage = named(
+  () => import("./pages/speaking/SpeakingRunnerPage.js"),
+  "SpeakingRunnerPage",
+);
+const CommunicationRunnerPage = named(
+  () => import("./pages/communication/CommunicationRunnerPage.js"),
+  "CommunicationRunnerPage",
+);
 const AdminCurriculumPage = named(
   () => import("./pages/curriculum/admin/AdminCurriculumPage.js"),
   "AdminCurriculumPage",
@@ -561,6 +577,12 @@ export function App() {
             <Route path="/games" element={<GamesPage />} />
             <Route path="/essays" element={<EssaysPage />} />
             <Route path="/essays/:id" element={<EssayWriterPage />} />
+            {/* B2C / global course-attached speaking + composite runners (S30) */}
+            <Route path="/speaking/:assessmentId" element={<SpeakingRunnerPage />} />
+            <Route
+              path="/communication/:assessmentId"
+              element={<CommunicationRunnerPage />}
+            />
             <Route path="/checkout/:slug" element={<CheckoutPage />} />
             <Route path="/payments/return" element={<PaymentReturnPage />} />
             <Route path="/orders" element={<OrdersPage />} />
@@ -588,6 +610,11 @@ export function App() {
               <Route
                 path="/admin/game-sets/:gameSetId"
                 element={<AdminGameSetEditorPage />}
+              />
+              <Route path="/admin/speaking" element={<AdminSpeakingPage />} />
+              <Route
+                path="/admin/communication"
+                element={<AdminCommunicationPage />}
               />
               <Route
                 path="/admin/curriculum"

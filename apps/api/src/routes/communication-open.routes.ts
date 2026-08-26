@@ -15,6 +15,7 @@ import {
   adminDeleteCommunicationController,
   adminGetCommunicationController,
   adminListCommunicationController,
+  adminListCommunicationTopicsController,
   adminSetCommunicationPublishController,
   adminUpdateCommunicationController,
   getCommunicationStudentController,
@@ -50,6 +51,11 @@ communicationOpenRouter.post(
 );
 
 // --- Platform-admin authoring (requireAdmin) — literal /admin/communication first ---
+communicationOpenRouter.get(
+  "/admin/communication-topics",
+  ...adminGuard,
+  adminListCommunicationTopicsController,
+);
 communicationOpenRouter.get(
   "/admin/communication",
   ...adminGuard,

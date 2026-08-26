@@ -25,3 +25,21 @@ export function communicationRunnerPath(
   if (partType === "essay") return `/essays/${ref}?${c}&${back}`;
   return `/c/${slug}/speaking?assessment=${encodeURIComponent(ref)}&${back}`;
 }
+
+/**
+ * The GLOBAL (B2C / any enrolled learner) variant — no slug (S30 B3). Each part
+ * routes into its GLOBAL engine runner: `/exam/:ref`, `/essays/:ref`, and the new
+ * slug-free `/speaking/:ref`. `?from=` returns to the composite exactly as the
+ * college variant does; a direct visit (no `from`) behaves as before. The B2C
+ * exam/essay flows are already enrollment-driven, so no `?c=` is needed.
+ */
+export function communicationRunnerPathGlobal(
+  partType: CommunicationPartType,
+  ref: string,
+  from: string,
+): string {
+  const back = `from=${encodeURIComponent(from)}`;
+  if (partType === "exam") return `/exam/${ref}?${back}`;
+  if (partType === "essay") return `/essays/${ref}?${back}`;
+  return `/speaking/${ref}?${back}`;
+}

@@ -41,7 +41,11 @@ export async function listGamesForUser(
   const topicIds = gameTopics.map((t) => t._id);
   if (topicIds.length === 0) return { items: [] };
 
-  const sets = await GameSetModel.find({ topic: { $in: topicIds } });
+  // Only PUBLISHED course-attached sets are discoverable — a draft a platform
+  // author is still building must not appear in a learner's list (S30 A1). This
+  // is DISCOVERY, not authorization; the access matrix is unchanged. (Platform
+  // admins preview drafts via /admin/game-sets, not this enrollment list.)
+  const sets = await GameSetModel.find({ topic: { $in: topicIds }, isPublished: true });
   const items = [];
   for (const set of sets) {
     const used = await countUsedAttempts(userId, set._id);

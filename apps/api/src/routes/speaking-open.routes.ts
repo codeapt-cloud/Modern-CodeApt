@@ -16,7 +16,9 @@ import {
   adminDeleteSpeakingController,
   adminGetSpeakingController,
   adminListSpeakingController,
+  adminListSpeakingTopicsController,
   adminSetSpeakingPublishController,
+  adminSpeakingTtsController,
   adminUpdateSpeakingController,
   listSpeakingForUserController,
   speakingCurrentController,
@@ -83,6 +85,18 @@ speakingOpenRouter.get(
 );
 
 // --- Platform-admin authoring (requireAdmin) — literal /admin/speaking first ---
+// Topic picker (before the parametrised /admin/speaking/:id routes).
+speakingOpenRouter.get(
+  "/admin/speaking-topics",
+  ...adminGuard,
+  adminListSpeakingTopicsController,
+);
+speakingOpenRouter.post(
+  "/admin/speaking/tts",
+  ...adminGuard,
+  uploadSignatureRateLimiter,
+  adminSpeakingTtsController,
+);
 speakingOpenRouter.get("/admin/speaking", ...adminGuard, adminListSpeakingController);
 speakingOpenRouter.post("/admin/speaking", ...adminGuard, adminCreateSpeakingController);
 speakingOpenRouter.get(

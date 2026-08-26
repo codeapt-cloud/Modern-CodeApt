@@ -25,6 +25,7 @@ import { useEffect, useState } from "react";
 
 import { parseApiError } from "../../../lib/api-client.js";
 import type { SpeakingAuthoringApi } from "../../../lib/speaking-authoring-api.js";
+import { CourseTopicPicker } from "../../curriculum/CourseTopicPicker.js";
 import { OrgUnitTargetPicker } from "../../colleges/exams/OrgUnitTargetPicker.js";
 import { Alert } from "../../ui/alert.js";
 import { Button } from "../../ui/button.js";
@@ -82,6 +83,8 @@ interface Draft {
   description: string;
   maxAttempts: number;
   orgUnitIds: string[];
+  /** Platform course-attach (S30): the SPEAKING topic id, "" = platform-internal. */
+  topicId: string;
   items: SpeakingItemUpsert[];
 }
 
@@ -107,6 +110,7 @@ export function SpeakingAssessmentEditor({
     description: "",
     maxAttempts: 1,
     orgUnitIds: [],
+    topicId: "",
     items: [],
   });
   const [presetKey, setPresetKey] = useState<string>("cts");
@@ -128,6 +132,7 @@ export function SpeakingAssessmentEditor({
           description: d.description,
           maxAttempts: d.maxAttempts,
           orgUnitIds: d.orgUnitIds,
+          topicId: d.topicId ?? "",
           items: d.items.map((it) => ({ ...blankItem(), ...it })),
         });
         setPublished(d.isPublished);
@@ -165,7 +170,9 @@ export function SpeakingAssessmentEditor({
         description: draft.description,
         maxAttempts: draft.maxAttempts,
         items: draft.items,
-        ...(surface === "college" ? { orgUnitIds: draft.orgUnitIds } : {}),
+        ...(surface === "college"
+          ? { orgUnitIds: draft.orgUnitIds }
+          : { topicId: draft.topicId.trim() }),
       };
       const saved = savedId
         ? await authApi.update(savedId, body)
@@ -276,6 +283,16 @@ export function SpeakingAssessmentEditor({
             role={role}
           />
         </div>
+      ) : null}
+
+      {/* Platform surface: attach to a SPEAKING curriculum topic (course-attached). */}
+      {surface === "platform" && authApi.listTopics ? (
+        <CourseTopicPicker
+          value={draft.topicId}
+          onChange={(topicId) => setDraft((d) => ({ ...d, topicId }))}
+          load={authApi.listTopics}
+          noun="speaking assessment"
+        />
       ) : null}
 
       {/* Items. */}

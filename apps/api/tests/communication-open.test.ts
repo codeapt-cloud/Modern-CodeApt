@@ -26,11 +26,16 @@ vi.mock("../src/lib/execution-queue.js", () => ({
 
 import { createApp } from "../src/app.js";
 import {
+  ExamModel,
+  ExamQuestionModel,
+} from "../src/models/assessment.model.js";
+import {
   EnrollmentModel,
   ModuleModel,
   SubjectModel,
   TopicModel,
 } from "../src/models/curriculum.model.js";
+import { EssayTopicModel } from "../src/models/essay.model.js";
 import { UserModel } from "../src/models/user.model.js";
 import * as colleges from "../src/services/college.service.js";
 
@@ -281,6 +286,177 @@ describe("platform authoring (college:null) — S29", () => {
 });
 
 // ===========================================================================
+// 2b. Per-type / per-scope part READINESS (S30 i.1)
+// ===========================================================================
+
+/** A platform (college:null) exam; `withQuestion` decides readiness. */
+async function makePlatformExam(withQuestion: boolean): Promise<string> {
+  const exam = await ExamModel.create({ college: null, title: `Exam ${n}` });
+  if (withQuestion) {
+    await ExamQuestionModel.create({
+      section: new Types.ObjectId(),
+      exam: exam._id,
+      questionType: "MCQ_SINGLE",
+      text: "Q1",
+    });
+  }
+  return exam._id.toString();
+}
+
+/** A platform (college:null) essay topic; readiness = isActive. */
+async function makePlatformEssay(isActive: boolean): Promise<string> {
+  const t = await EssayTopicModel.create({
+    college: null,
+    title: `Essay ${n}`,
+    isActive,
+  });
+  return t._id.toString();
+}
+
+describe("platform composite part readiness (S30 i.1)", () => {
+  it("PUBLISHES a platform composite whose parts are a ready exam AND a ready essay AND a published speaking", async () => {
+    const su = await superToken();
+    const examId = await makePlatformExam(true); // has a question → ready
+    const essayId = await makePlatformEssay(true); // isActive → ready
+    const speakingId = await adminCreateSpeaking(su, { title: "Ready Speaking" });
+    await publishSpeaking(su, speakingId);
+
+    const create = await request(app)
+      .post("/api/admin/communication")
+      .set(auth(su))
+      .send({
+        title: "Full Composite",
+        parts: [
+          { partType: "exam", ref: examId, label: "Exam", weight: 1 },
+          { partType: "essay", ref: essayId, label: "Email", weight: 1 },
+          { partType: "speaking", ref: speakingId, label: "Speak", weight: 1 },
+        ],
+      });
+    expect(create.status).toBe(201);
+    // The author detail marks every part ready (refPublished).
+    expect(create.body.parts.every((p: { refPublished: boolean }) => p.refPublished)).toBe(true);
+
+    const pub = await request(app)
+      .post(`/api/admin/communication/${create.body.id}/publish`)
+      .set(auth(su))
+      .send({ isPublished: true });
+    expect(pub.status).toBe(200);
+    expect(pub.body.isPublished).toBe(true);
+  });
+
+  it("REFUSES to publish when a part of each type is NOT ready", async () => {
+    const su = await superToken();
+    const attempt = async (partType: string, ref: string): Promise<number> => {
+      const c = await request(app)
+        .post("/api/admin/communication")
+        .set(auth(su))
+        .send({ title: `C ${partType}`, parts: [{ partType, ref, label: "P", weight: 1 }] });
+      expect(c.status).toBe(201);
+      const p = await request(app)
+        .post(`/api/admin/communication/${c.body.id}/publish`)
+        .set(auth(su))
+        .send({ isPublished: true });
+      return p.status;
+    };
+
+    // Exam with NO questions → not ready.
+    expect(await attempt("exam", await makePlatformExam(false))).toBe(400);
+    // Essay with isActive:false → not ready.
+    expect(await attempt("essay", await makePlatformEssay(false))).toBe(400);
+    // Speaking not published → not ready.
+    const draftSpeaking = await adminCreateSpeaking(su, { title: "Draft Speak" });
+    expect(await attempt("speaking", draftSpeaking)).toBe(400);
+  });
+});
+
+// ===========================================================================
+// 2c. Platform lifecycle end to end (S30 gap #2): create → attach → publish →
+//     B2C sees → unpublish → disappears → delete
+// ===========================================================================
+
+describe("platform speaking lifecycle (S30)", () => {
+  async function enrol(userId: string, subjectId: string): Promise<void> {
+    await EnrollmentModel.create({
+      user: new Types.ObjectId(userId),
+      subject: new Types.ObjectId(subjectId),
+      source: "order",
+    });
+  }
+  const unpublish = (id: string, token: string) =>
+    request(app)
+      .post(`/api/admin/speaking/${id}/publish`)
+      .set(auth(token))
+      .send({ isPublished: false });
+  const del = (id: string, token: string) =>
+    request(app).delete(`/api/admin/speaking/${id}`).set(auth(token));
+  const seen = async (id: string, token: string): Promise<boolean> => {
+    const r = await request(app).get("/api/speaking").set(auth(token));
+    return r.body.items.some((s: { id: string }) => s.id === id);
+  };
+
+  it("publish reveals to an enrolled B2C learner; unpublish hides; delete needs unpublish first", async () => {
+    const su = await superToken();
+    const { subjectId, topicId } = await makeTopic(TopicType.SPEAKING, "life");
+    const id = await adminCreateSpeaking(su, { title: "Lifecycle", topicId });
+    const learner = await makeUser();
+    await enrol(learner.userId, subjectId);
+
+    // Draft: not visible.
+    expect(await seen(id, learner.token)).toBe(false);
+    // Published: visible.
+    await publishSpeaking(su, id);
+    expect(await seen(id, learner.token)).toBe(true);
+    // Delete while published → refused (must unpublish first).
+    expect((await del(id, su)).status).toBe(409);
+    // Unpublish → disappears from the learner's list.
+    expect((await unpublish(id, su)).status).toBe(200);
+    expect(await seen(id, learner.token)).toBe(false);
+    // Now deletable.
+    expect((await del(id, su)).status).toBe(204);
+  });
+
+  it("composite: publish reveals, unpublish hides, delete-while-published refused", async () => {
+    const su = await superToken();
+    const part = await adminCreateSpeaking(su, { title: "P" });
+    await publishSpeaking(su, part);
+    const { subjectId, topicId } = await makeTopic(TopicType.COMMUNICATION, "clife");
+    const create = await request(app)
+      .post("/api/admin/communication")
+      .set(auth(su))
+      .send({
+        title: "Composite Lifecycle",
+        parts: [{ partType: "speaking", ref: part, label: "S", weight: 1 }],
+        topicId,
+      });
+    const id = create.body.id as string;
+    const learner = await makeUser();
+    await enrol(learner.userId, subjectId);
+    const seenC = async (): Promise<boolean> => {
+      const r = await request(app).get("/api/communication").set(auth(learner.token));
+      return r.body.items.some((c: { id: string }) => c.id === id);
+    };
+
+    expect(await seenC()).toBe(false);
+    await request(app)
+      .post(`/api/admin/communication/${id}/publish`)
+      .set(auth(su))
+      .send({ isPublished: true })
+      .expect(200);
+    expect(await seenC()).toBe(true);
+    // Delete while published → refused.
+    expect((await request(app).delete(`/api/admin/communication/${id}`).set(auth(su))).status).toBe(409);
+    // Unpublish → hidden → deletable.
+    await request(app)
+      .post(`/api/admin/communication/${id}/publish`)
+      .set(auth(su))
+      .send({ isPublished: false })
+      .expect(200);
+    expect(await seenC()).toBe(false);
+    expect((await request(app).delete(`/api/admin/communication/${id}`).set(auth(su))).status).toBe(204);
+  });
+});
+
+// ===========================================================================
 // 3. Access matrix — SPEAKING, all three shapes (via the global start route)
 // ===========================================================================
 
@@ -453,6 +629,58 @@ describe("discovery + B2C engine end to end (S29)", () => {
       (await request(app).get(`/api/speaking/attempts/${attemptId}/result`).set(auth(intruder.token)))
         .status,
     ).toBe(403);
+  });
+
+  it("A1: an UNPUBLISHED course-attached speaking assessment is NOT discoverable; publishing reveals it", async () => {
+    const su = await superToken();
+    const { subjectId, topicId } = await makeTopic(TopicType.SPEAKING, "a1s");
+    const id = await adminCreateSpeaking(su, { title: "Draft Speaking", topicId });
+    const learner = await makeUser();
+    await EnrollmentModel.create({
+      user: new Types.ObjectId(learner.userId),
+      subject: new Types.ObjectId(subjectId),
+      source: "order",
+    });
+    const draft = await request(app).get("/api/speaking").set(auth(learner.token));
+    expect(draft.body.items.some((s: { id: string }) => s.id === id)).toBe(false);
+    await publishSpeaking(su, id);
+    const live = await request(app).get("/api/speaking").set(auth(learner.token));
+    expect(live.body.items.some((s: { id: string }) => s.id === id)).toBe(true);
+  });
+
+  it("A1: an UNPUBLISHED course-attached composite is NOT discoverable", async () => {
+    const su = await superToken();
+    const speakingId = await adminCreateSpeaking(su, { title: "P" });
+    await publishSpeaking(su, speakingId);
+    const { subjectId, topicId } = await makeTopic(TopicType.COMMUNICATION, "a1c");
+    const create = await request(app)
+      .post("/api/admin/communication")
+      .set(auth(su))
+      .send({
+        title: "Draft Composite",
+        parts: [{ partType: "speaking", ref: speakingId, label: "S", weight: 1 }],
+        topicId,
+      });
+    const learner = await makeUser();
+    await EnrollmentModel.create({
+      user: new Types.ObjectId(learner.userId),
+      subject: new Types.ObjectId(subjectId),
+      source: "order",
+    });
+    const draft = await request(app).get("/api/communication").set(auth(learner.token));
+    expect(draft.body.items.some((c: { id: string }) => c.id === create.body.id)).toBe(false);
+  });
+
+  it("A2: deleting a SPEAKING topic with an assessment attached is REFUSED (409), naming it", async () => {
+    const su = await superToken();
+    const { topicId } = await makeTopic(TopicType.SPEAKING, "a2s");
+    const id = await adminCreateSpeaking(su, { title: "Attached Speaking", topicId });
+    const blocked = await request(app).delete(`/api/admin/topics/${topicId}`).set(auth(su));
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe("DELETE_BLOCKED");
+    expect(blocked.body.error.message).toContain("Attached Speaking");
+    await request(app).delete(`/api/admin/speaking/${id}`).set(auth(su));
+    expect((await request(app).delete(`/api/admin/topics/${topicId}`).set(auth(su))).status).toBe(200);
   });
 
   it("GET /communication lists a course-attached composite for an enrolled learner", async () => {

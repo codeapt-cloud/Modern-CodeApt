@@ -43,6 +43,7 @@ import {
   type CommunicationStudentPart,
   type CommunicationStudentView,
   type CompositeResultDto,
+  type GameTopicListResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
 
@@ -54,6 +55,7 @@ import {
 } from "../models/essay.model.js";
 import {
   ExamModel,
+  ExamQuestionModel,
   StudentExamAttemptModel,
 } from "../models/assessment.model.js";
 import { CollegeModel } from "../models/college.model.js";
@@ -64,6 +66,7 @@ import {
 import {
   EnrollmentModel,
   ModuleModel,
+  SubjectModel,
   TopicModel,
 } from "../models/curriculum.model.js";
 import { OrgUnitModel } from "../models/org-unit.model.js";
@@ -606,14 +609,26 @@ export async function launchCommunicationPart(
 // College authoring (tenant-scoped)
 // ---------------------------------------------------------------------------
 
-/** Confirm a referenced artifact exists AND belongs to the given SCOPE AND
- *  matches the declared type. Cross-scope or wrong-type refs are rejected at
- *  author time (400 INVALID_PART_REF) — a composite can only bind artifacts from
- *  its own scope. `scope` is the college ObjectId for a tenant composite, or
- *  `null` for a platform composite (which binds `college: null` artifacts). The
- *  query is `{ _id, college: scope }` in BOTH cases — for the tenant path that is
- *  byte-identical to the previous `{ _id, college }`; only the value differs.
- *  Returns the artifact's title + published flag for the detail view. */
+/**
+ * Confirm a referenced artifact EXISTS in the given SCOPE, matches the declared
+ * type, and is READY to be a composite part. `scope` is the college ObjectId for
+ * a tenant composite, or `null` for a platform composite (binding `college:null`
+ * artifacts). The lookup is `{ _id, college: scope }` in both cases — for the
+ * tenant path byte-identical to the previous `{ _id, college }`.
+ *
+ * `published` is the READINESS flag, which is per-TYPE and (for exam/essay) per-
+ * SCOPE — a single `isPublished` read was wrong for course-attached content
+ * (S30 i.1). The rules:
+ *   - EXAM, college:   a tenant exam has a real draft→publish lifecycle → isPublished.
+ *   - EXAM, platform:  a curriculum exam has NO draft state (isPublished is ignored
+ *                      by the model); it is ready when it actually has content —
+ *                      at least one authored question (an honest check, not bare
+ *                      existence, so an empty auto-created shell isn't "ready").
+ *   - ESSAY, college:  tenant draft→publish → isPublished (byte-identical).
+ *   - ESSAY, platform: an individual essay topic's gate is `isActive` (isPublished
+ *                      is unused on that path — see essay.model).
+ *   - SPEAKING:        a genuine draft→publish on BOTH scopes → isPublished.
+ */
 async function resolvePartRef(
   scope: Types.ObjectId | null,
   partType: PartType,
@@ -623,16 +638,19 @@ async function resolvePartRef(
   const college = scope;
   const _id = new Types.ObjectId(ref);
   if (partType === CommunicationPartType.EXAM) {
-    const e = await ExamModel.findOne({ _id, college }).select(
-      "title isPublished",
-    );
-    return e ? { title: e.title, published: !!e.isPublished } : null;
+    const e = await ExamModel.findOne({ _id, college }).select("title isPublished");
+    if (!e) return null;
+    if (scope) return { title: e.title, published: !!e.isPublished };
+    // Platform curriculum exam: ready ⇔ it has at least one authored question.
+    const questionCount = await ExamQuestionModel.countDocuments({ exam: e._id });
+    return { title: e.title, published: questionCount > 0 };
   }
   if (partType === CommunicationPartType.ESSAY) {
     const t = await EssayTopicModel.findOne({ _id, college }).select(
-      "title isPublished",
+      "title isPublished isActive",
     );
-    return t ? { title: t.title, published: !!t.isPublished } : null;
+    if (!t) return null;
+    return { title: t.title, published: scope ? !!t.isPublished : !!t.isActive };
   }
   const s = await SpeakingAssessmentModel.findOne({ _id, college }).select(
     "title isPublished",
@@ -1019,6 +1037,51 @@ export async function resolveCommunicationTopic(
   return topic._id;
 }
 
+/** Selectable COMMUNICATION curriculum topics for the course-attach picker
+ *  (mirror of listSpeakingTopics / listGameTopics). */
+export async function listCommunicationTopics(): Promise<GameTopicListResponse> {
+  const topics = await TopicModel.find({ topicType: TopicType.COMMUNICATION })
+    .select("_id name module")
+    .lean();
+  if (topics.length === 0) return { items: [] };
+  const modules = await ModuleModel.find({
+    _id: { $in: topics.map((t) => t.module) },
+  })
+    .select("_id name subject")
+    .lean();
+  const modById = new Map(modules.map((m) => [m._id.toString(), m]));
+  const subjects = await SubjectModel.find({
+    _id: { $in: modules.map((m) => m.subject) },
+  })
+    .select("_id name")
+    .lean();
+  const subById = new Map(subjects.map((s) => [s._id.toString(), s.name]));
+  const attachedDocs = await CommunicationAssessmentModel.find({
+    topic: { $in: topics.map((t) => t._id) },
+  })
+    .select("topic")
+    .lean();
+  const attached = new Set(
+    attachedDocs.map((a) => a.topic?.toString()).filter(Boolean),
+  );
+  const items = topics.map((t) => {
+    const m = modById.get(t.module.toString());
+    return {
+      id: t._id.toString(),
+      name: t.name,
+      moduleName: m?.name ?? "",
+      subjectName: m ? (subById.get(m.subject.toString()) ?? "") : "",
+      attached: attached.has(t._id.toString()),
+    };
+  });
+  items.sort((a, b) =>
+    `${a.subjectName}${a.moduleName}${a.name}`.localeCompare(
+      `${b.subjectName}${b.moduleName}${b.name}`,
+    ),
+  );
+  return { items };
+}
+
 // ---------------------------------------------------------------------------
 // Platform authoring (college: null) — parts resolve against college:null too
 // ---------------------------------------------------------------------------
@@ -1145,8 +1208,10 @@ export async function listCommunicationForUser(
   }).select("_id");
   const topicIds = topics.map((t) => t._id);
   if (topicIds.length === 0) return { items: [] };
+  // PUBLISHED only — a draft composite on a course topic is not discoverable (S30 A1).
   const docs = await CommunicationAssessmentModel.find({
     topic: { $in: topicIds },
+    isPublished: true,
   }).sort({ createdAt: -1 });
   return {
     items: docs.map((a) => ({

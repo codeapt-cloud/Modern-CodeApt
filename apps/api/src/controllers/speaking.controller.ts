@@ -241,6 +241,23 @@ export const adminListSpeakingController = asyncHandler(
   },
 );
 
+export const adminListSpeakingTopicsController = asyncHandler(
+  async (_req: Request, res: Response) => {
+    res.status(200).json(await speaking.listSpeakingTopics());
+  },
+);
+
+/** Platform authoring-time TTS (college:null): render prompt TEXT to a hosted,
+ *  fixed-voice clip. The scope is a folder segment only ("platform"). */
+export const adminSpeakingTtsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { text } = speakingTtsRequestSchema.parse(req.body);
+    res
+      .status(200)
+      .json(await speaking.generateSpeakingPromptAudio("platform", text));
+  },
+);
+
 export const adminCreateSpeakingController = asyncHandler(
   async (req: Request, res: Response) => {
     const input = speakingAssessmentUpsertSchema.parse(req.body);

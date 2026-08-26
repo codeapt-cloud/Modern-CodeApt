@@ -3957,6 +3957,203 @@ export const api = {
     },
   },
 
+  /** OPEN speaking (S29/S30) — global, enrollment-based, slug-free. Discovery +
+   *  the engine for a B2C or any enrolled learner. Mirrors collegeSpeaking minus
+   *  the slug; authorized by the access matrix + attempt ownership server-side. */
+  speaking: {
+    list: async (): Promise<SpeakingPlayListResponse> => {
+      const { data } = await http.get<SpeakingPlayListResponse>(
+        `${API_PREFIX}/speaking`,
+      );
+      return data;
+    },
+    uploadSignature: async (): Promise<UploadSignatureResponse> => {
+      const { data } = await http.post<UploadSignatureResponse>(
+        `${API_PREFIX}/speaking/uploads/signature`,
+      );
+      return data;
+    },
+    start: async (assessmentId: string): Promise<StartSpeakingResponse> => {
+      const { data } = await http.post<StartSpeakingResponse>(
+        `${API_PREFIX}/speaking/${assessmentId}/attempts`,
+      );
+      return data;
+    },
+    currentAttempt: async (
+      assessmentId: string,
+    ): Promise<SpeakingCurrentAttemptResponse> => {
+      const { data } = await http.get<SpeakingCurrentAttemptResponse>(
+        `${API_PREFIX}/speaking/${assessmentId}/attempt`,
+      );
+      return data;
+    },
+    submitItem: async (
+      attemptId: string,
+      itemIndex: number,
+      payload: { audioUrl?: string; text?: string; silent?: boolean },
+    ): Promise<SubmitSpeakingItemResponse> => {
+      const { data } = await http.post<SubmitSpeakingItemResponse>(
+        `${API_PREFIX}/speaking/attempts/${attemptId}/items/${itemIndex}`,
+        payload,
+      );
+      return data;
+    },
+    current: async (attemptId: string): Promise<SpeakingCurrentResponse> => {
+      const { data } = await http.get<SpeakingCurrentResponse>(
+        `${API_PREFIX}/speaking/attempts/${attemptId}/current`,
+      );
+      return data;
+    },
+    result: async (attemptId: string): Promise<SpeakingAttemptResult> => {
+      const { data } = await http.get<SpeakingAttemptResult>(
+        `${API_PREFIX}/speaking/attempts/${attemptId}/result`,
+      );
+      return data;
+    },
+  },
+
+  /** OPEN communication composite (S29/S30) — global discovery + student view +
+   *  launch. Launch returns {partType, ref}; the client routes into the global
+   *  engine runner. */
+  communication: {
+    list: async (): Promise<CommunicationAvailableListResponse> => {
+      const { data } = await http.get<CommunicationAvailableListResponse>(
+        `${API_PREFIX}/communication`,
+      );
+      return data;
+    },
+    student: async (id: string): Promise<CommunicationStudentView> => {
+      const { data } = await http.get<CommunicationStudentView>(
+        `${API_PREFIX}/communication/${id}/student`,
+      );
+      return data;
+    },
+    launchPart: async (
+      id: string,
+      order: number,
+    ): Promise<CommunicationLaunchResponse> => {
+      const { data } = await http.post<CommunicationLaunchResponse>(
+        `${API_PREFIX}/communication/${id}/parts/${order}/launch`,
+      );
+      return data;
+    },
+  },
+
+  /** Platform-admin speaking authoring (college:null) — mirrors adminGameSets. */
+  adminSpeaking: {
+    list: async (): Promise<SpeakingAssessmentListResponse> => {
+      const { data } = await http.get<SpeakingAssessmentListResponse>(
+        `${API_PREFIX}/admin/speaking`,
+      );
+      return data;
+    },
+    topics: async (): Promise<GameTopicListResponse> => {
+      const { data } = await http.get<GameTopicListResponse>(
+        `${API_PREFIX}/admin/speaking-topics`,
+      );
+      return data;
+    },
+    get: async (id: string): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.get<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/admin/speaking/${id}`,
+      );
+      return data;
+    },
+    create: async (
+      body: SpeakingAssessmentUpsert,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.post<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/admin/speaking`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      id: string,
+      body: SpeakingAssessmentUpsert,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.patch<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/admin/speaking/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      id: string,
+      isPublished: boolean,
+    ): Promise<SpeakingAssessmentDetail> => {
+      const { data } = await http.post<SpeakingAssessmentDetail>(
+        `${API_PREFIX}/admin/speaking/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/admin/speaking/${id}`);
+    },
+    generateTts: async (text: string): Promise<SpeakingTtsResponse> => {
+      const { data } = await http.post<SpeakingTtsResponse>(
+        `${API_PREFIX}/admin/speaking/tts`,
+        { text },
+      );
+      return data;
+    },
+  },
+
+  /** Platform-admin communication composite authoring (college:null). */
+  adminCommunication: {
+    list: async (): Promise<CommunicationAssessmentListResponse> => {
+      const { data } = await http.get<CommunicationAssessmentListResponse>(
+        `${API_PREFIX}/admin/communication`,
+      );
+      return data;
+    },
+    topics: async (): Promise<GameTopicListResponse> => {
+      const { data } = await http.get<GameTopicListResponse>(
+        `${API_PREFIX}/admin/communication-topics`,
+      );
+      return data;
+    },
+    get: async (id: string): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.get<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/admin/communication/${id}`,
+      );
+      return data;
+    },
+    create: async (
+      body: CommunicationAssessmentUpsert,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.post<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/admin/communication`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      id: string,
+      body: CommunicationAssessmentUpsert,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.patch<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/admin/communication/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      id: string,
+      isPublished: boolean,
+    ): Promise<CommunicationAssessmentDetail> => {
+      const { data } = await http.post<CommunicationAssessmentDetail>(
+        `${API_PREFIX}/admin/communication/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/admin/communication/${id}`);
+    },
+  },
+
   /** Platform-admin GameSet authoring (college:null sets). */
   adminGameSets: {
     list: async (): Promise<GameSetListResponse> => {

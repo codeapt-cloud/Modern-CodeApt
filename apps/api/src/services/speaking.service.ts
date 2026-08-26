@@ -48,6 +48,7 @@ import {
   type StartSpeakingResponse,
   type SubmitSpeakingItemRequest,
   type SubmitSpeakingItemResponse,
+  type GameTopicListResponse,
 } from "@codeapt/shared";
 import { Types, type HydratedDocument } from "mongoose";
 
@@ -60,6 +61,7 @@ import { CollegeModel } from "../models/college.model.js";
 import {
   EnrollmentModel,
   ModuleModel,
+  SubjectModel,
   TopicModel,
 } from "../models/curriculum.model.js";
 import { ExecutionJobModel } from "../models/execution.model.js";
@@ -986,6 +988,52 @@ export async function resolveSpeakingTopic(
   return topic._id;
 }
 
+/** Selectable SPEAKING curriculum topics for the course-attach picker (mirror of
+ *  game-set-admin.listGameTopics). Reuses the generic {id,name,moduleName,
+ *  subjectName,attached} option shape; `attached` = already owns an assessment. */
+export async function listSpeakingTopics(): Promise<GameTopicListResponse> {
+  const topics = await TopicModel.find({ topicType: TopicType.SPEAKING })
+    .select("_id name module")
+    .lean();
+  if (topics.length === 0) return { items: [] };
+  const modules = await ModuleModel.find({
+    _id: { $in: topics.map((t) => t.module) },
+  })
+    .select("_id name subject")
+    .lean();
+  const modById = new Map(modules.map((m) => [m._id.toString(), m]));
+  const subjects = await SubjectModel.find({
+    _id: { $in: modules.map((m) => m.subject) },
+  })
+    .select("_id name")
+    .lean();
+  const subById = new Map(subjects.map((s) => [s._id.toString(), s.name]));
+  const attachedDocs = await SpeakingAssessmentModel.find({
+    topic: { $in: topics.map((t) => t._id) },
+  })
+    .select("topic")
+    .lean();
+  const attached = new Set(
+    attachedDocs.map((a) => a.topic?.toString()).filter(Boolean),
+  );
+  const items = topics.map((t) => {
+    const m = modById.get(t.module.toString());
+    return {
+      id: t._id.toString(),
+      name: t.name,
+      moduleName: m?.name ?? "",
+      subjectName: m ? (subById.get(m.subject.toString()) ?? "") : "",
+      attached: attached.has(t._id.toString()),
+    };
+  });
+  items.sort((a, b) =>
+    `${a.subjectName}${a.moduleName}${a.name}`.localeCompare(
+      `${b.subjectName}${b.moduleName}${b.name}`,
+    ),
+  );
+  return { items };
+}
+
 // ---------------------------------------------------------------------------
 // Platform authoring (college: null) — mirrors game-set-admin.service
 // ---------------------------------------------------------------------------
@@ -1123,7 +1171,11 @@ export async function listSpeakingForUser(
   }).select("_id");
   const topicIds = topics.map((t) => t._id);
   if (topicIds.length === 0) return { items: [] };
-  const docs = await SpeakingAssessmentModel.find({ topic: { $in: topicIds } });
+  // PUBLISHED only — a draft on a course topic is not discoverable (S30 A1).
+  const docs = await SpeakingAssessmentModel.find({
+    topic: { $in: topicIds },
+    isPublished: true,
+  });
   const items = await Promise.all(
     docs.map(async (a) => ({
       id: a._id.toString(),

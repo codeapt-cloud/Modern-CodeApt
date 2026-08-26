@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 
 import type { SpeakingItemScoreDto } from "@codeapt/shared";
 
-import { api } from "../../lib/api-client.js";
+import type { SpeakingEngine } from "../../lib/speaking-engine.js";
 import {
   deriveSpeakingResults,
   isReadAloudFamilyScore,
@@ -42,17 +42,17 @@ function pct(n: number | null): string {
 }
 
 export function SpeakingResults({
-  slug,
+  engine,
   attemptId,
 }: {
-  slug: string;
+  engine: SpeakingEngine;
   attemptId: string;
 }): JSX.Element {
   const [tick, setTick] = useState(0);
   const [polls, setPolls] = useState(0);
   const q = useQuery(
-    () => api.collegeSpeaking.result(slug, attemptId),
-    [slug, attemptId, tick],
+    () => engine.result(attemptId),
+    [engine, attemptId, tick],
   );
 
   const complete = q.data?.complete ?? false;

@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { Link } from "react-router-dom";
+
 import { api } from "../../lib/api-client.js";
 import { getAdjacent, type FlatTopic } from "../../lib/player.js";
 import { useQuery } from "../../lib/use-query.js";
@@ -19,6 +21,7 @@ import { GameStatusCard } from "../game/GameStatusCard.js";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
+import { Card, CardContent } from "../ui/card.js";
 import { Skeleton } from "../ui/skeleton.js";
 import { Markdown } from "./Markdown.js";
 import { QuizRunner } from "./QuizRunner.js";
@@ -31,6 +34,8 @@ const TYPE_LABEL: Record<string, string> = {
   exam: "Exam",
   essay: "Essay",
   game: "Game",
+  speaking: "Speaking",
+  communication: "Communication",
 };
 
 export function TopicPane({
@@ -130,6 +135,10 @@ export function TopicPane({
           <EssayTopicLauncher topicId={topicId} />
         ) : content.topicType === "game" ? (
           <GameTopicLauncher topicId={topicId} />
+        ) : content.topicType === "speaking" ? (
+          <SpeakingTopicLauncher topicId={topicId} />
+        ) : content.topicType === "communication" ? (
+          <CommunicationTopicLauncher topicId={topicId} />
         ) : (
           <PlaceholderTopic />
         )}
@@ -258,6 +267,97 @@ function GameTopicLauncher({ topicId }: { topicId: string }) {
     );
   }
   return <GameStatusCard item={item} href={`/play/game/${item.id}`} />;
+}
+
+/**
+ * In-course SPEAKING entry point (S30). SAME status source as the global speaking
+ * list (GET /speaking via api.speaking.list()), matched by `topicId` to this
+ * curriculum topic, linking into the slug-free runner /speaking/:id. Mirrors
+ * GameTopicLauncher exactly — a distinct SpeakingStatusCard would just duplicate
+ * a title/attempt row, so the launcher renders the small card inline.
+ */
+function SpeakingTopicLauncher({ topicId }: { topicId: string }) {
+  const { data, loading, error } = useQuery(() => api.speaking.list(), []);
+  const item = data?.items.find((s) => s.topicId === topicId);
+  if (loading) return <Skeleton className="h-40 w-full rounded-2xl" />;
+  if (error || !item) {
+    return (
+      <Alert variant="info">
+        {error ??
+          "This speaking assessment isn’t available to you yet. It appears once it’s published for your subject."}
+      </Alert>
+    );
+  }
+  const used = item.attemptsUsed;
+  const capped = item.maxAttempts > 0 && used >= item.maxAttempts;
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4 p-5">
+        <div>
+          <h3 className="font-medium text-ink">{item.title}</h3>
+          {item.description ? (
+            <p className="line-clamp-2 text-sm text-ink-muted">{item.description}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-ink-muted">
+            {item.itemCount} item{item.itemCount === 1 ? "" : "s"} ·{" "}
+            {item.maxAttempts === 0
+              ? "unlimited attempts"
+              : `${used}/${item.maxAttempts} attempts used`}
+          </span>
+          {capped ? (
+            <Button size="sm" disabled>
+              No attempts left
+            </Button>
+          ) : (
+            <Button asChild size="sm">
+              <Link to={`/speaking/${item.id}`}>{used > 0 ? "Start again" : "Start"}</Link>
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * In-course COMMUNICATION composite entry point (S30). Matched by `topicId`
+ * against GET /communication, linking into the slug-free composite runner
+ * /communication/:id.
+ */
+function CommunicationTopicLauncher({ topicId }: { topicId: string }) {
+  const { data, loading, error } = useQuery(() => api.communication.list(), []);
+  const item = data?.items.find((c) => c.topicId === topicId);
+  if (loading) return <Skeleton className="h-40 w-full rounded-2xl" />;
+  if (error || !item) {
+    return (
+      <Alert variant="info">
+        {error ??
+          "This communication assessment isn’t available to you yet. It appears once it’s published for your subject."}
+      </Alert>
+    );
+  }
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4 p-5">
+        <div>
+          <h3 className="font-medium text-ink">{item.title}</h3>
+          {item.description ? (
+            <p className="line-clamp-2 text-sm text-ink-muted">{item.description}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-ink-muted">
+            {item.partCount} part{item.partCount === 1 ? "" : "s"}
+          </span>
+          <Button asChild size="sm">
+            <Link to={`/communication/${item.id}`}>Open</Link>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 function PlaceholderTopic() {

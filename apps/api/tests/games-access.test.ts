@@ -242,6 +242,12 @@ describe("course-attached reachability + discovery", () => {
     const superU = await makeUser({ role: Role.SUPER_ADMIN });
     const { subjectId, topicId } = await makeGameTopic("reach");
     const setId = await adminCreateSet(superU.token, { title: "Reach", topicId });
+    // S30 A1: discovery lists PUBLISHED course-attached content only, so publish
+    // before asserting it appears in GET /games (start is still allowed either way).
+    await request(app)
+      .post(`/api/admin/game-sets/${setId}/publish`)
+      .set(auth(superU.token))
+      .send({ isPublished: true });
 
     // B2C learner enrolled → allowed + appears in GET /games (discovery).
     const learner = await makeUser();
@@ -320,6 +326,46 @@ describe("clone a platform set into a college", () => {
       .set(auth(a.adminToken))
       .send({ title: "Cross" });
     expect(res.status === 403 || res.status === 404).toBe(true);
+  });
+});
+
+describe("S30 A1/A2 — discovery publish filter + topic-delete refusal (games)", () => {
+  it("A1: an UNPUBLISHED course-attached set is NOT discoverable; publishing reveals it", async () => {
+    const superU = await makeUser({ role: Role.SUPER_ADMIN });
+    const { subjectId, topicId } = await makeGameTopic("a1");
+    const setId = await adminCreateSet(superU.token, { title: "Draft", topicId });
+    const learner = await makeUser();
+    await EnrollmentModel.create({
+      user: new Types.ObjectId(learner.userId),
+      subject: new Types.ObjectId(subjectId),
+      source: "order",
+    });
+    const draftList = await request(app).get("/api/games").set(auth(learner.token));
+    expect(draftList.body.items.some((i: { id: string }) => i.id === setId)).toBe(false);
+    await request(app)
+      .post(`/api/admin/game-sets/${setId}/publish`)
+      .set(auth(superU.token))
+      .send({ isPublished: true });
+    const liveList = await request(app).get("/api/games").set(auth(learner.token));
+    expect(liveList.body.items.some((i: { id: string }) => i.id === setId)).toBe(true);
+  });
+
+  it("A2: deleting a GAME topic with a set attached is REFUSED (409), naming it", async () => {
+    const superU = await makeUser({ role: Role.SUPER_ADMIN });
+    const { topicId } = await makeGameTopic("a2");
+    const setId = await adminCreateSet(superU.token, { title: "Attached Set", topicId });
+    const blocked = await request(app)
+      .delete(`/api/admin/topics/${topicId}`)
+      .set(auth(superU.token));
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe("DELETE_BLOCKED");
+    expect(blocked.body.error.message).toContain("Attached Set");
+    // Detach (delete the set) → the topic can then be deleted.
+    await request(app).delete(`/api/admin/game-sets/${setId}`).set(auth(superU.token));
+    const ok = await request(app)
+      .delete(`/api/admin/topics/${topicId}`)
+      .set(auth(superU.token));
+    expect(ok.status).toBe(200);
   });
 });
 

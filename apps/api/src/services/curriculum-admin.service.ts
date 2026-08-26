@@ -89,6 +89,9 @@ import {
   type Topic,
 } from "../models/curriculum.model.js";
 import { EssayTopicModel } from "../models/essay.model.js";
+import { GameSetModel } from "../models/game.model.js";
+import { SpeakingAssessmentModel } from "../models/speaking.model.js";
+import { CommunicationAssessmentModel } from "../models/communication.model.js";
 
 type ProgramDoc = HydratedDocument<Program>;
 type SubjectDoc = HydratedDocument<Subject>;
@@ -851,6 +854,29 @@ export async function deleteTopic(id: string): Promise<{ deleted: true }> {
     } else if (progress > 0) {
       deleteBlocked("exam topic", { "progress records": progress });
     }
+  } else if (
+    topic.topicType === TopicType.GAME ||
+    topic.topicType === TopicType.SPEAKING ||
+    topic.topicType === TopicType.COMMUNICATION
+  ) {
+    // S30 A2 — REFUSE while an entity is attached rather than orphan it. These
+    // are forward links (entity.topic → Topic); deleting the topic would leave
+    // the assessment's FK dangling and silently drop it from discovery. Make the
+    // operator detach it first (edit the set/assessment, clear its topic). Name
+    // the offender so the message is actionable. Block on progress too.
+    const attached = await attachedAssessmentTitle(topic.topicType, topic._id);
+    if (attached) {
+      throw new AppError(
+        `Cannot delete this ${topic.topicType} topic — "${attached}" is attached to it. ` +
+          `Detach it first (open the assessment and clear its curriculum topic).`,
+        409,
+        CurriculumErrorCode.DELETE_BLOCKED,
+        { blockers: { "attached assessment": 1 } },
+      );
+    }
+    if (progress > 0) {
+      deleteBlocked(`${topic.topicType} topic`, { "progress records": progress });
+    }
   } else {
     // essay: never delete the shared EssayTopic — just drop this topic's ref.
     if (progress > 0) {
@@ -860,6 +886,24 @@ export async function deleteTopic(id: string): Promise<{ deleted: true }> {
 
   await TopicModel.deleteOne({ _id: topic._id });
   return { deleted: true };
+}
+
+/** The title of the assessment attached to a GAME/SPEAKING/COMMUNICATION topic,
+ *  or null when none — so deleteTopic can name the blocker (S30 A2). */
+async function attachedAssessmentTitle(
+  topicType: string,
+  topicId: Types.ObjectId,
+): Promise<string | null> {
+  if (topicType === TopicType.GAME) {
+    const g = await GameSetModel.findOne({ topic: topicId }).select("title");
+    return g?.title ?? null;
+  }
+  if (topicType === TopicType.SPEAKING) {
+    const s = await SpeakingAssessmentModel.findOne({ topic: topicId }).select("title");
+    return s?.title ?? null;
+  }
+  const c = await CommunicationAssessmentModel.findOne({ topic: topicId }).select("title");
+  return c?.title ?? null;
 }
 
 export async function reorderTopics(

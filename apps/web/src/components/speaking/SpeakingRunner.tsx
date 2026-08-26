@@ -18,6 +18,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { StartSpeakingResponse } from "@codeapt/shared";
 
+import type { SpeakingEngine } from "../../lib/speaking-engine.js";
 import { formatClock } from "../../lib/speaking-runner.js";
 import { useProctoring } from "../../lib/use-proctoring.js";
 import { useSpeakingRunner } from "../../lib/use-speaking-runner.js";
@@ -29,15 +30,15 @@ import { Card, CardContent } from "../ui/card.js";
 import { getSpeakingItemDefinition } from "./renderer-registry.js";
 
 export function SpeakingRunner({
-  slug,
+  engine,
   attempt,
   onFinished,
 }: {
-  slug: string;
+  engine: SpeakingEngine;
   attempt: StartSpeakingResponse;
   onFinished: () => void;
 }): JSX.Element {
-  const r = useSpeakingRunner({ slug, attempt, onFinished });
+  const r = useSpeakingRunner({ engine, attempt, onFinished });
   const [warnings, setWarnings] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
