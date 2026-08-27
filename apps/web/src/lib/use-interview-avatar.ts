@@ -1,34 +1,73 @@
 /**
- * Interview avatar orchestration hook (Step 37, retuned 37.1 for lab machines).
- * Owns the fallback CHAIN, the NON-BLOCKING lazy load, and a `speak`/`cancel`/
- * `setUiState` surface the runner uses in place of the old SpeechSynthesis-only
- * `useInterviewVoice`. Lives in InterviewSession (like the camera hook).
+ * Interview avatar orchestration hook (Step 37; corrected 37.2). Owns the fallback
+ * CHAIN, the NON-BLOCKING lazy load, and a `speak`/`cancel`/`setUiState` surface the
+ * runner uses in place of the old SpeechSynthesis-only `useInterviewVoice`.
  *
- * NON-BLOCKING is the point: question one NEVER waits on the 36.8 MB GLB or the
- * 300 MB neural model. `ready` is true immediately — the greeting speaks through
- * SpeechSynthesis with the static SVG showing, and the 3D avatar (and, if opted
- * in, the neural voice) stream in the BACKGROUND and upgrade the experience when
- * they arrive. Default tier is 3d-basic (avatar + browser voice + estimated
- * lip-sync); neural Kokoro is opt-in. Greetings/acknowledgements are spoken
- * through THIS `speak`, so the Step-36 flow is preserved by whichever voice runs.
+ * 37.2 corrections:
+ *  1. We no longer trust `navigator.connection.effectiveType` (a rolling estimate a
+ *     recent burst — e.g. the MediaPipe download — drags to "3g"). We START the GLB
+ *     download and ABORT it only if the MEASURED rate is genuinely too slow
+ *     (glb-loader.ts). Only explicit data-saver hard-skips.
+ *  2. The decision is VISIBLE: `status`/`statusText` say exactly what happened
+ *     (loading %, skipped — slow, unavailable — no WebGL2 / file not found).
+ *  3. An OVERRIDE (?avatar=on|neural|off, or localStorage) forces the tier so the
+ *     avatar can always be seen for judging; a forced load never rate-aborts.
+ *
+ * NON-BLOCKING: `ready` is true immediately — the greeting speaks via
+ * SpeechSynthesis with the static SVG showing; the 3D avatar (and, if opted in,
+ * the neural voice) stream in the background and upgrade in place.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   detectAvatarCapabilities,
+  resolveAvatarOverride,
   selectAvatarTier,
   type AvatarTier,
   type NeuralPolicy,
 } from "./avatar/capabilities.js";
 import type { AvatarUiState } from "./avatar/avatar-state.js";
+import { fetchGlbObjectUrl, type GlbFailReason } from "./avatar/glb-loader.js";
 import type { AvatarController } from "./avatar/talkinghead-controller.js";
 import { useInterviewVoice } from "./use-interview-voice.js";
 
-/** Local copy of the controller's estimate (kept here so this hook needs no static
- *  import from the lazy controller module). ~165 wpm, floored. */
+const AVATAR_GLB_URL = "/avatar/mpfb.glb";
+
 function estimateSpeechMs(text: string): number {
   const words = (text.trim().match(/\S+/g) ?? []).length;
   return Math.max(700, Math.round((words / 165) * 60_000));
+}
+
+/** Visible avatar state — never silent. */
+export type AvatarStatus =
+  | "loading"
+  | "ready"
+  | "off"
+  | "unavailable-browser"
+  | "unavailable-asset"
+  | "skipped-datasaver"
+  | "skipped-slow"
+  | "failed";
+
+function statusTextFor(status: AvatarStatus, progress: number): string {
+  switch (status) {
+    case "loading":
+      return `3D avatar loading… ${Math.round(progress * 100)}%`;
+    case "unavailable-browser":
+      return "3D avatar unavailable in this browser";
+    case "unavailable-asset":
+      return "3D avatar unavailable — model not found (deploy the avatar file)";
+    case "skipped-datasaver":
+      return "3D avatar skipped — data saver is on";
+    case "skipped-slow":
+      return "3D avatar skipped — connection too slow";
+    case "failed":
+      return "3D avatar failed to load — using the simple avatar";
+    case "off":
+    case "ready":
+    default:
+      return "";
+  }
 }
 
 export interface UseInterviewAvatar {
@@ -36,22 +75,19 @@ export interface UseInterviewAvatar {
   cancel(): void;
   prime(text: string): void;
   speaking: boolean;
-  /** The SELECTED tier (intent). May render as the static SVG until the GLB loads. */
   tier: AvatarTier;
-  /** Always true — the interview never blocks on avatar assets. */
   ready: boolean;
-  /** True while the GLB is still downloading in the background. */
   loading: boolean;
   progress: number;
-  /** True once the 3D avatar canvas is loaded and should be shown. */
   avatarVisible: boolean;
-  /** True when the neural voice has connected and is now driving speech. */
   neuralActive: boolean;
-  /** True when a 3D avatar was intended but its GLB failed → static SVG. */
   failed: boolean;
-  /** Whether the runner should render the 3D mount (intent). */
   is3d: boolean;
   motion: boolean;
+  /** Machine-readable avatar state (never silent). */
+  status: AvatarStatus;
+  /** Human-readable line for the UI. "" when nothing to say. */
+  statusText: string;
   preload(): void;
   attach(el: HTMLElement | null): void;
   setUiState(state: AvatarUiState): void;
@@ -62,17 +98,26 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
   const choice = useMemo(() => {
     const caps =
       typeof window === "undefined"
-        ? { webgl2: false, moduleWorkers: false, webgpu: false, reducedMotion: false, slowConnection: false }
+        ? { webgl2: false, moduleWorkers: false, webgpu: false, reducedMotion: false, saveData: false }
         : detectAvatarCapabilities(window);
-    return selectAvatarTier(caps, { avatarEnabled: enabled, neural });
+    const override = resolveAvatarOverride();
+    return selectAvatarTier(caps, { avatarEnabled: enabled, neural, override });
   }, [enabled, neural]);
 
+  const initialStatus: AvatarStatus =
+    choice.tier !== "speech-only"
+      ? "loading"
+      : choice.reason.includes("WebGL2")
+        ? "unavailable-browser"
+        : choice.reason.includes("data saver")
+          ? "skipped-datasaver"
+          : "off";
+
   const [tier] = useState<AvatarTier>(choice.tier);
-  const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [avatarVisible, setAvatarVisible] = useState(false);
   const [neuralActive, setNeuralActive] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [status, setStatus] = useState<AvatarStatus>(initialStatus);
   const [speaking, setSpeaking] = useState(false);
 
   const controllerRef = useRef<AvatarController | null>(null);
@@ -96,45 +141,59 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
   const preload = useCallback(() => {
     if (preloadStartedRef.current) return;
     preloadStartedRef.current = true;
-    if (choice.tier === "speech-only") return; // nothing to load; SS is ready now
+    if (choice.tier === "speech-only") return; // status already set; SS is ready
     const container = ensureContainer();
     if (!container) {
-      setFailed(true);
+      setStatus("failed");
       return;
     }
-    setLoading(true);
+    setStatus("loading");
     void (async () => {
+      // 1. MEASURED GLB fetch (never blocks the interview; aborts if truly slow).
+      let objectUrl: string;
+      try {
+        const res = await fetchGlbObjectUrl(AVATAR_GLB_URL, {
+          forced: choice.forced,
+          onProgress: (loaded, total) => {
+            if (total) setProgress(Math.min(1, loaded / total));
+          },
+        });
+        objectUrl = res.objectUrl;
+      } catch (e) {
+        const reason = (e as { reason?: GlbFailReason })?.reason;
+        setStatus(
+          reason === "too-slow"
+            ? "skipped-slow"
+            : reason === "not-found" || reason === "not-glb"
+              ? "unavailable-asset"
+              : "failed",
+        );
+        return;
+      }
+      // 2. Build the avatar from the in-memory GLB (no re-download).
       try {
         const { createAvatarController } = await import("./avatar/talkinghead-controller.js");
-        // VISUAL first (GLB). Never blocks the interview — the greeting has
-        // already been (or will be) spoken via SpeechSynthesis meanwhile.
         const controller = await createAvatarController(container, {
           motion: choice.motion,
-          onProgress: (p) => setProgress(p),
+          glbUrl: objectUrl,
         });
         if (!controller) {
-          setFailed(true);
+          setStatus("failed");
           return;
         }
         controllerRef.current = controller;
         controller.setState(uiStateRef.current, choice.motion);
         avatarVisibleRef.current = true;
         setAvatarVisible(true);
-        // NEURAL voice (opt-in) connects separately, in the background. It never
-        // gates anything; turns start using it once it's ready.
+        setStatus("ready");
         if (choice.tier === "3d-neural") {
-          void controller.enableNeural().then((ok) => {
-            if (ok) setNeuralActive(true);
-          });
+          void controller.enableNeural().then((ok) => ok && setNeuralActive(true));
         }
       } catch {
-        setFailed(true);
-      } finally {
-        setLoading(false);
-        setProgress(1);
+        setStatus("failed");
       }
     })();
-  }, [choice.tier, choice.motion, ensureContainer]);
+  }, [choice.tier, choice.motion, choice.forced, ensureContainer]);
 
   const attach = useCallback((el: HTMLElement | null) => {
     const container = containerRef.current;
@@ -165,14 +224,10 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
       };
       setSpeaking(true);
       const ctrl = controllerRef.current;
-      // Neural only once it has actually connected (never blocks; at most one
-      // SpeechSynthesis→neural transition across the session, never flip-flop).
       if (ctrl && ctrl.neuralReady()) {
         void ctrl.speakNeural(text).then(done, done);
         return;
       }
-      // Browser voice (the default). If the 3D avatar is up, animate its mouth
-      // from the estimated timings while SpeechSynthesis plays the audio.
       if (ctrl && avatarVisibleRef.current) ctrl.speakEstimated(text, estimateSpeechMs(text));
       voice.speak(text, { onEnd: done });
     },
@@ -203,20 +258,25 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
     };
   }, []);
 
+  const failed =
+    status === "failed" || status === "unavailable-asset" || status === "skipped-slow";
+
   return {
     speak,
     cancel,
     prime: voice.prime,
     speaking,
     tier,
-    ready: true, // the interview never waits on avatar assets
-    loading,
+    ready: true,
+    loading: status === "loading",
     progress,
     avatarVisible,
     neuralActive,
     failed,
-    is3d: tier !== "speech-only" && !failed,
+    is3d: tier !== "speech-only" && status !== "failed" && status !== "unavailable-asset" && status !== "skipped-slow",
     motion: choice.motion,
+    status,
+    statusText: statusTextFor(status, progress),
     preload,
     attach,
     setUiState,

@@ -6,6 +6,7 @@
  */
 import {
   degradeTier,
+  resolveAvatarOverride,
   selectAvatarTier,
   type AvatarCapabilities,
 } from "../src/lib/avatar/capabilities.js";
@@ -20,7 +21,7 @@ const caps = (over: Partial<AvatarCapabilities> = {}): AvatarCapabilities => ({
   moduleWorkers: true,
   webgpu: true,
   reducedMotion: false,
-  slowConnection: false,
+  saveData: false,
   ...over,
 });
 
@@ -49,9 +50,15 @@ describe("selectAvatarTier — lab-machine default is 3d-basic; neural is opt-in
     expect(selectAvatarTier(caps({ moduleWorkers: false }), { neural: "on" }).tier).toBe("3d-basic");
   });
 
-  it("SLOW/metered connection → speech-only (don't pull the 36.8 MB avatar)", () => {
-    expect(selectAvatarTier(caps({ slowConnection: true })).tier).toBe("speech-only");
-    expect(selectAvatarTier(caps({ slowConnection: true }), { neural: "on" }).tier).toBe("speech-only");
+  it("DATA SAVER (the only connection hard-skip) → speech-only", () => {
+    // effectiveType is NOT consulted anymore — a slow link is caught by measured
+    // abort at download time, not a rolling guess here. Only saveData hard-skips.
+    expect(selectAvatarTier(caps({ saveData: true })).tier).toBe("speech-only");
+  });
+
+  it("a plain (even '3g') connection still ATTEMPTS the avatar (3d-basic)", () => {
+    // No slowConnection field exists to suppress it — the GLB fetch measures reality.
+    expect(selectAvatarTier(caps()).tier).toBe("3d-basic");
   });
 
   it("no WebGL2 → speech-only (guaranteed floor)", () => {
@@ -66,6 +73,35 @@ describe("selectAvatarTier — lab-machine default is 3d-basic; neural is opt-in
     const c = selectAvatarTier(caps({ reducedMotion: true }));
     expect(c.motion).toBe(false);
     expect(c.tier).toBe("3d-basic");
+  });
+});
+
+describe("override — force the avatar for judging (bypasses gates + rate-abort)", () => {
+  it("override 'on' forces 3d-basic even with data saver, and marks forced", () => {
+    const c = selectAvatarTier(caps({ saveData: true }), { override: "on" });
+    expect(c.tier).toBe("3d-basic");
+    expect(c.forced).toBe(true);
+  });
+
+  it("override 'neural' forces neural (with a worker)", () => {
+    expect(selectAvatarTier(caps({ webgpu: false }), { override: "neural" }).tier).toBe("3d-neural");
+    expect(selectAvatarTier(caps({ moduleWorkers: false }), { override: "neural" }).tier).toBe(
+      "3d-basic",
+    );
+  });
+
+  it("override 'off' forces speech-only; but override can't conjure WebGL2", () => {
+    expect(selectAvatarTier(caps(), { override: "off" }).tier).toBe("speech-only");
+    expect(selectAvatarTier(caps({ webgl2: false }), { override: "on" }).tier).toBe("speech-only");
+  });
+
+  it("resolveAvatarOverride reads the query param, then storage, else auto", () => {
+    expect(resolveAvatarOverride("?avatar=on")).toBe("on");
+    expect(resolveAvatarOverride("?avatar=neural")).toBe("neural");
+    expect(resolveAvatarOverride("?avatar=off")).toBe("off");
+    expect(resolveAvatarOverride("?x=1")).toBe("auto");
+    expect(resolveAvatarOverride("", { getItem: () => "on" })).toBe("on");
+    expect(resolveAvatarOverride("", { getItem: () => null })).toBe("auto");
   });
 });
 

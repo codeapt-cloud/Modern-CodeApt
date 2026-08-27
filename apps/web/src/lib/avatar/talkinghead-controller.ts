@@ -22,7 +22,9 @@
  */
 import { avatarExpressionFor, type AvatarUiState } from "./avatar-state.js";
 
-const AVATAR_URL = "/avatar/mpfb.glb"; // self-hosted CC0 (MPFB) avatar
+/** Self-hosted CC0 (MPFB) avatar path. The hook fetches this itself (measured +
+ *  abortable) and hands the resulting object URL to `createAvatarController`. */
+export const AVATAR_URL = "/avatar/mpfb.glb";
 const NEURAL_VOICE = "am_fenrir"; // a natural English Kokoro voice
 
 interface TalkingHeadLike {
@@ -85,9 +87,9 @@ export function estimatedWordTimings(text: string, durationMs: number): {
  */
 export async function createAvatarController(
   container: HTMLElement,
-  opts: { motion: boolean; onProgress?: (p: number) => void },
+  opts: { motion: boolean; glbUrl?: string },
 ): Promise<AvatarController | null> {
-  const { motion, onProgress } = opts;
+  const { motion, glbUrl } = opts;
   let head: TalkingHeadLike;
   try {
     const mod = (await import("@met4citizen/talkinghead")) as unknown as {
@@ -101,13 +103,15 @@ export async function createAvatarController(
       avatarMute: false,
       modelFPS: motion ? 30 : 24,
     });
-    await head.showAvatar(
-      { url: AVATAR_URL, body: "M", lipsyncLang: "en", avatarMood: "neutral" },
-      (e) => {
-        const ev = e as { lengthComputable?: boolean; loaded?: number; total?: number };
-        if (ev?.lengthComputable && ev.total) onProgress?.(Math.min(1, ev.loaded! / ev.total));
-      },
-    );
+    // The hook has already fetched the GLB (measured + validated) into an object
+    // URL; TalkingHead loads it from memory (no re-download). Falls back to the
+    // path if none was supplied.
+    await head.showAvatar({
+      url: glbUrl ?? AVATAR_URL,
+      body: "M",
+      lipsyncLang: "en",
+      avatarMood: "neutral",
+    });
   } catch {
     return null; // 3D avatar failed → caller stays on the static SVG
   }

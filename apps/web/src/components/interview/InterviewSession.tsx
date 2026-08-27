@@ -66,16 +66,16 @@ export function InterviewSession({
       <div className="space-y-3">
         {error ? <Alert variant="error">{error}</Alert> : null}
         <InterviewIntake defaultRole={defaultRole} onSubmit={(v) => void begin(v)} starting={starting} />
-        {avatar.is3d && avatar.loading ? (
+        {avatar.loading ? (
           <Alert variant="info">
-            Your interviewer avatar is loading in the background ({Math.round(avatar.progress * 100)}%)
-            — you can begin whenever you’re ready; it’ll appear when it’s done.
+            {avatar.statusText} — you can begin whenever you’re ready; the interviewer
+            appears when it’s done.
           </Alert>
-        ) : null}
-        {avatar.failed ? (
+        ) : avatar.statusText ? (
+          // skipped / unavailable / failed — say so plainly (never silent).
           <Alert variant="info">
-            The 3D avatar isn’t available on this device — the interview runs with a
-            simple avatar and voice. Everything else works normally.
+            {avatar.statusText}. The interview runs with a simple avatar and voice —
+            everything else works normally.
           </Alert>
         ) : null}
       </div>

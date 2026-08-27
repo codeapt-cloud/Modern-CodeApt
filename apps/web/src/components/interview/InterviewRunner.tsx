@@ -486,12 +486,15 @@ export function InterviewRunner({
           ) : (
             // Static avatar shows immediately; the interview is already running.
             // The 3D avatar (if any) upgrades this in place when it finishes loading.
+            // The status is always VISIBLE — never a silent fall-back to the SVG.
             <div className="flex flex-col items-center gap-1">
               <InterviewAvatar state={avatarState} pulse={0} />
-              {avatar.is3d && avatar.loading ? (
-                <span className="flex items-center gap-1 text-[11px] text-ink-muted">
-                  <Loader2 className="h-3 w-3 animate-spin" /> 3D avatar loading…{" "}
-                  {Math.round(avatar.progress * 100)}%
+              {avatar.statusText ? (
+                <span className="flex items-center gap-1 text-center text-[11px] text-ink-muted">
+                  {avatar.status === "loading" ? (
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+                  ) : null}
+                  {avatar.statusText}
                 </span>
               ) : null}
             </div>

@@ -1,93 +1,113 @@
 /**
- * PURE avatar capability detection + fallback-tier selection (Step 37, retuned
- * Step 37.1 for the DEPLOYMENT TARGET: college lab machines — often older Chrome,
- * integrated graphics, NO WebGPU, on shared campus wifi).
+ * PURE avatar capability detection + fallback-tier selection (Step 37; corrected
+ * 37.2). Deployment target: college lab machines — often older Chrome, integrated
+ * graphics, NO WebGPU, on shared campus wifi.
  *
- * Two measured facts drive the policy:
- *   - the avatar GLB is 36.8 MB and the Kokoro neural model is 300 MB+ at defaults
- *     (90 MB even quantized) — far too large to BLOCK question one on;
- *   - most target machines have no WebGPU, so a neural tier would run Kokoro on
- *     WASM (slow) after a huge download.
- * So: the interview NEVER waits on avatar/model assets (the hook starts speaking
- * with SpeechSynthesis + a static avatar immediately and upgrades in the
- * background), the default tier is 3d-basic (TalkingHead avatar + SpeechSynthesis
- * + TalkingHead's text→viseme ESTIMATED lip-sync — visible mouth movement, no
- * 300 MB download), and the neural Kokoro voice is OPT-IN.
+ * 37.2 correction: `navigator.connection.effectiveType` is a ROLLING estimate that
+ * a burst of requests (e.g. the MediaPipe WASM download moments earlier) drags down
+ * — it wrongly reported "3g" on a fine connection and silently suppressed the
+ * avatar. We NO LONGER gate on effectiveType. We only hard-skip on `saveData` (an
+ * explicit user choice); otherwise we START the GLB download and ABORT it if the
+ * MEASURED rate is genuinely too slow (see glb-loader.ts) — measuring the real
+ * download instead of trusting a guess. An override (?avatar=on/neural/off) forces
+ * the decision so the avatar can always be seen for judging.
  *
- * Tiers (highest → lowest):
- *   - "3d-neural": TalkingHead + HeadTTS Kokoro — phoneme-timestamp lip-sync +
- *     neural voice. ONLY when opted in (or `neural:"auto"` on WebGPU + a fast
- *     connection). Loads in the background; the first session usually still speaks
- *     via SpeechSynthesis (Kokoro caches for later).
- *   - "3d-basic" (DEFAULT for capable machines): TalkingHead avatar + the browser
- *     voice + estimated lip-sync. Only the 36.8 MB GLB streams (in the background);
- *     the voice is instant. Visible lip movement, no neural download.
- *   - "speech-only": static SVG + SpeechSynthesis. Used on a slow connection (don't
- *     pull 36.8 MB), no WebGL2, or when the viewer disables the avatar.
+ * Tiers: 3d-neural (TalkingHead + HeadTTS Kokoro, opt-in), 3d-basic (TalkingHead +
+ * browser voice + estimated lip-sync — the default), speech-only (static SVG + SS).
  */
 export type AvatarTier = "3d-neural" | "3d-basic" | "speech-only";
 
 /** Whether/how to attempt the neural Kokoro voice. Default is OPT-IN ("off"). */
 export type NeuralPolicy = "auto" | "on" | "off";
 
+/** Explicit override (query param / setting): force the tier regardless of caps. */
+export type AvatarOverride = "auto" | "on" | "neural" | "off";
+
 export interface AvatarCapabilities {
   readonly webgl2: boolean;
   readonly moduleWorkers: boolean;
   readonly webgpu: boolean;
   readonly reducedMotion: boolean;
-  /** Connection is metered/slow (2g/3g/save-data) — skip the 36.8 MB GLB. Unknown
-   *  (no NetworkInformation API) is treated as NOT slow, so capable machines on
-   *  Firefox/Safari aren't needlessly downgraded. */
-  readonly slowConnection: boolean;
+  /** The user turned on data-saver — the ONLY connection signal we hard-skip on. */
+  readonly saveData: boolean;
 }
 
 export interface AvatarTierChoice {
   readonly tier: AvatarTier;
   readonly motion: boolean;
+  /** True when an override forced this — the GLB download must NOT rate-abort. */
+  readonly forced: boolean;
   readonly reason: string;
 }
 
 export function selectAvatarTier(
   caps: AvatarCapabilities,
-  opts: { avatarEnabled?: boolean; neural?: NeuralPolicy } = {},
+  opts: { avatarEnabled?: boolean; neural?: NeuralPolicy; override?: AvatarOverride } = {},
 ): AvatarTierChoice {
   const avatarEnabled = opts.avatarEnabled ?? true;
-  const neural = opts.neural ?? "off"; // opt-in by default (lab-machine safe)
+  const neural = opts.neural ?? "off";
+  const override = opts.override ?? "auto";
   const motion = !caps.reducedMotion;
 
-  if (!avatarEnabled) {
-    return { tier: "speech-only", motion, reason: "avatar disabled by the viewer" };
+  if (!avatarEnabled || override === "off") {
+    return { tier: "speech-only", motion, forced: false, reason: "avatar turned off" };
   }
   if (!caps.webgl2) {
-    return { tier: "speech-only", motion, reason: "no WebGL2 — 3D avatar unavailable" };
+    return { tier: "speech-only", motion, forced: false, reason: "this browser has no WebGL2" };
   }
-  if (caps.slowConnection) {
-    // The 36.8 MB avatar isn't worth it on a metered/slow link — stay light.
-    return { tier: "speech-only", motion, reason: "slow/metered connection — avatar skipped" };
+  // Forced overrides bypass the connection gate (and the rate-abort downstream).
+  if (override === "on") {
+    return { tier: "3d-basic", motion, forced: true, reason: "forced on (override)" };
+  }
+  if (override === "neural") {
+    return caps.moduleWorkers
+      ? { tier: "3d-neural", motion, forced: true, reason: "forced neural (override)" }
+      : { tier: "3d-basic", motion, forced: true, reason: "forced (no worker → browser voice)" };
+  }
+  // Auto: only data-saver hard-skips; a slow link is caught by measured abort.
+  if (caps.saveData) {
+    return { tier: "speech-only", motion, forced: false, reason: "data saver is on" };
   }
   const neuralWanted =
-    caps.moduleWorkers &&
-    (neural === "on" || (neural === "auto" && caps.webgpu));
+    caps.moduleWorkers && (neural === "on" || (neural === "auto" && caps.webgpu));
   if (neuralWanted) {
     return {
       tier: "3d-neural",
       motion,
-      reason:
-        neural === "on"
-          ? "neural voice opted in"
-          : "neural auto — WebGPU + fast connection",
+      forced: false,
+      reason: neural === "on" ? "neural opted in" : "neural auto (WebGPU)",
     };
   }
-  return {
-    tier: "3d-basic",
-    motion,
-    reason: "3D avatar + browser voice (estimated lip-sync) — the lab default",
-  };
+  return { tier: "3d-basic", motion, forced: false, reason: "3D avatar + browser voice" };
 }
 
-/** The next tier down, for runtime step-down when a tier fails to initialise. */
 export function degradeTier(tier: AvatarTier): AvatarTier {
   return tier === "3d-neural" ? "3d-basic" : "speech-only";
+}
+
+/** Resolve the override from a query string then localStorage; default "auto". */
+export function resolveAvatarOverride(
+  search?: string,
+  storage?: Pick<Storage, "getItem"> | null,
+): AvatarOverride {
+  const read = (): string => {
+    try {
+      const s =
+        search ?? (typeof window !== "undefined" ? window.location.search : "");
+      const qp = new URLSearchParams(s).get("avatar");
+      if (qp) return qp;
+      const store =
+        storage ?? (typeof window !== "undefined" ? window.localStorage : null);
+      return store?.getItem?.("codeapt.avatar") ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const v = read().toLowerCase();
+  if (v === "on" || v === "3d" || v === "basic") return "on";
+  if (v === "neural") return "neural";
+  if (v === "off") return "off";
+  return "auto";
 }
 
 /** Detect capabilities from the live browser (DOM). Guarded so it never throws. */
@@ -125,17 +145,13 @@ export function detectAvatarCapabilities(win: Window = window): AvatarCapabiliti
       return false;
     }
   })();
-  const slowConnection = (() => {
+  const saveData = (() => {
     try {
-      const conn = (win.navigator as { connection?: { effectiveType?: string; saveData?: boolean } })
-        .connection;
-      if (!conn) return false; // unknown → assume OK
-      if (conn.saveData) return true;
-      const et = conn.effectiveType ?? "";
-      return et === "slow-2g" || et === "2g" || et === "3g";
+      const conn = (win.navigator as { connection?: { saveData?: boolean } }).connection;
+      return !!conn?.saveData;
     } catch {
       return false;
     }
   })();
-  return { webgl2, moduleWorkers, webgpu, reducedMotion, slowConnection };
+  return { webgl2, moduleWorkers, webgpu, reducedMotion, saveData };
 }
