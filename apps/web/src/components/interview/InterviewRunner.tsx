@@ -46,7 +46,7 @@ import {
 import { parseApiError } from "../../lib/api-client.js";
 import { uploadAudioToCloudinary } from "../../lib/audio-upload.js";
 import { useAudioRecorder } from "../../lib/use-audio-recorder.js";
-import { useInterviewVoice } from "../../lib/use-interview-voice.js";
+import type { UseInterviewAvatar } from "../../lib/use-interview-avatar.js";
 import { requestFullscreen, useProctoring } from "../../lib/use-proctoring.js";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
@@ -73,11 +73,13 @@ export function InterviewRunner({
   engine,
   attempt,
   camera,
+  avatar,
   onFinished,
 }: {
   engine: InterviewEngine;
   attempt: StartMockInterviewResponse;
   camera: UseCameraObservation;
+  avatar: UseInterviewAvatar;
   onFinished: (observations: SessionObservations | null) => void;
 }): JSX.Element {
   const supported = speechRecognitionSupported(window as never);
@@ -87,7 +89,10 @@ export function InterviewRunner({
     (init) =>
       interviewReducer(init, { type: "started", current: attempt, greeting: attempt.greeting }),
   );
-  const voice = useInterviewVoice();
+  // The avatar hook (created in InterviewSession, loaded during intake) is the
+  // voice too — greeting/ack/closing are spoken through `avatar.speak`, so the
+  // Step-36 conversational flow is preserved by the new voice.
+  const voice = avatar;
   const [warnings, setWarnings] = useState(0);
   const [terminated, setTerminated] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -343,6 +348,9 @@ export function InterviewRunner({
   // this the recorder stays stuck at `uploaded` and turn 2+ records nothing.
   useEffect(() => {
     if (state.phase !== "asking" || !currentTurn) return;
+    // Wait for the avatar/voice to be ready so the greeting is spoken with lip-sync
+    // (speech-only is ready immediately; a failed 3D load degrades to ready too).
+    if (!avatar.ready) return;
     if (spokenIndexRef.current === currentTurn.index) return;
     spokenIndexRef.current = currentTurn.index;
     setLiveTranscript("");
@@ -366,7 +374,7 @@ export function InterviewRunner({
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.phase, currentTurn?.index]);
+  }, [state.phase, currentTurn?.index, avatar.ready]);
 
   // B1: prime the next MAIN question's TTS during the answer.
   useEffect(() => {
@@ -414,6 +422,20 @@ export function InterviewRunner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.finished]);
 
+  // The avatar's UI state (drives TalkingHead mood/gesture, or the static SVG).
+  const avatarState: AvatarState =
+    state.phase === "asking" || voice.speaking
+      ? "speaking"
+      : state.phase === "answering"
+        ? "listening"
+        : state.phase === "thinking"
+          ? "thinking"
+          : "idle";
+  useEffect(() => {
+    avatar.setUiState(avatarState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avatarState]);
+
   if (!supported) {
     return <Alert variant="error">{SUPPORTED_BROWSERS_MESSAGE}</Alert>;
   }
@@ -436,14 +458,6 @@ export function InterviewRunner({
     );
   }
 
-  const avatarState: AvatarState =
-    state.phase === "asking" || voice.speaking
-      ? "speaking"
-      : state.phase === "answering"
-        ? "listening"
-        : state.phase === "thinking"
-          ? "thinking"
-          : "idle";
   const answering = state.phase === "answering" && recorder.state === "recording";
 
   return (
@@ -461,7 +475,27 @@ export function InterviewRunner({
 
       <div className="grid gap-4 md:grid-cols-[200px_1fr]">
         <div className="flex flex-col items-center gap-3">
-          <InterviewAvatar state={avatarState} pulse={voice.pulse} />
+          {avatar.is3d && avatar.avatarVisible ? (
+            <div className="relative h-40 w-40 overflow-hidden rounded-2xl bg-surface-muted">
+              {/* TalkingHead mounts its canvas here (relocated from intake). */}
+              <div ref={avatar.attach} className="absolute inset-0" />
+              <span className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-[11px] text-ink-muted">
+                {avatar.speaking ? "Interviewer speaking…" : "Interviewer"}
+              </span>
+            </div>
+          ) : (
+            // Static avatar shows immediately; the interview is already running.
+            // The 3D avatar (if any) upgrades this in place when it finishes loading.
+            <div className="flex flex-col items-center gap-1">
+              <InterviewAvatar state={avatarState} pulse={0} />
+              {avatar.is3d && avatar.loading ? (
+                <span className="flex items-center gap-1 text-[11px] text-ink-muted">
+                  <Loader2 className="h-3 w-3 animate-spin" /> 3D avatar loading…{" "}
+                  {Math.round(avatar.progress * 100)}%
+                </span>
+              ) : null}
+            </div>
+          )}
           <CameraSelfView camera={camera} className="h-28 w-full" />
           {camera.granted ? (
             <p className="text-center text-[11px] text-ink-muted">
