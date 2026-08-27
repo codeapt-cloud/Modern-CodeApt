@@ -92,17 +92,30 @@ export async function createAvatarController(
   const { motion, glbUrl } = opts;
   let head: TalkingHeadLike;
   try {
-    const mod = (await import("@met4citizen/talkinghead")) as unknown as {
-      TalkingHead: new (el: HTMLElement, o?: Record<string, unknown>) => TalkingHeadLike;
-    };
+    // Import BOTH the engine AND the English lip-sync module as static specifiers
+    // so Vite BUNDLES them. TalkingHead would otherwise load lipsync via a COMPUTED
+    // `import(path + 'lipsync-en.mjs')` at runtime (path defaults to "./"), which
+    // resolves against the hashed /assets/ chunk → /assets/lipsync-en.mjs → the SPA
+    // 404 (index.html) → the whole avatar dies. lipsync-en.mjs is self-contained
+    // ESM exporting `LipsyncEn`, so we wire it ourselves and pass lipsyncModules:[]
+    // so TalkingHead never fires that runtime import.
+    const [mod, lip] = (await Promise.all([
+      import("@met4citizen/talkinghead"),
+      import("@met4citizen/talkinghead/modules/lipsync-en.mjs"),
+    ])) as unknown as [
+      { TalkingHead: new (el: HTMLElement, o?: Record<string, unknown>) => TalkingHeadLike },
+      { LipsyncEn: new () => unknown },
+    ];
     head = new mod.TalkingHead(container, {
-      lipsyncModules: ["en"],
+      lipsyncModules: [], // don't let TalkingHead runtime-import lipsync (see above)
       lipsyncLang: "en",
       cameraView: "upper", // head-and-shoulders, like a video call
       cameraRotateEnable: false,
       avatarMute: false,
       modelFPS: motion ? 30 : 24,
     });
+    // Wire the bundled lip-sync processor directly (ctor set `this.lipsync = {}`).
+    (head as unknown as { lipsync: Record<string, unknown> }).lipsync.en = new lip.LipsyncEn();
     // The hook has already fetched the GLB (measured + validated) into an object
     // URL; TalkingHead loads it from memory (no re-download). Falls back to the
     // path if none was supplied.

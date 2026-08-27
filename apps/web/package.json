@@ -8,6 +8,7 @@
     "dev": "vite",
     "prebuild": "node scripts/check-public-asset-sizes.mjs",
     "build": "vite build",
+    "postbuild": "node scripts/check-runtime-assets.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
