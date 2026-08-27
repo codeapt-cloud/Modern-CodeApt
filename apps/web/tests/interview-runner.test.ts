@@ -220,6 +220,57 @@ describe("turn-index tracking — the real loop (Step-34.2 stale-index regressio
   });
 });
 
+describe("conversation transcript (Step 36 A — the wiring Step 35 shipped but never surfaced)", () => {
+  it("seeds greeting + question, logs answer→ack→next question, then a closing", () => {
+    let s = interviewReducer(INITIAL_INTERVIEW_STATE, {
+      type: "started",
+      current: current(),
+      greeting: "Hello Vinay, thanks for joining me today.",
+    });
+    // The greeting is a DISTINCT kind from the question — the surface that was missing.
+    expect(s.messages.map((m) => m.kind)).toEqual(["greeting", "question"]);
+    expect(s.messages[0]!.text).toContain("Vinay");
+    expect(s.messages[1]!.text).toBe("Q0");
+
+    s = interviewReducer(s, {
+      type: "answered",
+      answerText: "my answer about the project",
+      response: submitRes({ index: 0, acknowledgement: "Thanks for walking me through that." }),
+    });
+    expect(s.messages.map((m) => m.kind)).toEqual([
+      "greeting",
+      "question",
+      "answer",
+      "acknowledgement",
+      "question",
+    ]);
+    expect(s.messages.find((m) => m.kind === "acknowledgement")!.text).toBe(
+      "Thanks for walking me through that.",
+    );
+
+    s = interviewReducer(s, {
+      type: "answered",
+      answerText: "final answer",
+      response: submitRes({
+        index: 1,
+        acknowledgement: "Got it — thank you.",
+        closing: "That's everything from me — thank you for your time.",
+        current: current({ status: "scored", turn: null, nextMainQuestion: null }),
+      }),
+    });
+    const last = s.messages[s.messages.length - 1]!;
+    expect(last.kind).toBe("closing");
+    expect(last.text).toContain("thank you");
+    // Every message id is unique (stable React keys).
+    expect(new Set(s.messages.map((m) => m.id)).size).toBe(s.messages.length);
+  });
+
+  it("skips an empty greeting/ack so there are no blank transcript lines", () => {
+    const s = interviewReducer(INITIAL_INTERVIEW_STATE, { type: "started", current: current() });
+    expect(s.messages.map((m) => m.kind)).toEqual(["question"]); // greeting absent → skipped
+  });
+});
+
 describe("isInterviewDone", () => {
   it("is true for scored / expired / no-turn envelopes", () => {
     expect(isInterviewDone(current({ status: "scored" }))).toBe(true);

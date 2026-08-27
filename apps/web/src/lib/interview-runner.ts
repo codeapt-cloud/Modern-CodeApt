@@ -22,6 +22,18 @@ export type InterviewPhase =
   | "thinking" // answer submitted; awaiting the server (never dead air)
   | "done"; // interview finished (scored or expired)
 
+/** One line of the running conversation transcript (Step 36 A). The interviewer's
+ *  greeting/acknowledgement/closing are DISTINCT `kind`s from a `question`, so the
+ *  UI can style them apart — and so a test can assert they were actually threaded
+ *  (the Step-35 wiring gap: they reached the runner but were only shown for the
+ *  sub-second "asking" phase, with no persistent surface). */
+export interface InterviewMessage {
+  readonly id: number;
+  readonly role: "interviewer" | "candidate";
+  readonly kind: "greeting" | "acknowledgement" | "question" | "answer" | "closing";
+  readonly text: string;
+}
+
 export interface InterviewRunnerState {
   readonly phase: InterviewPhase;
   readonly current: InterviewCurrentResponse | null;
@@ -32,13 +44,21 @@ export interface InterviewRunnerState {
   readonly prefetched: InterviewNextMain | null;
   /** True once the prefetched question's TTS has been synthesized ahead of time. */
   readonly prefetchSynthesized: boolean;
+  /** The visible conversation transcript, built as events flow (Step 36 A). */
+  readonly messages: readonly InterviewMessage[];
+  /** Monotonic id source for messages (deterministic for tests). */
+  readonly nextMessageId: number;
 }
 
 export type InterviewEvent =
-  | { type: "started"; current: InterviewCurrentResponse }
+  // `greeting` is the interviewer's opening line (from the start payload); it
+  // seeds the transcript so it's never lost after the "asking" phase.
+  | { type: "started"; current: InterviewCurrentResponse; greeting?: string }
   | { type: "question_spoken" }
   | { type: "answer_submitting" }
-  | { type: "answered"; response: SubmitInterviewAnswerResponse }
+  // `answerText` is the candidate's (corrected) transcript, logged before the
+  // interviewer's acknowledgement so the conversation reads in order.
+  | { type: "answered"; response: SubmitInterviewAnswerResponse; answerText?: string }
   | { type: "prefetch_synthesized" }
   // Re-sync to the server's authoritative `current` after a stale submit (409
   // NOT_CURRENT_TURN). Does NOT touch counters — nothing was newly answered, we
@@ -53,7 +73,36 @@ export const INITIAL_INTERVIEW_STATE: InterviewRunnerState = {
   finished: false,
   prefetched: null,
   prefetchSynthesized: false,
+  messages: [],
+  nextMessageId: 0,
 };
+
+/** Append transcript messages immutably, assigning monotonic ids. Empty-text
+ *  entries are skipped so an absent greeting/ack never leaves a blank line. */
+function pushMessages(
+  state: InterviewRunnerState,
+  entries: ReadonlyArray<Omit<InterviewMessage, "id">>,
+): Pick<InterviewRunnerState, "messages" | "nextMessageId"> {
+  let id = state.nextMessageId;
+  const added: InterviewMessage[] = [];
+  for (const e of entries) {
+    if (e.text.trim() === "") continue;
+    added.push({ ...e, id: id++ });
+  }
+  return {
+    messages: added.length ? [...state.messages, ...added] : state.messages,
+    nextMessageId: id,
+  };
+}
+
+/** The last interviewer QUESTION text in the transcript (to avoid re-logging the
+ *  same question on a resync). */
+function lastQuestionText(state: InterviewRunnerState): string {
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    if (state.messages[i]!.kind === "question") return state.messages[i]!.text;
+  }
+  return "";
+}
 
 /** A disclosed envelope is terminal when it is scored/expired or has no turn. */
 export function isInterviewDone(current: InterviewCurrentResponse): boolean {
@@ -67,8 +116,18 @@ export function interviewReducer(
   switch (event.type) {
     case "started": {
       const done = isInterviewDone(event.current);
+      // Seed the transcript: the greeting (interviewer), then the first question.
+      const seed = pushMessages(state, [
+        { role: "interviewer", kind: "greeting", text: event.greeting ?? "" },
+        {
+          role: "interviewer",
+          kind: "question",
+          text: done ? "" : (event.current.turn?.question ?? ""),
+        },
+      ]);
       return {
         ...state,
+        ...seed,
         current: event.current,
         phase: done ? "done" : "asking",
         finished: done,
@@ -83,8 +142,18 @@ export function interviewReducer(
     case "answered": {
       const { response } = event;
       const done = isInterviewDone(response.current);
+      // Log, in conversational order: the candidate's answer → the interviewer's
+      // acknowledgement → then either the closing (done) or the next question.
+      const entries: ReadonlyArray<Omit<InterviewMessage, "id">> = [
+        { role: "candidate", kind: "answer", text: event.answerText ?? "" },
+        { role: "interviewer", kind: "acknowledgement", text: response.acknowledgement ?? "" },
+        done
+          ? { role: "interviewer", kind: "closing", text: response.closing ?? "" }
+          : { role: "interviewer", kind: "question", text: response.current.turn?.question ?? "" },
+      ];
       return {
         ...state,
+        ...pushMessages(state, entries),
         current: response.current,
         turnsAnswered: state.turnsAnswered + 1,
         followUpsSeen: state.followUpsSeen + (response.followUpAdded ? 1 : 0),
@@ -98,8 +167,15 @@ export function interviewReducer(
       return { ...state, prefetchSynthesized: true };
     case "resynced": {
       const done = isInterviewDone(event.current);
+      // Only log the re-asked question if it isn't already the last one shown.
+      const q = done ? "" : (event.current.turn?.question ?? "");
+      const seed =
+        q && q !== lastQuestionText(state)
+          ? pushMessages(state, [{ role: "interviewer", kind: "question", text: q }])
+          : { messages: state.messages, nextMessageId: state.nextMessageId };
       return {
         ...state,
+        ...seed,
         current: event.current,
         phase: done ? "done" : "asking",
         finished: done,

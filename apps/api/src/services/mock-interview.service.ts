@@ -32,6 +32,7 @@ import {
   MockInterviewStatus,
   TopicType,
   collectDescendantUnitIds,
+  buildResumeQuestions,
   computeInterviewReport,
   correctTranscript,
   dropDuplicateQuestions,
@@ -631,8 +632,13 @@ export async function startInterview(
     meter,
   );
   const aiGenerated = generated !== null;
+  // Degrade order (Step 36 D): LLM plan → resume-anchored deterministic questions
+  // (when the resume analysis yielded highlights) → the generic role bank. So even
+  // without the LLM, questions still reference the candidate's actual experience.
+  const resumeFallback = buildResumeQuestions(analysis, behaviouralCount, technicalCount);
   let mainQuestions: GeneratedQuestion[] =
-    generated?.questions ?? fallbackQuestions(behaviouralCount, technicalCount);
+    generated?.questions ??
+    (resumeFallback.length > 0 ? resumeFallback : fallbackQuestions(behaviouralCount, technicalCount));
   const greeting = generated?.greeting?.trim() || interviewGreeting(candidateName);
   const closing = generated?.closing?.trim() || interviewClosing();
 

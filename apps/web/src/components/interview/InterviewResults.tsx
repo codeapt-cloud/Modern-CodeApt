@@ -9,7 +9,7 @@ import type { MockInterviewAttemptResult } from "@codeapt/shared";
 import { useEffect, useState } from "react";
 
 import type { InterviewEngine } from "../../lib/interview-engine.js";
-import type { ObservationSummary } from "../../lib/camera-observation.js";
+import type { SessionObservations } from "../../lib/camera-observation.js";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
 import { Card, CardContent } from "../ui/card.js";
@@ -34,7 +34,7 @@ export function InterviewResults({
 }: {
   engine: InterviewEngine;
   attemptId: string;
-  observations?: ObservationSummary | null;
+  observations?: SessionObservations | null;
 }): JSX.Element {
   const [data, setData] = useState<MockInterviewAttemptResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,34 +131,28 @@ export function InterviewResults({
         </CardContent>
       </Card>
 
-      {observations && observations.available ? (
+      {observations && (observations.available || observations.sentences.length > 0) ? (
         <Card>
-          <CardContent className="space-y-2 p-6">
+          <CardContent className="space-y-3 p-6">
             <div className="flex items-center gap-2">
               <h3 className="font-medium text-ink">Presence observations</h3>
               <Badge variant="neutral">not scored</Badge>
             </div>
             <p className="text-xs text-ink-muted">
-              Feedback from your camera. These never affect your score.
+              Feedback from your camera and timing. These never affect your score.
             </p>
-            {observations.maxFaces > 1 ? (
-              <p className="text-xs text-warning-fg">
-                More than one face was detected in view at times. This notes that the
-                frame changed — not who was in it.
-              </p>
-            ) : null}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
-              <Dim label="Looking away" value={observations.pctLookingAway} note="% of frames" />
-              <Dim label="Out of frame" value={observations.secondsOutOfFrame} note="seconds" />
-              <Dim label="Stillness" value={observations.stillnessScore} note="higher = steadier" />
-              <div className="rounded-xl border border-subtle p-3">
-                <div className="text-xs text-ink-muted">Smile</div>
-                <div className="text-sm text-ink">
-                  start: {observations.smileAtStart === null ? "—" : observations.smileAtStart ? "yes" : "no"} · end:{" "}
-                  {observations.smileAtEnd === null ? "—" : observations.smileAtEnd ? "yes" : "no"}
-                </div>
+            <ul className="list-disc space-y-1 pl-5 text-sm text-ink" data-testid="observation-sentences">
+              {observations.sentences.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+            {observations.available ? (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 text-sm">
+                <Dim label="Looking away" value={observations.pctLookingAway} note="% of the time" />
+                <Dim label="Out of frame" value={observations.secondsOutOfFrame} note="seconds" />
+                <Dim label="Stillness" value={observations.stillnessScore} note="higher = steadier" />
               </div>
-            </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

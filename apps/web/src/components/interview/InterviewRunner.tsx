@@ -24,8 +24,14 @@ import {
   interviewReducer,
 } from "../../lib/interview-runner.js";
 import type { InterviewEngine } from "../../lib/interview-engine.js";
-import type { ObservationSummary } from "../../lib/camera-observation.js";
+import {
+  aggregateObservations,
+  summarizeSessionObservations,
+  type AnswerObservation,
+  type SessionObservations,
+} from "../../lib/camera-observation.js";
 import type { UseCameraObservation } from "../../lib/use-camera-observation.js";
+import { InterviewTranscript } from "./InterviewTranscript.js";
 import {
   SUPPORTED_BROWSERS_MESSAGE,
   speechRecognitionSupported,
@@ -72,13 +78,14 @@ export function InterviewRunner({
   engine: InterviewEngine;
   attempt: StartMockInterviewResponse;
   camera: UseCameraObservation;
-  onFinished: (observations: ObservationSummary | null) => void;
+  onFinished: (observations: SessionObservations | null) => void;
 }): JSX.Element {
   const supported = speechRecognitionSupported(window as never);
   const [state, dispatch] = useReducer(
     interviewReducer,
     INITIAL_INTERVIEW_STATE,
-    (init) => interviewReducer(init, { type: "started", current: attempt }),
+    (init) =>
+      interviewReducer(init, { type: "started", current: attempt, greeting: attempt.greeting }),
   );
   const voice = useInterviewVoice();
   const [warnings, setWarnings] = useState(0);
@@ -101,7 +108,10 @@ export function InterviewRunner({
   const questionEndedAtRef = useRef<number>(0);
   const firstSpeechAtRef = useRef<number | null>(null);
   const spokenIndexRef = useRef<number>(-1);
-  const observationsRef = useRef<ObservationSummary | null>(null);
+  // Per-ANSWER observation summaries + think-times, accumulated across the WHOLE
+  // session (Step 36 B — Step 35 kept only the last answer's, so the report was
+  // empty). Folded into a session summary at finish.
+  const answerObservationsRef = useRef<AnswerObservation[]>([]);
   const finishedRef = useRef(false);
   // The LIVE reducer state, mirrored into a ref so the recorder's onUpload
   // callback (whose identity is stable across turns) always reads the CURRENT
@@ -213,14 +223,20 @@ export function InterviewRunner({
         submittingRef.current = true;
         stopTurnRecognition();
         dispatch({ type: "answer_submitting" });
-        const observation = camera.granted ? camera.endSampling() : null;
-        if (observation) observationsRef.current = observation;
+        const attemptId = live.attemptId;
+        const turnIndex = live.currentIndex;
+        // Close this answer's observation window + record its think-time. Kept
+        // per answer (accumulated) so the report reflects the WHOLE session.
+        const observation = camera.granted ? camera.endSampling() : aggregateObservations([]);
+        const latencySeconds =
+          firstSpeechAtRef.current !== null
+            ? Math.max(0, (firstSpeechAtRef.current - questionEndedAtRef.current) / 1000)
+            : null;
+        answerObservationsRef.current.push({ index: turnIndex, summary: observation, latencySeconds });
         const latencyMs =
           firstSpeechAtRef.current !== null
             ? firstSpeechAtRef.current - questionEndedAtRef.current
             : 0;
-        const attemptId = live.attemptId;
-        const turnIndex = live.currentIndex;
         try {
           const audioUrl = await uploadAudioToCloudinary(engine.uploadSignature, blob);
           const capture = await captureBrowserResult(blob);
@@ -235,7 +251,7 @@ export function InterviewRunner({
           // precedes the next question; the closing plays when the interview ends.
           ackRef.current = res.acknowledgement ?? "";
           closingRef.current = res.closing ?? "";
-          dispatch({ type: "answered", response: res });
+          dispatch({ type: "answered", response: res, answerText: capture.transcript });
         } catch (err) {
           // The submit was rejected. NOT_CURRENT_TURN means our index is stale —
           // RE-SYNC from the server's authoritative `current` and continue (never
@@ -283,7 +299,7 @@ export function InterviewRunner({
           if (res.terminated) {
             setTerminated(true);
             recorder.stop();
-            onFinished(observationsRef.current);
+            onFinished(summarizeSessionObservations(answerObservationsRef.current));
           }
         })
         .catch(() => setWarnings((n) => n + 1));
@@ -389,10 +405,10 @@ export function InterviewRunner({
       finishedRef.current = true;
       const closing = closingRef.current;
       if (closing) {
-        voice.speak(closing, { onEnd: () => onFinished(observationsRef.current) });
+        voice.speak(closing, { onEnd: () => onFinished(summarizeSessionObservations(answerObservationsRef.current)) });
       } else {
         voice.cancel();
-        onFinished(observationsRef.current);
+        onFinished(summarizeSessionObservations(answerObservationsRef.current));
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -405,7 +421,7 @@ export function InterviewRunner({
     return (
       <div className="space-y-3">
         <Alert variant="error">{error}</Alert>
-        <Button variant="secondary" onClick={() => onFinished(observationsRef.current)}>
+        <Button variant="secondary" onClick={() => onFinished(summarizeSessionObservations(answerObservationsRef.current))}>
           See your report so far
         </Button>
       </div>
@@ -447,6 +463,13 @@ export function InterviewRunner({
         <div className="flex flex-col items-center gap-3">
           <InterviewAvatar state={avatarState} pulse={voice.pulse} />
           <CameraSelfView camera={camera} className="h-28 w-full" />
+          {camera.granted ? (
+            <p className="text-center text-[11px] text-ink-muted">
+              {camera.detecting
+                ? "Analysing your presence on-device (never recorded)."
+                : "Camera preview only — on-device detection isn’t available here."}
+            </p>
+          ) : null}
         </div>
 
         <Card>
@@ -498,6 +521,16 @@ export function InterviewRunner({
           </CardContent>
         </Card>
       </div>
+
+      {/* Persistent conversation transcript (Step 36 A) — greeting, questions,
+          acknowledgements and closing, visually distinct and never lost. */}
+      {state.messages.length > 0 ? (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <InterviewTranscript messages={state.messages} />
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

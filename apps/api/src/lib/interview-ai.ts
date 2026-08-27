@@ -154,9 +154,15 @@ const GENERATION_SYSTEM =
   "name where natural (e.g. \"you mentioned migrating a monolith — how did you " +
   'sequence it?"). Do NOT ask generic questions when a specific one is possible. ' +
   "NEVER repeat or paraphrase a question in ALREADY ASKED. Each question must be " +
-  "answerable aloud in under two minutes. greeting = a warm one-line opener using " +
-  "the candidate's FIRST NAME if given; closing = a one-line thank-you to end the " +
-  "interview. Output EXACTLY the requested question counts. No numbering, no preamble.";
+  "answerable aloud in under two minutes. Reference a SPECIFIC claim or project " +
+  "from the resume, then probe it — for example: \"You validated the attendance " +
+  "engine to zero false positives — what was your test set, and what would have " +
+  "made you distrust that number?\" or \"Your agent falls back across six LLM " +
+  "providers — how did you decide when to fail over versus retry?\". Avoid generic " +
+  "questions like \"tell me about a project you're proud of\" when a specific one " +
+  "is possible. greeting = a warm one-line opener using the candidate's FIRST NAME " +
+  "if given; closing = a one-line thank-you to end the interview. Output EXACTLY " +
+  "the requested question counts. No numbering, no preamble.";
 
 function firstNameHint(fullName: string): string {
   return fullName.trim() ? `Candidate first name: ${fullName.trim()}\n` : "";

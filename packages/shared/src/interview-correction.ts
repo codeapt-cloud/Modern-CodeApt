@@ -12,10 +12,55 @@
  * regardless of what the model returns. No I/O.
  */
 
+import { phoneticMatch } from "./phonetics.js";
+
 const WORD = /[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g;
 
 function tokens(s: string): string[] {
   return s.match(WORD) ?? [];
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+    }
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+const alnum = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Is one substitution a plausible speech-to-text MISHEARING (not a rewrite)? A
+ * mishearing swaps a word/short span for a similar-SOUNDING or similar-SPELLED
+ * one, keeps the content, and doesn't balloon the length: e.g. "sing"→"sync",
+ * "daytah"→"data", "front end"→"frontend", "kubernetis"→"Kubernetes". A swap to a
+ * dissimilar or much longer word ("api"→"scalable REST API") is a rewrite. This
+ * PER-CHANGE test is the principled guard (Step 36 E) — it lets several small
+ * fixes through in a short answer where the old blunt global ratio wrongly
+ * rejected them, while still blocking content rewrites.
+ */
+export function plausibleMishearing(from: string, to: string): boolean {
+  const fk = alnum(from);
+  const tk = alnum(to);
+  if (tk === "" || fk === "") return false; // pure insertion/deletion = content change
+  if (fk === tk) return true; // spacing/case only ("front end" → "frontend")
+  // A mishearing stays roughly the same size; a big length jump is a rewrite.
+  if (Math.max(fk.length, tk.length) > Math.min(fk.length, tk.length) * 2 + 2) return false;
+  const norm = levenshtein(fk, tk) / Math.max(fk.length, tk.length, 1);
+  // ≤0.5 (not 0.4): real mishearings routinely swap a vowel or two ("sing"→"sync",
+  // "sink"→"sync"), and the read-aloud metaphone keeps vowels so it won't rescue
+  // those — spelling proximity has to carry short-word mishearings.
+  if (norm <= 0.5) return true; // close spelling
+  return phoneticMatch(fk, tk); // or sounds the same
 }
 
 /**
@@ -55,12 +100,14 @@ export interface ContextCorrection {
 }
 
 /**
- * The maximum share of words the contextual pass may change before we distrust it
- * as a rewrite rather than a set of mishearing fixes. Mishearings are typically a
- * handful of scattered words; a genuine rewrite touches far more. Tuned
- * conservatively — over-rejecting merely falls back to the (safe) term-list text.
+ * Backstop only (Step 36 E): even when every individual change LOOKS like a
+ * plausible mishearing, refuse a candidate that rewrote more than this share of
+ * the words — a wholesale rewrite dressed up as many small swaps. The PRIMARY
+ * guard is now per-change plausibility (`plausibleMishearing`); this ceiling is
+ * deliberately generous (0.5) so a short answer with several genuine homophone
+ * fixes — which the old blunt 0.3 cap wrongly rejected — is accepted.
  */
-export const MAX_CONTEXT_EDIT_RATIO = 0.3;
+export const MAX_CONTEXT_EDIT_RATIO = 0.5;
 
 export interface ContextCorrectionResult {
   /** The transcript to use downstream (the LLM output when accepted, else input). */
@@ -91,16 +138,28 @@ export function acceptContextCorrection(
   }
   const before = tokens(input);
   const after = tokens(cand);
-  // A mishearing fix preserves length closely; a rewrite adds/removes content.
+  // A mishearing set preserves length closely; a rewrite adds/removes content.
+  // Allow a few merges/splits (word count can shift by the number of merged terms).
   const lenDelta = Math.abs(before.length - after.length);
-  const lenBudget = Math.max(2, Math.ceil(before.length * 0.15));
+  const lenBudget = Math.max(3, Math.ceil(before.length * 0.25));
   if (lenDelta > lenBudget) {
     return { text: input, accepted: false, changes: [] };
   }
+  const changes = diffWords(input, cand);
+  if (changes.length === 0) {
+    return { text: input, accepted: false, changes: [] };
+  }
+  // PRIMARY guard: every change must be a plausible mishearing (similar sound or
+  // spelling, similar length) — one dissimilar/content swap and we distrust the
+  // whole candidate and keep the safe term-list text.
+  if (!changes.every((c) => plausibleMishearing(c.from, c.to))) {
+    return { text: input, accepted: false, changes: [] };
+  }
+  // Backstop: refuse a candidate that rewrote too large a share of the words.
   if (wordEditRatio(input, cand) > maxRatio) {
     return { text: input, accepted: false, changes: [] };
   }
-  return { text: cand, accepted: true, changes: diffWords(input, cand) };
+  return { text: cand, accepted: true, changes };
 }
 
 /**

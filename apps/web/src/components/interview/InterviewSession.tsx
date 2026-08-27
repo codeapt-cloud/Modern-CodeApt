@@ -8,7 +8,7 @@
 import type { StartMockInterviewResponse } from "@codeapt/shared";
 import { useState } from "react";
 
-import type { ObservationSummary } from "../../lib/camera-observation.js";
+import type { SessionObservations } from "../../lib/camera-observation.js";
 import type { InterviewEngine } from "../../lib/interview-engine.js";
 import { useCameraObservation } from "../../lib/use-camera-observation.js";
 import { Alert } from "../ui/alert.js";
@@ -31,7 +31,7 @@ export function InterviewSession({
   const camera = useCameraObservation(true);
   const [phase, setPhase] = useState<Phase>("preflight");
   const [attempt, setAttempt] = useState<StartMockInterviewResponse | null>(null);
-  const [observations, setObservations] = useState<ObservationSummary | null>(null);
+  const [observations, setObservations] = useState<SessionObservations | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

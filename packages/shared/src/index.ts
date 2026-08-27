@@ -26,6 +26,7 @@ export * from "./interview-terms.js";
 export * from "./interview-questions.js";
 export * from "./interview-conversation.js";
 export * from "./interview-correction.js";
+export * from "./interview-resume-questions.js";
 export * from "./essay-risk.js";
 export * from "./essay-integrity.js";
 export * from "./credits.js";

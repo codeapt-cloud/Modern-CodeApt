@@ -220,6 +220,129 @@ export function aggregateObservations(
 }
 
 // ---------------------------------------------------------------------------
+// Session-level observations (Step 36 B) — aggregate ALL answers, not just the
+// last one, and turn them into plain-language sentences for the report.
+// ---------------------------------------------------------------------------
+/** One answer's observation summary + the client-measured think-time before it. */
+export interface AnswerObservation {
+  readonly index: number; // the question index this answer belongs to
+  readonly summary: ObservationSummary;
+  readonly latencySeconds: number | null;
+}
+
+export interface SessionObservations {
+  /** True when at least one answer produced usable frames. */
+  readonly available: boolean;
+  /** Aggregated across all answers that had data. */
+  readonly pctLookingAway: number;
+  readonly secondsOutOfFrame: number;
+  readonly stillnessScore: number;
+  readonly smiled: boolean;
+  readonly maxFaces: number;
+  readonly answersWithData: number;
+  /** Notable think-time pauses, per question. */
+  readonly longPauses: readonly { readonly index: number; readonly seconds: number }[];
+  /** Plain-language observations for the report (never a score). */
+  readonly sentences: readonly string[];
+}
+
+/** Think-time (seconds) at/above which we call out a "long pause before Q". */
+export const LONG_PAUSE_SECONDS = 5;
+
+const EMPTY_SESSION: SessionObservations = {
+  available: false,
+  pctLookingAway: 0,
+  secondsOutOfFrame: 0,
+  stillnessScore: 0,
+  smiled: false,
+  maxFaces: 0,
+  answersWithData: 0,
+  longPauses: [],
+  sentences: [],
+};
+
+/**
+ * Fold per-answer observations into ONE session summary + human sentences. The
+ * Step-35 runner kept only the LAST answer's summary (and hid the card when it
+ * was empty) — this aggregates every answer so the report reflects the whole
+ * interview. Pure; unit-tested with synthetic per-answer summaries.
+ */
+export function summarizeSessionObservations(
+  answers: readonly AnswerObservation[],
+): SessionObservations {
+  const withData = answers.filter((a) => a.summary.available && a.summary.frames > 0);
+  const longPauses = answers
+    .filter((a) => a.latencySeconds != null && a.latencySeconds >= LONG_PAUSE_SECONDS)
+    .map((a) => ({ index: a.index, seconds: round1(a.latencySeconds!) }));
+
+  if (withData.length === 0) {
+    // Still report a pause callout even if the detector produced no frames.
+    if (longPauses.length === 0) return EMPTY_SESSION;
+    return {
+      ...EMPTY_SESSION,
+      longPauses,
+      sentences: longPauses.map(pauseSentence),
+    };
+  }
+
+  const totalFrames = withData.reduce((s, a) => s + a.summary.frames, 0);
+  // Frame-weighted means so a longer answer counts proportionally.
+  const pctLookingAway = round1(
+    withData.reduce((s, a) => s + a.summary.pctLookingAway * a.summary.frames, 0) /
+      Math.max(1, totalFrames),
+  );
+  const stillnessScore = round1(
+    withData.reduce((s, a) => s + a.summary.stillnessScore * a.summary.frames, 0) /
+      Math.max(1, totalFrames),
+  );
+  const secondsOutOfFrame = round1(
+    withData.reduce((s, a) => s + a.summary.secondsOutOfFrame, 0),
+  );
+  const smiled = withData.some(
+    (a) => a.summary.smileAtStart === true || a.summary.smileAtEnd === true,
+  );
+  const maxFaces = withData.reduce((m, a) => Math.max(m, a.summary.maxFaces), 0);
+
+  const sentences: string[] = [];
+  sentences.push(
+    pctLookingAway >= 1
+      ? `You looked away from the camera for about ${pctLookingAway}% of the time you were answering.`
+      : "You kept your eyes on the camera almost the whole time.",
+  );
+  if (secondsOutOfFrame >= 1) {
+    sentences.push(`You were out of frame for about ${secondsOutOfFrame}s in total.`);
+  }
+  sentences.push(
+    stillnessScore >= 70
+      ? "You stayed steady while you spoke."
+      : "You moved around a fair amount while answering.",
+  );
+  if (smiled) sentences.push("You smiled at points during the interview.");
+  for (const p of longPauses) sentences.push(pauseSentence(p));
+  if (maxFaces > 1) {
+    sentences.push(
+      "More than one face was detected in view at times — this notes that the frame changed, not who was in it.",
+    );
+  }
+
+  return {
+    available: true,
+    pctLookingAway,
+    secondsOutOfFrame,
+    stillnessScore,
+    smiled,
+    maxFaces,
+    answersWithData: withData.length,
+    longPauses,
+    sentences,
+  };
+}
+
+function pauseSentence(p: { index: number; seconds: number }): string {
+  return `You paused for about ${p.seconds}s before answering question ${p.index + 1}.`;
+}
+
+// ---------------------------------------------------------------------------
 // Person-change detection (Step 35 B) — PURE streaming reducer.
 // ---------------------------------------------------------------------------
 /** What a person-change event means. Both detect that THE FRAME CHANGED, never
