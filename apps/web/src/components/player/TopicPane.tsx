@@ -36,6 +36,7 @@ const TYPE_LABEL: Record<string, string> = {
   game: "Game",
   speaking: "Speaking",
   communication: "Communication",
+  mock_interview: "Mock Interview",
 };
 
 export function TopicPane({
@@ -139,6 +140,8 @@ export function TopicPane({
           <SpeakingTopicLauncher topicId={topicId} />
         ) : content.topicType === "communication" ? (
           <CommunicationTopicLauncher topicId={topicId} />
+        ) : content.topicType === "mock_interview" ? (
+          <InterviewTopicLauncher topicId={topicId} />
         ) : (
           <PlaceholderTopic />
         )}
@@ -354,6 +357,51 @@ function CommunicationTopicLauncher({ topicId }: { topicId: string }) {
           <Button asChild size="sm">
             <Link to={`/communication/${item.id}`}>Open</Link>
           </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function InterviewTopicLauncher({ topicId }: { topicId: string }) {
+  const { data, loading, error } = useQuery(() => api.interview.list(), []);
+  const item = data?.items.find((s) => s.topicId === topicId);
+  if (loading) return <Skeleton className="h-40 w-full rounded-2xl" />;
+  if (error || !item) {
+    return (
+      <Alert variant="info">
+        {error ??
+          "This mock interview isn’t available to you yet. It appears once it’s published for your subject."}
+      </Alert>
+    );
+  }
+  const used = item.attemptsUsed;
+  const capped = item.maxAttempts > 0 && used >= item.maxAttempts;
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4 p-5">
+        <div>
+          <h3 className="font-medium text-ink">{item.title}</h3>
+          <p className="text-sm text-ink-muted">
+            {item.role}
+            {item.seniority ? ` · ${item.seniority}` : ""} · {item.durationMinutes} min
+          </p>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-ink-muted">
+            {item.maxAttempts === 0
+              ? "unlimited attempts"
+              : `${used}/${item.maxAttempts} attempts used`}
+          </span>
+          {capped ? (
+            <Button size="sm" disabled>
+              No attempts left
+            </Button>
+          ) : (
+            <Button asChild size="sm">
+              <Link to={`/interviews/${item.id}`}>{used > 0 ? "Start again" : "Start"}</Link>
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

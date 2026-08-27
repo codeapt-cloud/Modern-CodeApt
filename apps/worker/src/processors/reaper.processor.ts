@@ -14,6 +14,7 @@
 import {
   GAME_ATTEMPT_ABANDON_GRACE_MS,
   GameSetAttemptStatus,
+  MockInterviewStatus,
   SPEAKING_SUBMIT_GRACE_MS,
   SpeakingAttemptStatus,
 } from "@codeapt/shared";
@@ -21,7 +22,11 @@ import type { Job } from "bullmq";
 
 import { logger } from "../lib/logger.js";
 import { GameSetAttemptModel } from "../models/game.model.js";
+import { MockInterviewAttemptModel } from "../models/mock-interview.model.js";
 import { SpeakingAttemptModel } from "../models/speaking.model.js";
+
+// A mock interview shares speaking's submit grace (both stamp a server deadline).
+const INTERVIEW_SUBMIT_GRACE_MS = SPEAKING_SUBMIT_GRACE_MS;
 
 export const ATTEMPT_REAPER_JOB_NAME = "attempt-reaper";
 
@@ -46,9 +51,30 @@ export function shouldReapSpeaking(
   );
 }
 
+/** True when a mock-interview attempt is a reap candidate — past the deadline +
+ *  grace with at least one turn still undisclosed. Pure (mirrors shouldReapSpeaking). */
+export function shouldReapInterview(
+  attempt: {
+    status: string;
+    expiresAt: Date | null;
+    currentIndex: number;
+    turnCount: number;
+  },
+  now: Date,
+): boolean {
+  return (
+    (attempt.status === MockInterviewStatus.IN_PROGRESS ||
+      attempt.status === MockInterviewStatus.SUBMITTED) &&
+    !!attempt.expiresAt &&
+    now.getTime() > attempt.expiresAt.getTime() + INTERVIEW_SUBMIT_GRACE_MS &&
+    attempt.currentIndex < attempt.turnCount
+  );
+}
+
 export async function reapAttempts(now: Date = new Date()): Promise<{
   speakingExpired: number;
   gamesAbandoned: number;
+  interviewsExpired: number;
 }> {
   // --- Speaking: past-deadline attempts with undisclosed items. ---
   const graceCutoff = new Date(now.getTime() - SPEAKING_SUBMIT_GRACE_MS);
@@ -86,17 +112,52 @@ export async function reapAttempts(now: Date = new Date()): Promise<{
   );
   const gamesAbandoned = games.modifiedCount ?? 0;
 
-  if (speakingExpired > 0 || gamesAbandoned > 0) {
-    logger.info({ speakingExpired, gamesAbandoned }, "attempt reaper swept");
+  // --- Mock interviews: past-deadline attempts with undisclosed turns. Backstop
+  //     only — the API scores inline + lazily finalizes on read. ---
+  const interviewCandidates = await MockInterviewAttemptModel.find({
+    status: {
+      $in: [MockInterviewStatus.IN_PROGRESS, MockInterviewStatus.SUBMITTED],
+    },
+    expiresAt: { $ne: null, $lt: graceCutoff },
+  }).select("status expiresAt currentIndex turns");
+  const staleInterviews = interviewCandidates.filter((a) =>
+    shouldReapInterview(
+      {
+        status: a.status as string,
+        expiresAt: (a.expiresAt as Date | null) ?? null,
+        currentIndex: (a.currentIndex as number) ?? 0,
+        turnCount: Array.isArray(a.turns) ? a.turns.length : 0,
+      },
+      now,
+    ),
+  );
+  let interviewsExpired = 0;
+  if (staleInterviews.length > 0) {
+    const res = await MockInterviewAttemptModel.updateMany(
+      { _id: { $in: staleInterviews.map((a) => a._id) } },
+      { $set: { status: MockInterviewStatus.EXPIRED, scoredAt: now } },
+    );
+    interviewsExpired = res.modifiedCount ?? 0;
   }
-  return { speakingExpired, gamesAbandoned };
+
+  if (speakingExpired > 0 || gamesAbandoned > 0 || interviewsExpired > 0) {
+    logger.info(
+      { speakingExpired, gamesAbandoned, interviewsExpired },
+      "attempt reaper swept",
+    );
+  }
+  return { speakingExpired, gamesAbandoned, interviewsExpired };
 }
 
 export async function attemptReaperProcessor(job: Job): Promise<{ ok: true }> {
   const log = logger.child({ queue: "default", jobId: job.id, name: job.name });
   try {
-    const { speakingExpired, gamesAbandoned } = await reapAttempts(new Date());
-    log.info({ speakingExpired, gamesAbandoned }, "attempt reaper done");
+    const { speakingExpired, gamesAbandoned, interviewsExpired } =
+      await reapAttempts(new Date());
+    log.info(
+      { speakingExpired, gamesAbandoned, interviewsExpired },
+      "attempt reaper done",
+    );
   } catch (err) {
     // Auxiliary — never let a reaper failure crash the worker.
     log.error({ err }, "attempt reaper failed");

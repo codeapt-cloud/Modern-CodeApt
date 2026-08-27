@@ -95,6 +95,10 @@ function toPayload(d: TopicDraft): AdminTopicUpsert {
       return { topicType: TopicType.SPEAKING, ...base };
     case TopicType.COMMUNICATION:
       return { topicType: TopicType.COMMUNICATION, ...base };
+    case TopicType.MOCK_INTERVIEW:
+      // Bare like GAME/SPEAKING — the MockInterview is authored + attached
+      // separately (platform create with topicId). Step 34.
+      return { topicType: TopicType.MOCK_INTERVIEW, ...base };
     case TopicType.ESSAY:
       // Picker-driven link (nullable) — a real EssayTopic or none.
       return {

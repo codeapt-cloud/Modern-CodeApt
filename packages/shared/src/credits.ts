@@ -56,6 +56,19 @@ export const AI_ACTION_WEIGHTS: Record<string, number> = {
   // charges one unit PER hybrid item scored — a full CTS run (~3 open topics +
   // up to 3 retells) is ~6 units worst case, an order of magnitude under a mock
   // interview. The deterministic floor still scores the item if the reserve fails.
+
+  // --- AI Mock Interview (Step 33). A whole SESSION spends across four labels;
+  // each is charged per LIVE call (cache hits + degrades cost 0). Worst case for
+  // one session ≈ analysis(1) + generation(2) + followups(6×1) + grading(12×1)
+  // = 21 units — ~20× an essay, exactly the pool-stress the governor guards. The
+  // generation labels ride the DEFERRABLE tier (shed → fallback question bank /
+  // no follow-up); interview_grading rides the protected INTERACTIVE tier so
+  // judgement survives a busy pool. The deterministic floor scores the session
+  // regardless of any reserve failure. ---
+  interview_analysis: 1, // resume + JD → skills/experience/gaps (one pass)
+  interview_generation: 2, // role+resume+JD → the main question plan (big output)
+  interview_followup: 1, // one adaptive probe after an answer
+  interview_grading: 1, // one LLM judgement pass per answered turn
 };
 export const DEFAULT_AI_ACTION_WEIGHT = 1;
 

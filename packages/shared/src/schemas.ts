@@ -80,6 +80,14 @@ import {
   type HistoryModule,
   HISTORY_STATUS_VALUES,
   type HistoryStatus,
+  MOCK_INTERVIEW_STATUS_VALUES,
+  type MockInterviewStatus,
+  INTERVIEW_QUESTION_CATEGORY_VALUES,
+  type InterviewQuestionCategory,
+  INTERVIEW_QUESTION_SOURCE_VALUES,
+  type InterviewQuestionSource,
+  INTERVIEW_SCORE_SOURCE_VALUES,
+  type InterviewScoreSource,
   SPEECH_JOB_STATUS_VALUES,
   TOPIC_TYPE_VALUES,
   TopicType,
@@ -1429,6 +1437,12 @@ export const adminTopicUpsertSchema = z.discriminatedUnion("topicType", [
   }),
   z.object({
     topicType: z.literal(TopicType.COMMUNICATION),
+    ...adminTopicBase,
+  }),
+  z.object({
+    // Bare like GAME/SPEAKING — the MockInterview is authored + attached
+    // separately (platform create with topicId). Step 34.
+    topicType: z.literal(TopicType.MOCK_INTERVIEW),
     ...adminTopicBase,
   }),
   z.object({
@@ -6900,3 +6914,305 @@ export const historyResponseSchema = z.object({
   entries: z.array(historyEntrySchema),
 });
 export type HistoryResponse = z.infer<typeof historyResponseSchema>;
+
+// ===========================================================================
+// AI Mock Interview (Step 33) — authoring + attempt DTOs. Mirrors the speaking
+// shapes; the divergence is the TURN model (turns grow with follow-ups) and the
+// resume/JD intake at start.
+// ===========================================================================
+export const mockInterviewStatusSchema = z.enum(
+  MOCK_INTERVIEW_STATUS_VALUES as [MockInterviewStatus, ...MockInterviewStatus[]],
+);
+export const interviewQuestionCategorySchema = z.enum(
+  INTERVIEW_QUESTION_CATEGORY_VALUES as [
+    InterviewQuestionCategory,
+    ...InterviewQuestionCategory[],
+  ],
+);
+export const interviewQuestionSourceSchema = z.enum(
+  INTERVIEW_QUESTION_SOURCE_VALUES as [
+    InterviewQuestionSource,
+    ...InterviewQuestionSource[],
+  ],
+);
+export const interviewScoreSourceSchema = z.enum(
+  INTERVIEW_SCORE_SOURCE_VALUES as [
+    InterviewScoreSource,
+    ...InterviewScoreSource[],
+  ],
+);
+
+/** The question plan: counts by category + adaptive follow-up caps. Hard-capped
+ *  by INTERVIEW_MAX_* in the service; these are the author's requested values. */
+export const interviewPlanSchema = z.object({
+  behaviouralCount: z.number().int().min(0).max(12).default(3),
+  technicalCount: z.number().int().min(0).max(12).default(4),
+  maxFollowUpsPerAnswer: z.number().int().min(0).max(2).default(1),
+  maxFollowUpsPerSession: z.number().int().min(0).max(6).default(4),
+});
+export type InterviewPlan = z.infer<typeof interviewPlanSchema>;
+
+/** An author-written FIXED question with optional pre-generated Piper audio. */
+export const interviewSeedQuestionSchema = z.object({
+  text: z.string().trim().min(1).max(600),
+  category: interviewQuestionCategorySchema,
+  promptAudioUrl: z.string().default(""),
+  promptAudioVoiceId: z.string().default(""),
+  promptAudioVoiceVersion: z.string().default(""),
+});
+export type InterviewSeedQuestion = z.infer<typeof interviewSeedQuestionSchema>;
+
+export const mockInterviewUpsertSchema = z.object({
+  title: z.string().trim().min(1),
+  description: z.string().default(""),
+  role: z.string().trim().min(1),
+  seniority: z.string().trim().default(""),
+  durationMinutes: z.number().int().min(1).max(120).default(20),
+  maxAttempts: z.number().int().min(0).default(1),
+  plan: interviewPlanSchema.default({
+    behaviouralCount: 3,
+    technicalCount: 4,
+    maxFollowUpsPerAnswer: 1,
+    maxFollowUpsPerSession: 4,
+  }),
+  seedQuestions: z.array(interviewSeedQuestionSchema).max(12).default([]),
+  orgUnitIds: z.array(z.string().min(1)).max(500).optional(),
+  /** PLATFORM-surface course attach (college:null) — a MOCK_INTERVIEW topic. */
+  topicId: z.string().trim().optional(),
+});
+export type MockInterviewUpsert = z.infer<typeof mockInterviewUpsertSchema>;
+
+export const mockInterviewDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  role: z.string(),
+  seniority: z.string(),
+  durationMinutes: z.number().int(),
+  maxAttempts: z.number().int(),
+  isPublished: z.boolean(),
+  plan: interviewPlanSchema,
+  seedQuestions: z.array(interviewSeedQuestionSchema),
+  orgUnitIds: z.array(z.string()),
+  topicId: z.string(),
+  createdAt: z.string(),
+});
+export type MockInterviewDetail = z.infer<typeof mockInterviewDetailSchema>;
+
+export const mockInterviewListItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  role: z.string(),
+  isPublished: z.boolean(),
+  maxAttempts: z.number().int(),
+  orgUnitIds: z.array(z.string()),
+  createdAt: z.string(),
+});
+export const mockInterviewListResponseSchema = z.object({
+  items: z.array(mockInterviewListItemSchema),
+});
+export type MockInterviewListResponse = z.infer<
+  typeof mockInterviewListResponseSchema
+>;
+export const setMockInterviewPublishSchema = z.object({
+  isPublished: z.boolean(),
+});
+
+/** Discovery (student play list). */
+export const mockInterviewPlayListItemSchema = z.object({
+  id: z.string(),
+  topicId: z.string(),
+  title: z.string(),
+  role: z.string(),
+  seniority: z.string(),
+  durationMinutes: z.number().int(),
+  maxAttempts: z.number().int(),
+  attemptsUsed: z.number().int(),
+});
+export const mockInterviewPlayListResponseSchema = z.object({
+  items: z.array(mockInterviewPlayListItemSchema),
+});
+export type MockInterviewPlayListResponse = z.infer<
+  typeof mockInterviewPlayListResponseSchema
+>;
+
+/** START intake — the student supplies a resume (paste), a JD, and (optionally)
+ *  a target role overriding the assessment default. Text only; no file upload. */
+export const startMockInterviewRequestSchema = z.object({
+  resumeText: z.string().trim().min(1).max(20000),
+  jobDescription: z.string().trim().max(20000).default(""),
+  role: z.string().trim().max(200).optional(),
+});
+export type StartMockInterviewRequest = z.infer<
+  typeof startMockInterviewRequestSchema
+>;
+
+/** The current turn disclosed to the runner (question text; audio only when the
+ *  turn is an author SEED with pre-generated Piper audio). */
+export const interviewTurnViewSchema = z.object({
+  index: z.number().int(),
+  question: z.string(),
+  category: interviewQuestionCategorySchema,
+  isFollowUp: z.boolean(),
+  source: interviewQuestionSourceSchema,
+  promptAudioUrl: z.string(),
+  answerWindowSeconds: z.number().int(),
+  prepSeconds: z.number().int(),
+});
+export type InterviewTurnView = z.infer<typeof interviewTurnViewSchema>;
+
+/** A peek at the next MAIN (non-follow-up) question, so the runner can PRE-FETCH
+ *  and pre-synthesize its TTS DURING the current answer (Step 34 B1 speculative
+ *  prefetch). Null when the current turn is the last main question. Questions are
+ *  not secret in an interview, so exposing the next one is safe; the adaptive
+ *  follow-up is NOT peeked (it depends on the answer just given). */
+export const interviewNextMainSchema = z.object({
+  index: z.number().int(),
+  question: z.string(),
+  category: interviewQuestionCategorySchema,
+});
+export type InterviewNextMain = z.infer<typeof interviewNextMainSchema>;
+
+export const interviewCurrentResponseSchema = z.object({
+  attemptId: z.string(),
+  status: mockInterviewStatusSchema,
+  totalTurns: z.number().int(),
+  currentIndex: z.number().int(),
+  expiresAt: z.string(),
+  remainingSeconds: z.number().int(),
+  expired: z.boolean(),
+  turn: interviewTurnViewSchema.nullable(),
+  nextMainQuestion: interviewNextMainSchema.nullable(),
+});
+export type InterviewCurrentResponse = z.infer<
+  typeof interviewCurrentResponseSchema
+>;
+
+export const startMockInterviewResponseSchema =
+  interviewCurrentResponseSchema.extend({
+    title: z.string(),
+    /** True when questions were generated by the LLM; false = fallback bank. */
+    aiGenerated: z.boolean(),
+  });
+export type StartMockInterviewResponse = z.infer<
+  typeof startMockInterviewResponseSchema
+>;
+
+/** Submit one answer. Audio ALWAYS uploads (Cloudinary) even if recognition
+ *  failed, so the take stays verifiable. `latencySeconds` = client-measured
+ *  think-time before speaking (feeds the speaking dimension). */
+export const submitInterviewAnswerRequestSchema = z.object({
+  audioUrl: z.string().optional(),
+  transcript: z.string().optional(),
+  fluency: fluencyResultInputSchema.optional(),
+  recognitionFailed: z.boolean().optional(),
+  latencySeconds: z.number().optional(),
+  silent: z.boolean().optional(),
+});
+export type SubmitInterviewAnswerRequest = z.infer<
+  typeof submitInterviewAnswerRequestSchema
+>;
+
+export const submitInterviewAnswerResponseSchema = z.object({
+  index: z.number().int(),
+  /** A newly-generated adaptive follow-up (already appended as the next turn). */
+  followUpAdded: z.boolean(),
+  current: interviewCurrentResponseSchema,
+});
+export type SubmitInterviewAnswerResponse = z.infer<
+  typeof submitInterviewAnswerResponseSchema
+>;
+
+/** Per-question row of the final report. */
+export const interviewQuestionReportSchema = z.object({
+  index: z.number().int(),
+  question: z.string(),
+  category: interviewQuestionCategorySchema,
+  isFollowUp: z.boolean(),
+  answered: z.boolean(),
+  speaking: z.number().nullable(),
+  vocabulary: z.number().nullable(),
+  concept: z.number().nullable(),
+  analysis: z.number().nullable(),
+  topicKnowledge: z.number().nullable(),
+  relevance: z.number().nullable(),
+  star: z.number().nullable(),
+  transcript: z.string().nullable(),
+  audioUrl: z.string(),
+  feedback: z.string(),
+});
+
+export const interviewDimensionScoresSchema = z.object({
+  speaking: z.number(),
+  vocabulary: z.number(),
+  concept: z.number().nullable(),
+  analysis: z.number().nullable(),
+  topicKnowledge: z.number().nullable(),
+});
+
+export const mockInterviewAttemptResultSchema = z.object({
+  attemptId: z.string(),
+  status: mockInterviewStatusSchema,
+  complete: z.boolean(),
+  role: z.string(),
+  seniority: z.string(),
+  dimensions: interviewDimensionScoresSchema.nullable(),
+  overall: z.number().nullable(),
+  source: interviewScoreSourceSchema,
+  approximate: z.boolean(),
+  summary: z.string(),
+  perQuestion: z.array(interviewQuestionReportSchema),
+  terminated: z.boolean(),
+  terminatedReason: z.string().nullable(),
+});
+export type MockInterviewAttemptResult = z.infer<
+  typeof mockInterviewAttemptResultSchema
+>;
+
+/** Operator attempt list + cohort report. */
+export const mockInterviewAttemptAdminRowSchema = z.object({
+  attemptId: z.string(),
+  userId: z.string(),
+  userName: z.string(),
+  rollNumber: z.string(),
+  status: mockInterviewStatusSchema,
+  overall: z.number().nullable(),
+  source: interviewScoreSourceSchema,
+  startedAt: z.string().nullable(),
+  scoredAt: z.string().nullable(),
+  flagged: z.boolean(),
+});
+export const mockInterviewAttemptAdminListSchema = z.object({
+  items: z.array(mockInterviewAttemptAdminRowSchema),
+});
+export type MockInterviewAttemptAdminList = z.infer<
+  typeof mockInterviewAttemptAdminListSchema
+>;
+
+export const mockInterviewCohortRowSchema = z.object({
+  userId: z.string(),
+  userName: z.string(),
+  rollNumber: z.string(),
+  attempts: z.number().int(),
+  bestOverall: z.number().nullable(),
+  speaking: z.number().nullable(),
+  vocabulary: z.number().nullable(),
+  concept: z.number().nullable(),
+  analysis: z.number().nullable(),
+  topicKnowledge: z.number().nullable(),
+  source: interviewScoreSourceSchema.nullable(),
+});
+export const mockInterviewCohortReportSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  role: z.string(),
+  rows: z.array(mockInterviewCohortRowSchema),
+});
+export type MockInterviewCohortReport = z.infer<
+  typeof mockInterviewCohortReportSchema
+>;
+
+/** SPEAKING-style TTS for a seed question (authoring-time Piper). */
+export const interviewTtsRequestSchema = z.object({
+  text: z.string().trim().min(1).max(600),
+});

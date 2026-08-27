@@ -130,6 +130,9 @@ export const SUB_CAPABILITY_CATALOG: Record<
   // inconsistency C8 identified. See the rule above; a rename is a separate,
   // migration-bearing step (do not rename here).
   [CollegeFeature.COMMUNICATION]: ["authoring", "speaking"],
+  // `interview` = AUTHORING SCOPE: may author mock interviews (consumption needs
+  // only the INTERVIEW feature; the course-attached shape needs no flag at all).
+  [CollegeFeature.INTERVIEW]: ["interview"],
 };
 
 /** Canonical flat key for a sub-capability toggle. */

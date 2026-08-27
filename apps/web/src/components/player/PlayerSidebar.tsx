@@ -7,6 +7,7 @@ import {
   Gamepad2,
   Mic,
   MessagesSquare,
+  MicVocal,
   PenLine,
   PlayCircle,
   type LucideIcon,
@@ -24,6 +25,7 @@ const TYPE_ICON: Record<TopicType, LucideIcon> = {
   game: Gamepad2,
   speaking: Mic,
   communication: MessagesSquare,
+  mock_interview: MicVocal,
 };
 
 export function PlayerSidebar({

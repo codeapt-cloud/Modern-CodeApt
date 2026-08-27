@@ -98,6 +98,11 @@ export const CollegeFeature = {
    * communication content; `speaking` is a placeholder for the later speech
    * phase, listed now so the console needs no schema change then. */
   COMMUNICATION: "communication",
+  /** AI Mock Interview (Step 33): a solo practice interview (resume + JD → LLM
+   *  questions → browser-STT answers → scored report). `interview` sub-capability
+   *  gates a college AUTHORING its own interviews; consumption needs only the
+   *  feature. The course-attached shape is reachable with NO feature flag. */
+  INTERVIEW: "interview",
 } as const;
 export type CollegeFeature =
   (typeof CollegeFeature)[keyof typeof CollegeFeature];
@@ -281,6 +286,9 @@ export const TopicType = {
   /** A curriculum topic that maps 1:1 to a CommunicationAssessment (composite),
    *  same bare/forward mechanic as GAME/SPEAKING. Step 29. */
   COMMUNICATION: "communication",
+  /** A curriculum topic that maps 1:1 to a MockInterview, same bare/forward
+   *  mechanic as GAME/SPEAKING/COMMUNICATION. Step 33. */
+  MOCK_INTERVIEW: "mock_interview",
 } as const;
 export type TopicType = (typeof TopicType)[keyof typeof TopicType];
 export const TOPIC_TYPE_VALUES = Object.values(TopicType);
@@ -634,6 +642,62 @@ export const HistoryStatus = {
 } as const;
 export type HistoryStatus = (typeof HistoryStatus)[keyof typeof HistoryStatus];
 export const HISTORY_STATUS_VALUES = Object.values(HistoryStatus);
+
+// ---------------------------------------------------------------------------
+// AI Mock Interview (Step 33). Mirrors the speaking attempt lifecycle, but the
+// turn list GROWS during the attempt (an adaptive follow-up appends a turn),
+// so these are "turns", not pre-materialized "items".
+// ---------------------------------------------------------------------------
+
+/** MockInterviewAttempt lifecycle. IN_PROGRESS → SCORED (inline, browser-STT +
+ *  LLM) or EXPIRED (abandoned past the deadline; the reaper sweeps it). SUBMITTED
+ *  is a transient state kept for parity with speaking's reaper query. */
+export const MockInterviewStatus = {
+  IN_PROGRESS: "in_progress",
+  SUBMITTED: "submitted",
+  SCORED: "scored",
+  EXPIRED: "expired",
+} as const;
+export type MockInterviewStatus =
+  (typeof MockInterviewStatus)[keyof typeof MockInterviewStatus];
+export const MOCK_INTERVIEW_STATUS_VALUES = Object.values(MockInterviewStatus);
+
+/** What a turn asks. A follow-up inherits its parent's category but is marked
+ *  by `isFollowUp` on the turn; these two are the top-level question kinds. */
+export const InterviewQuestionCategory = {
+  BEHAVIOURAL: "behavioural",
+  TECHNICAL: "technical",
+} as const;
+export type InterviewQuestionCategory =
+  (typeof InterviewQuestionCategory)[keyof typeof InterviewQuestionCategory];
+export const INTERVIEW_QUESTION_CATEGORY_VALUES = Object.values(
+  InterviewQuestionCategory,
+);
+
+/** How a question's TEXT was produced. `llm` = generated from resume/JD; `seed`
+ *  = an author-written fixed question; `fallback` = the role-based bank used when
+ *  the LLM was unavailable (an honest degrade, flagged so it's auditable). */
+export const InterviewQuestionSource = {
+  LLM: "llm",
+  SEED: "seed",
+  FALLBACK: "fallback",
+} as const;
+export type InterviewQuestionSource =
+  (typeof InterviewQuestionSource)[keyof typeof InterviewQuestionSource];
+export const INTERVIEW_QUESTION_SOURCE_VALUES = Object.values(
+  InterviewQuestionSource,
+);
+
+/** Report provenance, mirroring the speech score-source split: the full report
+ *  is `ai_hybrid` when the LLM contributed the concept/analysis/topic dimensions,
+ *  else `deterministic_floor` (speaking + vocabulary reweighted to 100%). */
+export const InterviewScoreSource = {
+  AI_HYBRID: "ai_hybrid",
+  DETERMINISTIC_FLOOR: "deterministic_floor",
+} as const;
+export type InterviewScoreSource =
+  (typeof InterviewScoreSource)[keyof typeof InterviewScoreSource];
+export const INTERVIEW_SCORE_SOURCE_VALUES = Object.values(InterviewScoreSource);
 
 /**
  * Item types whose task is IMPOSSIBLE without hearing an audio stimulus — the

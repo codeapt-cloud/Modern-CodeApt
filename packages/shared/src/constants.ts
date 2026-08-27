@@ -452,6 +452,54 @@ export const EXAM_MAX_WARNINGS = 2;
  */
 export const COMMUNICATION_MAX_WARNINGS = 3;
 
+// ---------------------------------------------------------------------------
+// AI Mock Interview (Step 33)
+// ---------------------------------------------------------------------------
+
+/**
+ * Overall-report weights for the five interview dimensions. Two DETERMINISTIC
+ * dimensions (speaking, vocabulary) that stand alone, and three LLM-judged
+ * dimensions (concept, analysis, topicKnowledge). When the LLM is unavailable
+ * the three AI dimensions drop out of BOTH the numerator and the denominator —
+ * the overall reweights to speaking+vocabulary at 100% (see computeInterviewReport).
+ */
+export const INTERVIEW_DIMENSION_WEIGHTS = {
+  speaking: 0.2,
+  vocabulary: 0.15,
+  concept: 0.25,
+  analysis: 0.2,
+  topicKnowledge: 0.2,
+} as const;
+
+/** The dimensions that have a deterministic floor (never need the LLM). */
+export const INTERVIEW_DETERMINISTIC_DIMENSIONS = [
+  "speaking",
+  "vocabulary",
+] as const;
+/** The dimensions that only the LLM can judge (absent → reweighted out). */
+export const INTERVIEW_AI_DIMENSIONS = [
+  "concept",
+  "analysis",
+  "topicKnowledge",
+] as const;
+
+/** Hard caps so an interview can never run unbounded. Authors may set lower via
+ *  the question plan, but never higher than these. */
+export const INTERVIEW_MAX_FOLLOWUPS_PER_ANSWER = 2;
+export const INTERVIEW_MAX_FOLLOWUPS_PER_SESSION = 6;
+/** Hard cap on authored main questions per plan (behavioural + technical). */
+export const INTERVIEW_MAX_QUESTIONS = 12;
+
+/** Default answer window + prep seconds per turn (authors set duration at the
+ *  assessment level; these bound a single answer for the runner's clock). */
+export const INTERVIEW_ANSWER_WINDOW_SECONDS = 120;
+export const INTERVIEW_PREP_SECONDS = 20;
+
+/** A mock interview terminates on the same three-warning budget as speaking's
+ *  hardened Communication profile (Step 32) — a solo practice session under a
+ *  camera-observation layer (Part 2). */
+export const INTERVIEW_MAX_WARNINGS = 3;
+
 /** Default score awarded for a correct daily/quiz MCQ. */
 export const MCQ_CORRECT_MARKS = 5;
 
@@ -759,6 +807,27 @@ export const SpeakingErrorCode = {
 } as const;
 export type SpeakingErrorCode =
   (typeof SpeakingErrorCode)[keyof typeof SpeakingErrorCode];
+
+/** AI Mock Interview (Step 33) error codes — same discipline as speaking. */
+export const InterviewErrorCode = {
+  ASSESSMENT_NOT_FOUND: "ASSESSMENT_NOT_FOUND",
+  ATTEMPT_NOT_FOUND: "ATTEMPT_NOT_FOUND",
+  NOT_AUTHORIZED: "NOT_AUTHORIZED",
+  ATTEMPT_LIMIT_REACHED: "ATTEMPT_LIMIT_REACHED",
+  /** The attempt's server deadline passed. */
+  ATTEMPT_EXPIRED: "ATTEMPT_EXPIRED",
+  /** Answer submitted for a turn other than the attempt's current index. */
+  NOT_CURRENT_TURN: "NOT_CURRENT_TURN",
+  ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
+  NOT_PUBLISHABLE: "NOT_PUBLISHABLE",
+  NOT_DELETABLE: "NOT_DELETABLE",
+  TTS_UNAVAILABLE: "TTS_UNAVAILABLE",
+  TOPIC_NOT_FOUND: "TOPIC_NOT_FOUND",
+  TOPIC_NOT_INTERVIEW: "TOPIC_NOT_INTERVIEW",
+  TOPIC_ALREADY_ATTACHED: "TOPIC_ALREADY_ATTACHED",
+} as const;
+export type InterviewErrorCode =
+  (typeof InterviewErrorCode)[keyof typeof InterviewErrorCode];
 
 /** CommunicationAssessment composite (Step 21). */
 export const CommunicationErrorCode = {

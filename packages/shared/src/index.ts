@@ -21,6 +21,7 @@ export * from "./phonetics.js";
 export * from "./speech.js";
 export * from "./speaking-presets.js";
 export * from "./communication.js";
+export * from "./interview.js";
 export * from "./essay-risk.js";
 export * from "./essay-integrity.js";
 export * from "./credits.js";

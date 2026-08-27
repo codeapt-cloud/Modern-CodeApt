@@ -19,6 +19,8 @@ import { gameRouter } from "./game.routes.js";
 import { collegeGameRouter } from "./college-game.routes.js";
 import { collegeSpeakingRouter } from "./speaking.routes.js";
 import { speakingOpenRouter } from "./speaking-open.routes.js";
+import { collegeInterviewRouter } from "./mock-interview.routes.js";
+import { interviewOpenRouter } from "./mock-interview-open.routes.js";
 import { collegeCommunicationRouter } from "./communication.routes.js";
 import { communicationOpenRouter } from "./communication-open.routes.js";
 import { attendanceRouter } from "./attendance.routes.js";
@@ -102,6 +104,12 @@ apiRouter.use(collegeSpeakingRouter);
 // OPEN speaking (Step 29): global enrollment discovery + slug-free engine +
 // platform-admin authoring (/admin/speaking). Makes course-attached / B2C reach real.
 apiRouter.use(speakingOpenRouter);
+
+// AI Mock Interview (Step 33): tenant-scoped interviews behind the INTERVIEW
+// feature (+ `interview` sub-capability for authoring), plus the slug-free open
+// engine + enrollment discovery + platform-admin authoring (/admin/interviews).
+apiRouter.use(collegeInterviewRouter);
+apiRouter.use(interviewOpenRouter);
 
 // Communication ASSESSMENT COMPOSITE (Step 21): an ordered container over
 // exam/essay/speaking artifacts + a unified report. Reads the engines, never

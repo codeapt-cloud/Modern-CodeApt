@@ -13,6 +13,7 @@ import {
   Lock,
   MessagesSquare,
   Mic,
+  MicVocal,
   PenLine,
   PlayCircle,
   Sparkles,
@@ -48,6 +49,7 @@ const TOPIC_META: Record<TopicType, { icon: LucideIcon; label: string }> = {
   game: { icon: Gamepad2, label: "Game" },
   speaking: { icon: Mic, label: "Speaking" },
   communication: { icon: MessagesSquare, label: "Communication" },
+  mock_interview: { icon: MicVocal, label: "Mock Interview" },
 };
 
 export function CourseDetailPage() {

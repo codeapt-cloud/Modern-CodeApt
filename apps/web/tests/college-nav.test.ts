@@ -128,6 +128,7 @@ describe("buildStudentCollegeNav (student consume nav)", () => {
       "my-coding",
       "my-games",
       "my-communication",
+      "my-interviews",
       "my-ai-credits",
       "my-results",
       "placements",

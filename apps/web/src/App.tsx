@@ -152,6 +152,14 @@ const AdminCommunicationPage = named(
   () => import("./pages/communication/admin/AdminCommunicationPage.js"),
   "AdminCommunicationPage",
 );
+const AdminInterviewPage = named(
+  () => import("./pages/interview/admin/AdminInterviewPage.js"),
+  "AdminInterviewPage",
+);
+const InterviewRunnerPage = named(
+  () => import("./pages/interview/InterviewRunnerPage.js"),
+  "InterviewRunnerPage",
+);
 const SpeakingRunnerPage = named(
   () => import("./pages/speaking/SpeakingRunnerPage.js"),
   "SpeakingRunnerPage",
@@ -329,6 +337,18 @@ const CollegeCommunicationEditorPage = named(
 const CollegeCommunicationRunnerPage = named(
   () => import("./pages/colleges/CollegeCommunicationRunnerPage.js"),
   "CollegeCommunicationRunnerPage",
+);
+const CollegeInterviewPage = named(
+  () => import("./pages/colleges/CollegeInterviewPage.js"),
+  "CollegeInterviewPage",
+);
+const CollegeInterviewEditorPage = named(
+  () => import("./pages/colleges/CollegeInterviewEditorPage.js"),
+  "CollegeInterviewEditorPage",
+);
+const CollegeInterviewCohortPage = named(
+  () => import("./pages/colleges/CollegeInterviewCohortPage.js"),
+  "CollegeInterviewCohortPage",
 );
 const CollegeCommunicationCohortPage = named(
   () => import("./pages/colleges/CollegeCommunicationCohortPage.js"),
@@ -581,6 +601,7 @@ export function App() {
             <Route path="/essays/:id" element={<EssayWriterPage />} />
             {/* B2C / global course-attached speaking + composite runners (S30) */}
             <Route path="/speaking/:assessmentId" element={<SpeakingRunnerPage />} />
+            <Route path="/interviews/:assessmentId" element={<InterviewRunnerPage />} />
             <Route
               path="/communication/:assessmentId"
               element={<CommunicationRunnerPage />}
@@ -614,6 +635,7 @@ export function App() {
                 element={<AdminGameSetEditorPage />}
               />
               <Route path="/admin/speaking" element={<AdminSpeakingPage />} />
+              <Route path="/admin/interviews" element={<AdminInterviewPage />} />
               <Route
                 path="/admin/communication"
                 element={<AdminCommunicationPage />}
@@ -744,6 +766,12 @@ export function App() {
               />
               <Route path="speaking" element={<CollegeSpeakingPage />} />
               <Route path="speaking/manage" element={<CollegeSpeakingEditorPage />} />
+              <Route path="interviews" element={<CollegeInterviewPage />} />
+              <Route path="interviews/manage" element={<CollegeInterviewEditorPage />} />
+              <Route
+                path="interviews/:assessmentId/cohort"
+                element={<CollegeInterviewCohortPage />}
+              />
               <Route
                 path="communication/assessments"
                 element={<CollegeCommunicationAssessmentsPage />}

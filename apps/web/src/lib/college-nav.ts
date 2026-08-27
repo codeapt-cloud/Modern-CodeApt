@@ -223,6 +223,17 @@ export const COLLEGE_SECTIONS: readonly CollegeSection[] = [
     comingSoon: false,
   },
   {
+    key: "interviews",
+    label: "Mock interviews",
+    description:
+      "AI practice interviews — resume-tailored questions, spoken answers, a scored report.",
+    group: "Learning",
+    icon: "communication",
+    path: "interviews",
+    feature: CollegeFeature.INTERVIEW,
+    comingSoon: false,
+  },
+  {
     key: "challenges",
     label: "Challenges",
     description: "Your students' daily-challenge leaderboard.",
@@ -385,6 +396,16 @@ export const STUDENT_COLLEGE_SECTIONS: readonly CollegeSection[] = [
     icon: "communication",
     path: "communication",
     feature: CollegeFeature.COMMUNICATION,
+    comingSoon: false,
+  },
+  {
+    key: "my-interviews",
+    label: "Mock interviews",
+    description: "AI practice interviews with a scored report.",
+    group: "Learning",
+    icon: "communication",
+    path: "interviews",
+    feature: CollegeFeature.INTERVIEW,
     comingSoon: false,
   },
   {

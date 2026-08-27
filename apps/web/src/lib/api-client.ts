@@ -247,6 +247,18 @@ import {
   type CommunicationAssessmentDetail,
   type CommunicationAssessmentUpsert,
   type CommunicationCohortReport,
+  type MockInterviewPlayListResponse,
+  type MockInterviewListResponse,
+  type MockInterviewDetail,
+  type MockInterviewUpsert,
+  type MockInterviewAttemptResult,
+  type MockInterviewAttemptAdminList,
+  type MockInterviewCohortReport,
+  type StartMockInterviewRequest,
+  type StartMockInterviewResponse,
+  type InterviewCurrentResponse,
+  type SubmitInterviewAnswerRequest,
+  type SubmitInterviewAnswerResponse,
   type MockPayRequest,
   type OrderListResponse,
   type OrderStatusResponse,
@@ -4190,6 +4202,297 @@ export const api = {
     generateTts: async (text: string): Promise<SpeakingTtsResponse> => {
       const { data } = await http.post<SpeakingTtsResponse>(
         `${API_PREFIX}/admin/speaking/tts`,
+        { text },
+      );
+      return data;
+    },
+  },
+
+  /** AI Mock Interview (Step 34) — tenant surface: student engine + college
+   *  authoring + operator cohort. Mirrors collegeSpeaking (+ cohort from the
+   *  composite). Note the turn-based submit path `answers/:turnIndex`. */
+  collegeInterview: {
+    available: async (slug: string): Promise<MockInterviewPlayListResponse> => {
+      const { data } = await http.get<MockInterviewPlayListResponse>(
+        `${API_PREFIX}/c/${slug}/interviews/available`,
+      );
+      return data;
+    },
+    uploadSignature: async (slug: string): Promise<UploadSignatureResponse> => {
+      const { data } = await http.post<UploadSignatureResponse>(
+        `${API_PREFIX}/c/${slug}/interviews/uploads/signature`,
+      );
+      return data;
+    },
+    start: async (
+      slug: string,
+      id: string,
+      body: StartMockInterviewRequest,
+    ): Promise<StartMockInterviewResponse> => {
+      const { data } = await http.post<StartMockInterviewResponse>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/attempts`,
+        body,
+      );
+      return data;
+    },
+    currentAttempt: async (
+      slug: string,
+      id: string,
+    ): Promise<{ attempt: InterviewCurrentResponse | null }> => {
+      const { data } = await http.get<{ attempt: InterviewCurrentResponse | null }>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/attempt`,
+      );
+      return data;
+    },
+    current: async (
+      slug: string,
+      attemptId: string,
+    ): Promise<InterviewCurrentResponse> => {
+      const { data } = await http.get<InterviewCurrentResponse>(
+        `${API_PREFIX}/c/${slug}/interviews/attempts/${attemptId}/current`,
+      );
+      return data;
+    },
+    submitAnswer: async (
+      slug: string,
+      attemptId: string,
+      turnIndex: number,
+      payload: SubmitInterviewAnswerRequest,
+    ): Promise<SubmitInterviewAnswerResponse> => {
+      const { data } = await http.post<SubmitInterviewAnswerResponse>(
+        `${API_PREFIX}/c/${slug}/interviews/attempts/${attemptId}/answers/${turnIndex}`,
+        payload,
+      );
+      return data;
+    },
+    result: async (
+      slug: string,
+      attemptId: string,
+    ): Promise<MockInterviewAttemptResult> => {
+      const { data } = await http.get<MockInterviewAttemptResult>(
+        `${API_PREFIX}/c/${slug}/interviews/attempts/${attemptId}/result`,
+      );
+      return data;
+    },
+    recordWarning: async (
+      slug: string,
+      attemptId: string,
+    ): Promise<{ warnings: number; terminated: boolean }> => {
+      const { data } = await http.post<{ warnings: number; terminated: boolean }>(
+        `${API_PREFIX}/c/${slug}/interviews/attempts/${attemptId}/warning`,
+      );
+      return data;
+    },
+    list: async (slug: string): Promise<MockInterviewListResponse> => {
+      const { data } = await http.get<MockInterviewListResponse>(
+        `${API_PREFIX}/c/${slug}/interviews`,
+      );
+      return data;
+    },
+    get: async (slug: string, id: string): Promise<MockInterviewDetail> => {
+      const { data } = await http.get<MockInterviewDetail>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}`,
+      );
+      return data;
+    },
+    create: async (
+      slug: string,
+      body: MockInterviewUpsert,
+    ): Promise<MockInterviewDetail> => {
+      const { data } = await http.post<MockInterviewDetail>(
+        `${API_PREFIX}/c/${slug}/interviews`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      slug: string,
+      id: string,
+      body: MockInterviewUpsert,
+    ): Promise<MockInterviewDetail> => {
+      const { data } = await http.patch<MockInterviewDetail>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      slug: string,
+      id: string,
+      isPublished: boolean,
+    ): Promise<MockInterviewDetail> => {
+      const { data } = await http.post<MockInterviewDetail>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (slug: string, id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/c/${slug}/interviews/${id}`);
+    },
+    generateTts: async (
+      slug: string,
+      text: string,
+    ): Promise<SpeakingTtsResponse> => {
+      const { data } = await http.post<SpeakingTtsResponse>(
+        `${API_PREFIX}/c/${slug}/interviews/tts`,
+        { text },
+      );
+      return data;
+    },
+    listAttempts: async (
+      slug: string,
+      id: string,
+    ): Promise<MockInterviewAttemptAdminList> => {
+      const { data } = await http.get<MockInterviewAttemptAdminList>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/attempts`,
+      );
+      return data;
+    },
+    cohort: async (
+      slug: string,
+      id: string,
+    ): Promise<MockInterviewCohortReport> => {
+      const { data } = await http.get<MockInterviewCohortReport>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/cohort`,
+      );
+      return data;
+    },
+    exportCohort: async (
+      slug: string,
+      id: string,
+    ): Promise<{ blob: Blob; filename: string }> => {
+      const res = await http.get(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/cohort/export`,
+        { responseType: "blob" },
+      );
+      const disposition = String(res.headers["content-disposition"] ?? "");
+      const match = /filename="?([^"]+)"?/.exec(disposition);
+      return {
+        blob: res.data as Blob,
+        filename: match?.[1] ?? `mock-interview-${id}.xlsx`,
+      };
+    },
+  },
+
+  /** OPEN interview (Step 34) — global, enrollment-based, slug-free. */
+  interview: {
+    list: async (): Promise<MockInterviewPlayListResponse> => {
+      const { data } = await http.get<MockInterviewPlayListResponse>(
+        `${API_PREFIX}/interviews`,
+      );
+      return data;
+    },
+    uploadSignature: async (): Promise<UploadSignatureResponse> => {
+      const { data } = await http.post<UploadSignatureResponse>(
+        `${API_PREFIX}/interviews/uploads/signature`,
+      );
+      return data;
+    },
+    start: async (
+      id: string,
+      body: StartMockInterviewRequest,
+    ): Promise<StartMockInterviewResponse> => {
+      const { data } = await http.post<StartMockInterviewResponse>(
+        `${API_PREFIX}/interviews/${id}/attempts`,
+        body,
+      );
+      return data;
+    },
+    currentAttempt: async (
+      id: string,
+    ): Promise<{ attempt: InterviewCurrentResponse | null }> => {
+      const { data } = await http.get<{ attempt: InterviewCurrentResponse | null }>(
+        `${API_PREFIX}/interviews/${id}/attempt`,
+      );
+      return data;
+    },
+    current: async (attemptId: string): Promise<InterviewCurrentResponse> => {
+      const { data } = await http.get<InterviewCurrentResponse>(
+        `${API_PREFIX}/interviews/attempts/${attemptId}/current`,
+      );
+      return data;
+    },
+    submitAnswer: async (
+      attemptId: string,
+      turnIndex: number,
+      payload: SubmitInterviewAnswerRequest,
+    ): Promise<SubmitInterviewAnswerResponse> => {
+      const { data } = await http.post<SubmitInterviewAnswerResponse>(
+        `${API_PREFIX}/interviews/attempts/${attemptId}/answers/${turnIndex}`,
+        payload,
+      );
+      return data;
+    },
+    result: async (attemptId: string): Promise<MockInterviewAttemptResult> => {
+      const { data } = await http.get<MockInterviewAttemptResult>(
+        `${API_PREFIX}/interviews/attempts/${attemptId}/result`,
+      );
+      return data;
+    },
+    recordWarning: async (
+      attemptId: string,
+    ): Promise<{ warnings: number; terminated: boolean }> => {
+      const { data } = await http.post<{ warnings: number; terminated: boolean }>(
+        `${API_PREFIX}/interviews/attempts/${attemptId}/warning`,
+      );
+      return data;
+    },
+  },
+
+  /** Platform-admin interview authoring (college:null). Mirrors adminSpeaking. */
+  adminInterview: {
+    list: async (): Promise<MockInterviewListResponse> => {
+      const { data } = await http.get<MockInterviewListResponse>(
+        `${API_PREFIX}/admin/interviews`,
+      );
+      return data;
+    },
+    topics: async (): Promise<GameTopicListResponse> => {
+      const { data } = await http.get<GameTopicListResponse>(
+        `${API_PREFIX}/admin/interview-topics`,
+      );
+      return data;
+    },
+    get: async (id: string): Promise<MockInterviewDetail> => {
+      const { data } = await http.get<MockInterviewDetail>(
+        `${API_PREFIX}/admin/interviews/${id}`,
+      );
+      return data;
+    },
+    create: async (body: MockInterviewUpsert): Promise<MockInterviewDetail> => {
+      const { data } = await http.post<MockInterviewDetail>(
+        `${API_PREFIX}/admin/interviews`,
+        body,
+      );
+      return data;
+    },
+    update: async (
+      id: string,
+      body: MockInterviewUpsert,
+    ): Promise<MockInterviewDetail> => {
+      const { data } = await http.patch<MockInterviewDetail>(
+        `${API_PREFIX}/admin/interviews/${id}`,
+        body,
+      );
+      return data;
+    },
+    setPublished: async (
+      id: string,
+      isPublished: boolean,
+    ): Promise<MockInterviewDetail> => {
+      const { data } = await http.post<MockInterviewDetail>(
+        `${API_PREFIX}/admin/interviews/${id}/publish`,
+        { isPublished },
+      );
+      return data;
+    },
+    remove: async (id: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/admin/interviews/${id}`);
+    },
+    generateTts: async (text: string): Promise<SpeakingTtsResponse> => {
+      const { data } = await http.post<SpeakingTtsResponse>(
+        `${API_PREFIX}/admin/interviews/tts`,
         { text },
       );
       return data;
