@@ -7137,7 +7137,14 @@ export const interviewQuestionReportSchema = z.object({
   topicKnowledge: z.number().nullable(),
   relevance: z.number().nullable(),
   star: z.number().nullable(),
+  /** The domain-term-corrected transcript (what was scored + shown). */
   transcript: z.string().nullable(),
+  /** The original browser-STT transcript, for disputes (Step 34 fix #3). */
+  rawTranscript: z.string().nullable(),
+  /** Term corrections applied to this answer. */
+  corrections: z.array(
+    z.object({ from: z.string(), to: z.string(), kind: z.string() }),
+  ),
   audioUrl: z.string(),
   feedback: z.string(),
 });

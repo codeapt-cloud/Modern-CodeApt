@@ -61,15 +61,21 @@ export interface InterviewAnalysis {
   skills: string[];
   experience: string;
   gaps: string[];
+  /** Canonical domain vocabulary (technologies, tools, protocols, acronyms) drawn
+   *  from the JD + resume — used to CORRECT STT mishearings in answers, never to
+   *  rewrite them. e.g. "frontend", "Kubernetes", "PostgreSQL", "Node.js", "REST". */
+  terms: string[];
 }
 
 const ANALYSIS_SYSTEM =
   "You are an expert technical recruiter. Read the RESUME and JOB DESCRIPTION and " +
   "return STRICT JSON only: " +
-  '{"skills": string[], "experience": string, "gaps": string[]}. ' +
+  '{"skills": string[], "experience": string, "gaps": string[], "terms": string[]}. ' +
   "skills = concrete skills the resume evidences; experience = a one-sentence " +
-  "seniority summary; gaps = skills the job needs that the resume does not show. " +
-  "No text outside the JSON.";
+  "seniority summary; gaps = skills the job needs that the resume does not show; " +
+  "terms = the canonical spelling of domain technologies/tools/protocols/acronyms " +
+  "mentioned (e.g. frontend, Kubernetes, PostgreSQL, Node.js, REST, OAuth) — used " +
+  "to fix speech-to-text mishearings. No text outside the JSON.";
 
 export async function analyzeResume(
   resumeText: string,
@@ -95,6 +101,7 @@ export async function analyzeResume(
     skills: strArray(parsed, "skills"),
     experience: str(parsed, "experience"),
     gaps: strArray(parsed, "gaps"),
+    terms: strArray(parsed, "terms"),
   };
 }
 

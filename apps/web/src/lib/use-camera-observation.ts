@@ -81,7 +81,10 @@ export interface UseCameraObservation {
   supported: boolean;
   granted: boolean;
   error: string | null;
-  videoRef: React.RefObject<HTMLVideoElement>;
+  /** Ref CALLBACK for any <video> self-view. Binds the shared stream whenever an
+   *  element mounts — so the SAME stream shows in both the pre-flight and the
+   *  runner previews (a single RefObject can only bind one element at a time). */
+  attach: (el: HTMLVideoElement | null) => void;
   /** Request the camera once (preflight). Resolves granted/denied. */
   request(): Promise<boolean>;
   /** Start sampling frames for the current answer. */
@@ -91,7 +94,7 @@ export interface UseCameraObservation {
 }
 
 export function useCameraObservation(enabled: boolean): UseCameraObservation {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<FaceDetectorLike | null>(null);
   const framesRef = useRef<FrameObservation[]>([]);
@@ -101,14 +104,26 @@ export function useCameraObservation(enabled: boolean): UseCameraObservation {
   const [granted, setGranted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Bind the shared stream to whichever <video> is currently mounted. Fires on
+  // mount (runner: stream already exists) and is also called by request() (pre-
+  // flight: element mounted before the stream existed). Also the frame source
+  // for the detector, so the preview IS what's analysed.
+  const attach = useCallback((el: HTMLVideoElement | null) => {
+    videoElRef.current = el;
+    if (el && streamRef.current && el.srcObject !== streamRef.current) {
+      el.srcObject = streamRef.current;
+      void el.play().catch(() => undefined);
+    }
+  }, []);
+
   const request = useCallback(async (): Promise<boolean> => {
     if (!enabled) return false;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        void videoRef.current.play().catch(() => undefined);
+      if (videoElRef.current) {
+        videoElRef.current.srcObject = stream;
+        void videoElRef.current.play().catch(() => undefined);
       }
       if (supported) {
         const Ctor = (window as unknown as { FaceDetector: new (o?: unknown) => FaceDetectorLike })
@@ -130,7 +145,7 @@ export function useCameraObservation(enabled: boolean): UseCameraObservation {
     startedAtRef.current = performance.now();
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
-      const video = videoRef.current;
+      const video = videoElRef.current;
       const det = detectorRef.current;
       if (!video || !det) return;
       const t = (performance.now() - startedAtRef.current) / 1000;
@@ -167,5 +182,5 @@ export function useCameraObservation(enabled: boolean): UseCameraObservation {
     };
   }, []);
 
-  return { supported, granted, error, videoRef, request, beginSampling, endSampling };
+  return { supported, granted, error, attach, request, beginSampling, endSampling };
 }

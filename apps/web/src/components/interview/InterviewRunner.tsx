@@ -27,13 +27,16 @@ import type { InterviewEngine } from "../../lib/interview-engine.js";
 import type { ObservationSummary } from "../../lib/camera-observation.js";
 import type { UseCameraObservation } from "../../lib/use-camera-observation.js";
 import {
-  INITIAL_RECOGNITION_STATE,
   SUPPORTED_BROWSERS_MESSAGE,
-  nextRecognitionState,
-  recognitionSubmission,
   speechRecognitionSupported,
-  type RecognitionState,
 } from "../../lib/browser-stt.js";
+import {
+  INITIAL_RECOGNITION_SESSION,
+  recognitionSessionReducer,
+  sessionTranscript,
+  shouldRestartRecognizer,
+  type RecognitionSession,
+} from "../../lib/recognition-session.js";
 import { uploadAudioToCloudinary } from "../../lib/audio-upload.js";
 import { useAudioRecorder } from "../../lib/use-audio-recorder.js";
 import { useInterviewVoice } from "../../lib/use-interview-voice.js";
@@ -43,6 +46,7 @@ import { Badge } from "../ui/badge.js";
 import { Button } from "../ui/button.js";
 import { Card, CardContent } from "../ui/card.js";
 import { InterviewAvatar, type AvatarState } from "./InterviewAvatar.js";
+import { CameraSelfView } from "./CameraSelfView.js";
 
 const ANSWER_WINDOW_SECONDS = 120;
 const FIRST_SPEECH_LEVEL = 0.04; // level above which we consider the answer started
@@ -80,7 +84,7 @@ export function InterviewRunner({
   const [terminated, setTerminated] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState("");
 
-  const recStateRef = useRef<RecognitionState>(INITIAL_RECOGNITION_STATE);
+  const sessionRef = useRef<RecognitionSession>(INITIAL_RECOGNITION_SESSION);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const questionEndedAtRef = useRef<number>(0);
   const firstSpeechAtRef = useRef<number | null>(null);
@@ -90,12 +94,78 @@ export function InterviewRunner({
 
   const currentTurn = state.current?.turn ?? null;
 
-  // --- Reused capture glue: decode blob → envelope → fluency + recognition. ---
+  // --- Recognition SESSION control (per-turn re-arm + within-turn restart). ---
+  const spawnRecognizer = useCallback(() => {
+    const Ctor =
+      (window as never as { SpeechRecognition?: new () => SpeechRecognitionLike }).SpeechRecognition ??
+      (window as never as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
+    if (!Ctor) return;
+    const rec = new Ctor();
+    recognitionRef.current = rec;
+    rec.lang = "en-IN";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e: unknown) => {
+      const ev = e as { results: ArrayLike<ArrayLike<{ transcript: string }>> };
+      let text = "";
+      for (let i = 0; i < ev.results.length; i += 1) text += ev.results[i]![0]!.transcript + " ";
+      sessionRef.current = recognitionSessionReducer(sessionRef.current, {
+        type: "result",
+        text: text.trim(),
+      });
+      setLiveTranscript(sessionTranscript(sessionRef.current));
+    };
+    rec.onerror = () => {
+      // Errors surface as an end; the session decides whether to restart.
+    };
+    rec.onend = () => {
+      sessionRef.current = recognitionSessionReducer(sessionRef.current, { type: "recognizer_end" });
+      recognitionRef.current = null;
+      // Continuous recognition ends on its own mid-answer — restart while the turn
+      // is active so a long answer keeps being transcribed (the Step-34 fix).
+      if (shouldRestartRecognizer(sessionRef.current)) {
+        try {
+          spawnRecognizer();
+        } catch {
+          /* no-op */
+        }
+      }
+    };
+    try {
+      rec.start();
+    } catch {
+      /* already started / not-allowed surfaces via onend */
+    }
+  }, []);
+
+  const startTurnRecognition = useCallback(
+    (index: number) => {
+      sessionRef.current = recognitionSessionReducer(sessionRef.current, {
+        type: "turn_start",
+        index,
+      });
+      setLiveTranscript("");
+      if (supported) spawnRecognizer();
+    },
+    [supported, spawnRecognizer],
+  );
+
+  const stopTurnRecognition = useCallback(() => {
+    sessionRef.current = recognitionSessionReducer(sessionRef.current, { type: "turn_stop" });
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      /* no-op */
+    }
+    recognitionRef.current = null;
+  }, []);
+
+  // --- Reused capture glue: decode blob → envelope → fluency + the turn's transcript. ---
   const captureBrowserResult = useCallback(
     async (
       blob: Blob,
     ): Promise<{ transcript: string; fluency: FluencyResult; recognitionFailed: boolean }> => {
-      const sub = recognitionSubmission(recStateRef.current);
+      const transcript = sessionTranscript(sessionRef.current);
       let fluency: FluencyResult;
       try {
         const Ctx =
@@ -104,12 +174,12 @@ export function InterviewRunner({
         const ctx = new Ctx!();
         const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
         const env = computeRmsEnvelope(buf.getChannelData(0), buf.sampleRate, ENVELOPE_FRAME_SECONDS);
-        fluency = fluencyFromEnvelope(env, ENVELOPE_FRAME_SECONDS, sub.transcript);
+        fluency = fluencyFromEnvelope(env, ENVELOPE_FRAME_SECONDS, transcript);
         void ctx.close();
       } catch {
-        fluency = fluencyFromEnvelope([], ENVELOPE_FRAME_SECONDS, sub.transcript);
+        fluency = fluencyFromEnvelope([], ENVELOPE_FRAME_SECONDS, transcript);
       }
-      return { ...sub, fluency };
+      return { transcript, fluency, recognitionFailed: transcript.trim() === "" };
     },
     [],
   );
@@ -121,6 +191,7 @@ export function InterviewRunner({
       async (blob: Blob) => {
         if (submittingRef.current || !state.current?.turn) return;
         submittingRef.current = true;
+        stopTurnRecognition();
         dispatch({ type: "answer_submitting" });
         const observation = camera.granted ? camera.endSampling() : null;
         if (observation) observationsRef.current = observation;
@@ -204,19 +275,24 @@ export function InterviewRunner({
   });
 
   // Speak each question once when it becomes current; on end → student answers.
+  // The recorder is single-shot (uploaded is terminal), so RE-ARM it each turn
+  // with reset()→start() (mirrors the speaking runner's per-item reset) — without
+  // this the recorder stays stuck at `uploaded` and turn 2+ records nothing.
   useEffect(() => {
     if (state.phase !== "asking" || !currentTurn) return;
     if (spokenIndexRef.current === currentTurn.index) return;
     spokenIndexRef.current = currentTurn.index;
     setLiveTranscript("");
     firstSpeechAtRef.current = null;
-    recStateRef.current = INITIAL_RECOGNITION_STATE;
+    const turnIndex = currentTurn.index;
     voice.speak(currentTurn.question, {
       onEnd: () => {
         questionEndedAtRef.current = performance.now();
         dispatch({ type: "question_spoken" });
         if (camera.granted) camera.beginSampling();
+        recorder.reset();
         recorder.start();
+        startTurnRecognition(turnIndex);
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,47 +307,16 @@ export function InterviewRunner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.phase, state.prefetched, state.prefetchSynthesized]);
 
-  // Drive the live SpeechRecognition alongside the recorder (interimResults=true).
+  // Stop any live recogniser on unmount (per-turn start/stop is driven above).
   useEffect(() => {
-    if (!supported || recorder.state !== "recording") return;
-    const Ctor =
-      (window as never as { SpeechRecognition?: new () => SpeechRecognitionLike }).SpeechRecognition ??
-      (window as never as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
-    if (!Ctor) return;
-    const rec = new Ctor();
-    recognitionRef.current = rec;
-    recStateRef.current = nextRecognitionState(recStateRef.current, { type: "start" });
-    rec.lang = "en-IN";
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (e: unknown) => {
-      const ev = e as { results: ArrayLike<ArrayLike<{ transcript: string }>> };
-      let text = "";
-      for (let i = 0; i < ev.results.length; i += 1) text += ev.results[i]![0]!.transcript + " ";
-      const trimmed = text.trim();
-      setLiveTranscript(trimmed);
-      recStateRef.current = nextRecognitionState(recStateRef.current, { type: "result", transcript: trimmed });
-    };
-    rec.onerror = (e: unknown) => {
-      recStateRef.current = nextRecognitionState(recStateRef.current, { type: "error", error: (e as { error?: string }).error ?? "error" });
-    };
-    rec.onend = () => {
-      recStateRef.current = nextRecognitionState(recStateRef.current, { type: "end" });
-    };
-    try {
-      rec.start();
-    } catch {
-      /* already started / not-allowed surfaces via onerror */
-    }
     return () => {
       try {
-        rec.stop();
+        recognitionRef.current?.stop();
       } catch {
         /* no-op */
       }
-      recognitionRef.current = null;
     };
-  }, [supported, recorder.state]);
+  }, []);
 
   // Response-latency: mark the first moment the student's audio rises above silence.
   useEffect(() => {
@@ -332,14 +377,7 @@ export function InterviewRunner({
       <div className="grid gap-4 md:grid-cols-[200px_1fr]">
         <div className="flex flex-col items-center gap-3">
           <InterviewAvatar state={avatarState} pulse={voice.pulse} />
-          {camera.granted ? (
-            <video
-              ref={camera.videoRef}
-              muted
-              playsInline
-              className="h-28 w-full rounded-lg bg-black/80 object-cover"
-            />
-          ) : null}
+          <CameraSelfView camera={camera} className="h-28 w-full" />
         </div>
 
         <Card>

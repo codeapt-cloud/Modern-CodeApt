@@ -21,6 +21,7 @@ import type { UseCameraObservation } from "../../lib/use-camera-observation.js";
 import { Alert } from "../ui/alert.js";
 import { Button } from "../ui/button.js";
 import { Card, CardContent } from "../ui/card.js";
+import { CameraSelfView } from "./CameraSelfView.js";
 
 export function InterviewPreflight({
   camera,
@@ -88,12 +89,7 @@ export function InterviewPreflight({
             <Camera className="h-4 w-4" /> Camera (optional)
           </div>
           {cameraChoice === "granted" ? (
-            <video
-              ref={camera.videoRef}
-              muted
-              playsInline
-              className="h-32 w-full rounded-lg bg-black/80 object-cover"
-            />
+            <CameraSelfView camera={camera} className="h-40 w-full" />
           ) : (
             <p className="text-xs text-ink-muted">
               Turn the camera on for feedback on your presence (looking away,

@@ -105,6 +105,27 @@ export function InterviewResults({
               {q.feedback ? (
                 <p className="mt-1 text-sm text-ink-muted">{q.feedback}</p>
               ) : null}
+              {q.corrections.length > 0 ? (
+                <details className="mt-1 text-xs text-ink-muted">
+                  <summary className="cursor-pointer">
+                    {q.corrections.length} domain term
+                    {q.corrections.length === 1 ? "" : "s"} corrected
+                  </summary>
+                  <ul className="mt-1 list-disc pl-5">
+                    {q.corrections.map((c, i) => (
+                      <li key={i}>
+                        “{c.from}” → <span className="text-ink">{c.to}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {q.rawTranscript ? (
+                    <p className="mt-1">
+                      <span className="font-medium">Original transcript:</span>{" "}
+                      {q.rawTranscript}
+                    </p>
+                  ) : null}
+                </details>
+              ) : null}
             </div>
           ))}
         </CardContent>

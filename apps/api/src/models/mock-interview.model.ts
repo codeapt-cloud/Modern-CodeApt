@@ -98,7 +98,12 @@ const turnSchema = new Schema(
     parentIndex: { type: Number, default: null },
     // --- filled at answer time ---
     audioUrl: { type: String, default: "" },
+    /** The domain-term-CORRECTED transcript (scored + shown). */
     transcript: { type: String, default: "" },
+    /** The ORIGINAL browser-STT transcript, kept for disputes (Step 34 fix #3). */
+    rawTranscript: { type: String, default: "" },
+    /** Term corrections applied: [{ from, to, kind }]. */
+    corrections: { type: Schema.Types.Mixed, default: [] },
     fluency: { type: Schema.Types.Mixed, default: null }, // FluencyResult | null
     latencySeconds: { type: Number, default: null },
     answered: { type: Boolean, default: false },

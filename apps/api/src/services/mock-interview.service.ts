@@ -33,6 +33,7 @@ import {
   TopicType,
   collectDescendantUnitIds,
   computeInterviewReport,
+  correctTranscript,
   fluencyFromEnvelope,
   isCourseGranted,
   isPlatformAdmin,
@@ -768,7 +769,13 @@ export async function submitInterviewAnswer(
   };
 
   // --- Record the answer + deterministic floor (audio ALWAYS stored). ---
-  const transcript = (body.transcript ?? "").trim();
+  const rawTranscript = (body.transcript ?? "").trim();
+  // Domain-term correction (Step 34 fix #3): normalize known terms against the
+  // resume/JD term list. TERMS ONLY — never rewrites phrasing. Store BOTH the
+  // original and the corrected transcript; the corrected one is what's scored.
+  const terms = ((attempt.analysis as { terms?: unknown } | null)?.terms ?? []) as string[];
+  const correction = correctTranscript(rawTranscript, Array.isArray(terms) ? terms : []);
+  const transcript = correction.corrected.trim();
   const answered = !body.silent && transcript !== "";
   turn.audioUrl = body.audioUrl ?? "";
   turn.latencySeconds = typeof body.latencySeconds === "number" ? body.latencySeconds : null;
@@ -780,6 +787,8 @@ export async function submitInterviewAnswer(
       sanitizeClientFluency(body.fluency, INTERVIEW_ANSWER_WINDOW_SECONDS, transcript) ??
       fluencyFromEnvelope([], 0, transcript);
     turn.transcript = transcript;
+    turn.rawTranscript = rawTranscript;
+    turn.corrections = correction.applied;
     turn.fluency = fluency;
     turn.answered = true;
     turn.floor = scoreInterviewAnswerFloor(transcript, fluency, turn.latencySeconds ?? undefined);
@@ -953,6 +962,12 @@ function toResult(attempt: AttemptDoc): MockInterviewAttemptResult {
       relevance: (t.ai as { relevance: number | null } | null)?.relevance ?? null,
       star: (t.ai as { star: number | null } | null)?.star ?? null,
       transcript: t.transcript ? t.transcript : null,
+      rawTranscript: t.rawTranscript ? t.rawTranscript : null,
+      corrections: (Array.isArray(t.corrections) ? t.corrections : []) as {
+        from: string;
+        to: string;
+        kind: string;
+      }[],
       audioUrl: t.audioUrl ?? "",
       feedback: t.feedback ?? "",
     })),
