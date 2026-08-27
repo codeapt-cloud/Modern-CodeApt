@@ -53,6 +53,9 @@ describe("createAvatarController — lip-sync is BUNDLED, not runtime-loaded", (
 
     // The whole fix: TalkingHead must NOT be asked to runtime-import lipsync.
     expect(captured.opts?.lipsyncModules).toEqual([]);
+    // Our GLB is Draco-compressed → DRACOLoader MUST be enabled, or GLTFLoader
+    // throws "No DRACOLoader instance provided" (Step 37.8).
+    expect(captured.opts?.dracoEnabled).toBe(true);
     // …and the processor is wired directly from the statically-imported module.
     const en = captured.head?.lipsync?.en as { preProcessText?: unknown } | undefined;
     expect(en).toBeTruthy();

@@ -113,6 +113,11 @@ export async function createAvatarController(
       cameraRotateEnable: false,
       avatarMute: false,
       modelFPS: motion ? 30 : 24,
+      // Our mpfb.glb is Draco-compressed (KHR_draco_mesh_compression); TalkingHead
+      // defaults dracoEnabled:false and otherwise throws "No DRACOLoader instance
+      // provided" while parsing. This attaches a DRACOLoader whose decoder loads
+      // from gstatic (dracoDecoderPath default) at parse time.
+      dracoEnabled: true,
     });
     // Wire the bundled lip-sync processor directly (ctor set `this.lipsync = {}`).
     (head as unknown as { lipsync: Record<string, unknown> }).lipsync.en = new lip.LipsyncEn();
