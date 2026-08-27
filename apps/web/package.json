@@ -6,6 +6,7 @@
   "description": "CodeApt React (Vite) SPA",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/check-public-asset-sizes.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

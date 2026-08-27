@@ -31,7 +31,16 @@ import { fetchGlbObjectUrl, type GlbFailReason } from "./avatar/glb-loader.js";
 import type { AvatarController } from "./avatar/talkinghead-controller.js";
 import { useInterviewVoice } from "./use-interview-voice.js";
 
-const AVATAR_GLB_URL = "/avatar/mpfb.glb";
+/**
+ * Where the avatar GLB is fetched from. Configurable so it isn't tied to one
+ * account: set VITE_AVATAR_GLB_URL to the off-repo CDN URL (e.g. a Cloudinary raw
+ * URL) in production. The 36.8 MB file is NOT committed (Cloudflare Pages rejects
+ * files > 25 MiB); the local path is only a dev fallback (and 404s → the static
+ * SVG with a clear "model not found" status if the env isn't set).
+ */
+const AVATAR_GLB_URL =
+  ((import.meta as unknown as { env?: Record<string, string | undefined> }).env
+    ?.VITE_AVATAR_GLB_URL || "/avatar/mpfb.glb").trim();
 
 function estimateSpeechMs(text: string): number {
   const words = (text.trim().match(/\S+/g) ?? []).length;

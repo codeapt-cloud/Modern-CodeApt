@@ -35,3 +35,8 @@ apps/web/dist/
 # Local archives / scratch
 Modern CodeApt.zip
 *.zip
+
+# Large 3D avatar assets — host off-repo (Cloudinary) and point
+# VITE_AVATAR_GLB_URL at the CDN URL. Cloudflare Pages rejects files >25 MiB,
+# and big binaries bloat git history. See scripts/check-public-asset-sizes.mjs.
+apps/web/public/avatar/*.glb
