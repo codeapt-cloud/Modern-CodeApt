@@ -1,85 +1,48 @@
 /**
- * OPTIONAL camera-observation capture (Step 34 Part C). Requests a SEPARATE video
- * stream, samples frames while the student answers, runs the browser Shape
- * Detection `FaceDetector` on each frame, DISCARDS every frame immediately, and
- * hands the per-frame RESULTS to the pure `aggregateObservations`. Nothing is ever
- * uploaded or stored — no frame, no bitmap, no video.
+ * OPTIONAL camera-observation capture (Step 34 Part C, reworked Step 35 A/B).
+ * Requests a SEPARATE video stream, LAZILY loads the MediaPipe FaceLandmarker
+ * (see face-detector.ts — never in the main bundle), and runs one always-on
+ * detection loop while the camera is granted. Each tick: run the detector, DISCARD
+ * the frame, update the live "in frame" signal, feed the person-presence reducer
+ * (→ proctoring warnings), and — while an answer is being sampled — buffer the
+ * per-frame observation for aggregation. Nothing is ever uploaded or stored: no
+ * frame, no bitmap, no video, no identity.
  *
- * Detector choice (deliberate, no new dependency): the browser `FaceDetector`
- * (Shape Detection API). Zero bundle cost and — critically — it exposes ONLY a
- * bounding box + coarse landmarks, NO emotion/expression classifier and NO iris,
- * so the DPDP boundary (face presence + coarse head direction + geometric smile
- * only; never emotion, never gaze-point) is satisfied by construction. Where the
- * API is absent (e.g. desktop Firefox/Safari) `supported` is false: the camera
- * preview still shows, observations report "unavailable", and NOTHING is scored.
- * A landmark library would give wider coverage but is a multi-MB download for a
- * feedback-only layer — deferred (see the Step-34 report).
+ * Camera stays OPTIONAL: if the student declines, none of this runs, observations
+ * are absent, and the score is identical (proven by the camera-decline test).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { createFaceDetector, type FaceDetector } from "./face-detector.js";
 import {
   aggregateObservations,
+  INITIAL_PRESENCE,
+  presenceReducer,
   type FrameObservation,
   type ObservationSummary,
+  type PersonChangeReason,
+  type PresenceState,
 } from "./camera-observation.js";
 
-const SAMPLE_INTERVAL_MS = 500;
+const SAMPLE_INTERVAL_MS = 500; // 2 fps — light for feedback, plenty for presence
 
-interface DetectedFaceLike {
-  boundingBox: { x: number; y: number; width: number; height: number };
-  landmarks?: { type: string; locations: { x: number; y: number }[] }[];
-}
-interface FaceDetectorLike {
-  detect(source: CanvasImageSource): Promise<DetectedFaceLike[]>;
-}
-
-function faceDetectorSupported(): boolean {
-  return typeof (window as unknown as { FaceDetector?: unknown }).FaceDetector !== "undefined";
-}
-
-/** Map ONE detector result to a normalized FrameObservation, or an absent-face
- *  frame. Landmarks are used for a GEOMETRIC smile only — never emotion. */
-function toFrame(
-  faces: DetectedFaceLike[],
-  t: number,
-  vw: number,
-  vh: number,
-): FrameObservation {
-  const face = faces[0];
-  if (!face || vw <= 0 || vh <= 0) return { t, box: null, mouth: null };
-  const b = face.boundingBox;
-  const box = {
-    cx: (b.x + b.width / 2) / vw,
-    cy: (b.y + b.height / 2) / vh,
-    w: b.width / vw,
-    h: b.height / vh,
-  };
-  // Coarse geometric smile: mouth-corner spread vs eye spread. Only when the
-  // detector supplied eye + mouth landmarks; otherwise smile is left unknown.
-  let mouth: FrameObservation["mouth"] = null;
-  const eyes = face.landmarks?.filter((l) => l.type === "eye") ?? [];
-  const mouths = face.landmarks?.filter((l) => l.type === "mouth") ?? [];
-  const mouthPts = mouths[0]?.locations ?? [];
-  if (eyes.length >= 2 && mouthPts.length >= 2) {
-    const e0 = eyes[0]!.locations[0]!;
-    const e1 = eyes[1]!.locations[0]!;
-    const interocular = Math.hypot(e1.x - e0.x, e1.y - e0.y) / vw;
-    const left = mouthPts[0]!;
-    const right = mouthPts[mouthPts.length - 1]!;
-    mouth = {
-      leftX: left.x / vw,
-      leftY: left.y / vh,
-      rightX: right.x / vw,
-      rightY: right.y / vh,
-      interocular,
-    };
-  }
-  return { t, box, mouth };
+/** A person-change signal: a monotonically-increasing seq so the consumer can
+ *  react to each event (even repeats of the same reason). */
+export interface PersonSignal {
+  readonly reason: PersonChangeReason;
+  readonly seq: number;
 }
 
 export interface UseCameraObservation {
+  /** True once we've attempted to enable real detection (MediaPipe target). */
   supported: boolean;
   granted: boolean;
+  /** True while the detector is loaded and the detection loop is running. */
+  detecting: boolean;
+  /** Live signal that a face is currently in frame (for the self-view indicator). */
+  inFrame: boolean;
+  /** Latest person-change event (multiple faces / face left & returned), or null. */
+  personSignal: PersonSignal | null;
   error: string | null;
   /** Ref CALLBACK for any <video> self-view. Binds the shared stream whenever an
    *  element mounts — so the SAME stream shows in both the pre-flight and the
@@ -87,33 +50,63 @@ export interface UseCameraObservation {
   attach: (el: HTMLVideoElement | null) => void;
   /** Request the camera once (preflight). Resolves granted/denied. */
   request(): Promise<boolean>;
-  /** Start sampling frames for the current answer. */
+  /** Start buffering frames for the current answer. */
   beginSampling(): void;
-  /** Stop sampling and return the observation summary for the answer. */
+  /** Stop buffering and return the observation summary for the answer. */
   endSampling(): ObservationSummary;
 }
 
 export function useCameraObservation(enabled: boolean): UseCameraObservation {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectorRef = useRef<FaceDetectorLike | null>(null);
+  const detectorRef = useRef<FaceDetector | null>(null);
   const framesRef = useRef<FrameObservation[]>([]);
+  const samplingRef = useRef(false);
   const startedAtRef = useRef<number>(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [supported] = useState(faceDetectorSupported);
+  const presenceRef = useRef<PresenceState>(INITIAL_PRESENCE);
+  const seqRef = useRef(0);
+
+  const [supported] = useState(true);
   const [granted, setGranted] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [inFrame, setInFrame] = useState(false);
+  const [personSignal, setPersonSignal] = useState<PersonSignal | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Bind the shared stream to whichever <video> is currently mounted. Fires on
-  // mount (runner: stream already exists) and is also called by request() (pre-
-  // flight: element mounted before the stream existed). Also the frame source
-  // for the detector, so the preview IS what's analysed.
   const attach = useCallback((el: HTMLVideoElement | null) => {
     videoElRef.current = el;
     if (el && streamRef.current && el.srcObject !== streamRef.current) {
       el.srcObject = streamRef.current;
       void el.play().catch(() => undefined);
     }
+  }, []);
+
+  // One always-on detection loop while granted: presence + live in-frame every
+  // tick, plus per-answer buffering when sampling. detectForVideo needs a
+  // monotonic ms timestamp and a video with real dimensions.
+  const startLoop = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      const video = videoElRef.current;
+      const det = detectorRef.current;
+      if (!video || !det || video.videoWidth === 0) return;
+      let frame: FrameObservation;
+      try {
+        frame = det.detect(video, performance.now(), (performance.now() - startedAtRef.current) / 1000);
+      } catch {
+        return; // a transient detect error is not evidence of absence — skip
+      }
+      const nowInFrame = frame.faceCount >= 1;
+      setInFrame((prev) => (prev === nowInFrame ? prev : nowInFrame));
+      const { state, event } = presenceReducer(presenceRef.current, frame.faceCount);
+      presenceRef.current = state;
+      if (event) {
+        seqRef.current += 1;
+        setPersonSignal({ reason: event, seq: seqRef.current });
+      }
+      if (samplingRef.current) framesRef.current.push(frame);
+    }, SAMPLE_INTERVAL_MS);
   }, []);
 
   const request = useCallback(async (): Promise<boolean> => {
@@ -125,47 +118,28 @@ export function useCameraObservation(enabled: boolean): UseCameraObservation {
         videoElRef.current.srcObject = stream;
         void videoElRef.current.play().catch(() => undefined);
       }
-      if (supported) {
-        const Ctor = (window as unknown as { FaceDetector: new (o?: unknown) => FaceDetectorLike })
-          .FaceDetector;
-        detectorRef.current = new Ctor({ fastMode: true, maxDetectedFaces: 1 });
-      }
       setGranted(true);
+      // Load the detector lazily; the preview shows regardless of the outcome.
+      const det = await createFaceDetector();
+      detectorRef.current = det;
+      setDetecting(det !== null);
+      if (det) startLoop();
       return true;
     } catch {
       setError("Camera access was declined or unavailable.");
       setGranted(false);
       return false;
     }
-  }, [enabled, supported]);
+  }, [enabled, startLoop]);
 
   const beginSampling = useCallback(() => {
-    if (!granted || !supported || !detectorRef.current) return;
     framesRef.current = [];
     startedAtRef.current = performance.now();
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      const video = videoElRef.current;
-      const det = detectorRef.current;
-      if (!video || !det) return;
-      const t = (performance.now() - startedAtRef.current) / 1000;
-      // detect() reads the live <video> frame directly; we keep NO copy of it.
-      void det
-        .detect(video)
-        .then((faces) => {
-          framesRef.current.push(toFrame(faces, t, video.videoWidth, video.videoHeight));
-        })
-        .catch(() => {
-          framesRef.current.push({ t, box: null, mouth: null });
-        });
-    }, SAMPLE_INTERVAL_MS);
-  }, [granted, supported]);
+    samplingRef.current = true;
+  }, []);
 
   const endSampling = useCallback((): ObservationSummary => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    samplingRef.current = false;
     const frames = framesRef.current;
     framesRef.current = [];
     return aggregateObservations(frames, {
@@ -173,14 +147,27 @@ export function useCameraObservation(enabled: boolean): UseCameraObservation {
     });
   }, []);
 
-  // Release the camera on unmount — the stream never outlives the interview.
+  // Release everything on unmount — the stream/detector never outlive the interview.
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      detectorRef.current?.close();
+      detectorRef.current = null;
       streamRef.current?.getTracks().forEach((tk) => tk.stop());
       streamRef.current = null;
     };
   }, []);
 
-  return { supported, granted, error, attach, request, beginSampling, endSampling };
+  return {
+    supported,
+    granted,
+    detecting,
+    inFrame,
+    personSignal,
+    error,
+    attach,
+    request,
+    beginSampling,
+    endSampling,
+  };
 }

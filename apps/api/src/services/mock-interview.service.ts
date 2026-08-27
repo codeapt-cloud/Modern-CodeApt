@@ -34,6 +34,11 @@ import {
   collectDescendantUnitIds,
   computeInterviewReport,
   correctTranscript,
+  dropDuplicateQuestions,
+  interviewAcknowledgement,
+  interviewClosing,
+  interviewGreeting,
+  isNearDuplicateQuestion,
   fluencyFromEnvelope,
   isCourseGranted,
   isPlatformAdmin,
@@ -64,6 +69,7 @@ import { synthesizePrompt, TtsError } from "../lib/asr-tts.js";
 import { uploadBufferToCloudinary } from "../lib/cloudinary.js";
 import {
   analyzeResume,
+  correctTranscriptContextually,
   fallbackQuestions,
   generateFollowUp,
   generateQuestions,
@@ -600,13 +606,18 @@ export async function startInterview(
     collegeId: meterCollege,
     userId: await resolveStudentMeterId(meterCollege, userId),
   };
+  const candidateName = await candidateFullName(userId);
 
   // 1. Analyse the resume (degrade → null; generation still proceeds).
   const analysis = await analyzeResume(body.resumeText, body.jobDescription, role, meter);
 
-  // 2. Generate the question plan (degrade → role-based fallback bank).
+  // 2. Generate the question plan (degrade → role-based fallback bank). The
+  // resume TEXT + extracted highlights shape the questions (E); the seed
+  // questions are threaded in as ALREADY-ASKED so the model doesn't echo them,
+  // and we drop any near-duplicate that slips through, regenerating once (D).
   const behaviouralCount = assessment.plan?.behaviouralCount ?? 0;
   const technicalCount = assessment.plan?.technicalCount ?? 0;
+  const seeds = (assessment.seedQuestions ?? []).map((s) => s.text);
   const generated = await generateQuestions(
     role,
     assessment.seniority,
@@ -614,11 +625,45 @@ export async function startInterview(
     technicalCount,
     analysis,
     body.jobDescription,
+    body.resumeText,
+    seeds,
+    candidateName,
     meter,
   );
   const aiGenerated = generated !== null;
-  const mainQuestions: GeneratedQuestion[] =
-    generated ?? fallbackQuestions(behaviouralCount, technicalCount);
+  let mainQuestions: GeneratedQuestion[] =
+    generated?.questions ?? fallbackQuestions(behaviouralCount, technicalCount);
+  const greeting = generated?.greeting?.trim() || interviewGreeting(candidateName);
+  const closing = generated?.closing?.trim() || interviewClosing();
+
+  if (aiGenerated) {
+    const requested = behaviouralCount + technicalCount;
+    mainQuestions = dropDuplicateQuestions(mainQuestions, seeds);
+    // If de-duplication left us short of the plan, regenerate ONCE, telling the
+    // model everything asked so far, and top up from the fresh (deduped) batch.
+    if (mainQuestions.length < requested) {
+      const asked = [...seeds, ...mainQuestions.map((q) => q.text)];
+      const again = await generateQuestions(
+        role,
+        assessment.seniority,
+        behaviouralCount,
+        technicalCount,
+        analysis,
+        body.jobDescription,
+        body.resumeText,
+        asked,
+        candidateName,
+        meter,
+      );
+      if (again) {
+        for (const q of dropDuplicateQuestions(again.questions, asked)) {
+          if (mainQuestions.length >= requested) break;
+          mainQuestions.push(q);
+          asked.push(q.text);
+        }
+      }
+    }
+  }
 
   // Seed questions (author-fixed) first, then generated/fallback, capped.
   const turns: TurnDoc[] = [];
@@ -655,6 +700,8 @@ export async function startInterview(
     resumeText: body.resumeText,
     jobDescription: body.jobDescription,
     analysis: analysis ?? null,
+    greeting,
+    closing,
     turns,
     currentIndex: 0,
     followUpsUsed: 0,
@@ -666,7 +713,16 @@ export async function startInterview(
     ...buildCurrent(attempt, now),
     title: assessment.title,
     aiGenerated,
+    greeting,
   };
+}
+
+/** The candidate's full name (for the greeting), or "" when no profile. */
+async function candidateFullName(userId: string): Promise<string> {
+  const profile = await ProfileModel.findOne({ user: new Types.ObjectId(userId) }).select(
+    "fullName",
+  );
+  return profile?.fullName ?? "";
 }
 
 function makeTurn(
@@ -770,25 +826,39 @@ export async function submitInterviewAnswer(
 
   // --- Record the answer + deterministic floor (audio ALWAYS stored). ---
   const rawTranscript = (body.transcript ?? "").trim();
-  // Domain-term correction (Step 34 fix #3): normalize known terms against the
-  // resume/JD term list. TERMS ONLY — never rewrites phrasing. Store BOTH the
-  // original and the corrected transcript; the corrected one is what's scored.
+  // Two-stage transcript correction. Stage 1 (Step 34 fix #3): deterministic
+  // term-list correction of KNOWN JD/resume terms — TERMS ONLY, never phrasing.
+  // Stage 2 (Step 35 G): an LLM pass fixes GENERAL mishearings the term list
+  // can't, gated by a structural guard so it can only fix, never rewrite; it
+  // degrades to the term-list text when the LLM is unavailable. The FINAL
+  // corrected transcript is what every dimension scores; the raw is kept for
+  // disputes and every change (term + contextual) is recorded for the audit view.
   const terms = ((attempt.analysis as { terms?: unknown } | null)?.terms ?? []) as string[];
-  const correction = correctTranscript(rawTranscript, Array.isArray(terms) ? terms : []);
-  const transcript = correction.corrected.trim();
-  const answered = !body.silent && transcript !== "";
+  const termsArr = Array.isArray(terms) ? terms : [];
+  const correction = correctTranscript(rawTranscript, termsArr);
+  const termCorrected = correction.corrected.trim();
+  const answered = !body.silent && termCorrected !== "";
   turn.audioUrl = body.audioUrl ?? "";
   turn.latencySeconds = typeof body.latencySeconds === "number" ? body.latencySeconds : null;
   turn.answeredAt = now;
 
   let followUpAdded = false;
+  let acknowledgement = "";
+  let closing = "";
   if (answered) {
+    // Stage 2 contextual correction runs BEFORE scoring (the corrected transcript
+    // is what's scored). One LLM round-trip; the runner's "thinking" state covers
+    // it. Degrades to the term-list transcript on unavailability or an over-edit.
+    const contextual = await correctTranscriptContextually(termCorrected, termsArr, role, meter);
+    const transcript = (contextual?.text ?? termCorrected).trim();
+    const contextChanges = contextual?.changes ?? [];
+
     const fluency =
       sanitizeClientFluency(body.fluency, INTERVIEW_ANSWER_WINDOW_SECONDS, transcript) ??
       fluencyFromEnvelope([], 0, transcript);
     turn.transcript = transcript;
     turn.rawTranscript = rawTranscript;
-    turn.corrections = correction.applied;
+    turn.corrections = [...correction.applied, ...contextChanges];
     turn.fluency = fluency;
     turn.answered = true;
     turn.floor = scoreInterviewAnswerFloor(transcript, fluency, turn.latencySeconds ?? undefined);
@@ -806,6 +876,9 @@ export async function submitInterviewAnswer(
       !pastDeadline &&
       attempt.followUpsUsed < plan.maxFollowUpsPerSession &&
       followUpsForRoot < plan.maxFollowUpsPerAnswer;
+    // Every question asked so far — threaded into the follow-up so it never
+    // repeats one (D). Also the dedup baseline for the returned probe.
+    const asked = attempt.turns.map((t) => t.question);
     const [judged, probe] = await Promise.all([
       gradeAnswer(
         turn.question,
@@ -815,46 +888,60 @@ export async function submitInterviewAnswer(
         meter,
       ),
       canFollowUp
-        ? generateFollowUp(turn.question, transcript, role, meter)
+        ? generateFollowUp(turn.question, transcript, role, asked, meter)
         : Promise.resolve(null),
     ]);
     if (judged) {
       turn.ai = judged.scores;
       turn.feedback = judged.feedback;
     }
-    if (canFollowUp) {
-      if (probe) {
-        const insertAt = turnIndex + 1;
-        const follow = makeTurn(
-          insertAt,
-          probe,
-          turn.category as InterviewQuestionCategory,
-          InterviewQuestionSource.LLM,
-          { isFollowUp: true, parentIndex: rootIndex },
-        );
-        attempt.turns.splice(insertAt, 0, follow);
-        reindexTurns(attempt);
-        attempt.followUpsUsed += 1;
-        followUpAdded = true;
-      }
+    // A neutral acknowledgement of this answer, spoken before the next question
+    // (F). The grading call supplies a tailored one for free; fall back to the
+    // deterministic phrase bank (varied by turn index) when the LLM is down.
+    acknowledgement = judged?.acknowledgement?.trim() || interviewAcknowledgement(turn.index);
+    // Splice a probe only when one came back AND it isn't a near-duplicate of an
+    // already-asked question (D — the last-line defence past the prompt instruction).
+    if (canFollowUp && probe && !isNearDuplicateQuestion(probe, asked)) {
+      const insertAt = turnIndex + 1;
+      const follow = makeTurn(
+        insertAt,
+        probe,
+        turn.category as InterviewQuestionCategory,
+        InterviewQuestionSource.LLM,
+        { isFollowUp: true, parentIndex: rootIndex },
+      );
+      attempt.turns.splice(insertAt, 0, follow);
+      reindexTurns(attempt);
+      attempt.followUpsUsed += 1;
+      followUpAdded = true;
     }
   } else {
     turn.answered = false;
   }
 
+  const respond = (): SubmitInterviewAnswerResponse => ({
+    index: turnIndex,
+    followUpAdded,
+    current: buildCurrent(attempt, now),
+    acknowledgement,
+    closing,
+  });
+
   // --- Advance. Within-grace-but-past-deadline: accept once, do NOT advance, close. ---
   if (pastDeadline) {
     await finalizeAttempt(attempt, MockInterviewStatus.EXPIRED, now);
-    return { index: turnIndex, followUpAdded, current: buildCurrent(attempt, now) };
+    closing = attempt.closing || interviewClosing();
+    return respond();
   }
 
   attempt.currentIndex = turnIndex + 1;
   if (attempt.currentIndex >= attempt.turns.length) {
     await finalizeAttempt(attempt, MockInterviewStatus.SCORED, now);
+    closing = attempt.closing || interviewClosing();
   } else {
     await attempt.save();
   }
-  return { index: turnIndex, followUpAdded, current: buildCurrent(attempt, now) };
+  return respond();
 }
 
 function reindexTurns(attempt: AttemptDoc): void {
@@ -982,12 +1069,19 @@ function toResult(attempt: AttemptDoc): MockInterviewAttemptResult {
 export async function recordInterviewWarning(
   userId: string,
   attemptId: string,
+  reason?: string,
 ): Promise<{ warnings: number; terminated: boolean }> {
   const attempt = await loadOwnedAttempt(userId, attemptId);
   if (attempt.terminated) return { warnings: attempt.warnings ?? 0, terminated: true };
   const warnings = (attempt.warnings ?? 0) + 1;
   const terminated = warnings >= INTERVIEW_MAX_WARNINGS;
   attempt.warnings = warnings;
+  // Record WHY (audit) — a camera "frame changed" signal (multiple_faces /
+  // left_frame) or a generic proctoring violation. This never records identity.
+  attempt.proctoringEvents = [
+    ...((attempt.proctoringEvents as { reason: string; at: Date }[] | undefined) ?? []),
+    { reason: (reason ?? "proctoring").slice(0, 40), at: new Date() },
+  ];
   if (terminated) {
     attempt.terminated = true;
     attempt.terminatedReason = "unauthorised actions detected";

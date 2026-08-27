@@ -23,7 +23,10 @@ export interface InterviewEngine {
   ): Promise<SubmitInterviewAnswerResponse>;
   uploadSignature(): Promise<UploadSignatureResponse>;
   result(attemptId: string): Promise<MockInterviewAttemptResult>;
-  recordWarning(attemptId: string): Promise<{ warnings: number; terminated: boolean }>;
+  recordWarning(
+    attemptId: string,
+    reason?: string,
+  ): Promise<{ warnings: number; terminated: boolean }>;
 }
 
 export function collegeInterviewEngine(slug: string): InterviewEngine {
@@ -33,8 +36,8 @@ export function collegeInterviewEngine(slug: string): InterviewEngine {
       api.collegeInterview.submitAnswer(slug, attemptId, turnIndex, payload),
     uploadSignature: () => api.collegeInterview.uploadSignature(slug),
     result: (attemptId) => api.collegeInterview.result(slug, attemptId),
-    recordWarning: (attemptId) =>
-      api.collegeInterview.recordWarning(slug, attemptId),
+    recordWarning: (attemptId, reason) =>
+      api.collegeInterview.recordWarning(slug, attemptId, reason),
   };
 }
 
@@ -45,6 +48,6 @@ export function globalInterviewEngine(): InterviewEngine {
       api.interview.submitAnswer(attemptId, turnIndex, payload),
     uploadSignature: () => api.interview.uploadSignature(),
     result: (attemptId) => api.interview.result(attemptId),
-    recordWarning: (attemptId) => api.interview.recordWarning(attemptId),
+    recordWarning: (attemptId, reason) => api.interview.recordWarning(attemptId, reason),
   };
 }

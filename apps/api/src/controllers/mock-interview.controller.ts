@@ -98,9 +98,19 @@ export const interviewInProgressController = asyncHandler(
 );
 export const recordInterviewWarningController = asyncHandler(
   async (req: Request, res: Response) => {
+    const reason =
+      typeof (req.body as { reason?: unknown } | undefined)?.reason === "string"
+        ? (req.body as { reason: string }).reason
+        : undefined;
     res
       .status(200)
-      .json(await interview.recordInterviewWarning(userId(req), req.params.attemptId ?? ""));
+      .json(
+        await interview.recordInterviewWarning(
+          userId(req),
+          req.params.attemptId ?? "",
+          reason,
+        ),
+      );
   },
 );
 export const listAvailableInterviewsController = asyncHandler(

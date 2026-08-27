@@ -13,13 +13,16 @@ import prettier from "eslint-config-prettier";
  */
 export default tseslint.config(
   {
-    // Never lint build output, deps, or generated assets.
+    // Never lint build output, deps, or generated/vendored assets.
     ignores: [
       "**/dist/**",
       "**/build/**",
       "**/node_modules/**",
       "**/coverage/**",
       "**/*.d.ts",
+      // Vendored, self-hosted static assets served as-is (e.g. the MediaPipe
+      // WASM glue in apps/web/public/mediapipe) — not our source.
+      "**/public/**",
     ],
   },
 

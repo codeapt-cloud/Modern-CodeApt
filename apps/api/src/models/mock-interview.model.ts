@@ -137,8 +137,11 @@ const mockInterviewAttemptSchema = new Schema(
     seniority: { type: String, default: "" },
     resumeText: { type: String, default: "" },
     jobDescription: { type: String, default: "" },
-    /** LLM extraction { skills[], experience, gaps[] } — degrades to empty. */
+    /** LLM extraction { skills[], experience, gaps[], terms[] } — degrades to empty. */
     analysis: { type: Schema.Types.Mixed, default: null },
+    /** Conversational glue (Step 35 F) generated with the question plan. */
+    greeting: { type: String, default: "" },
+    closing: { type: String, default: "" },
     turns: { type: [turnSchema], default: [] },
     currentIndex: { type: Number, default: 0, min: 0 },
     followUpsUsed: { type: Number, default: 0, min: 0 },
@@ -158,6 +161,11 @@ const mockInterviewAttemptSchema = new Schema(
     warnings: { type: Number, default: 0, min: 0 },
     terminated: { type: Boolean, default: false },
     terminatedReason: { type: String, default: "" },
+    /** Per-warning audit log (Step 35 B): [{ reason, at }]. Each entry records WHY
+     *  a warning fired — including camera "frame changed" signals (multiple_faces /
+     *  left_frame). These detect that the frame changed, NEVER who is in it (no
+     *  identity, no biometric template). Mixed to match `corrections`/`ai`. */
+    proctoringEvents: { type: Schema.Types.Mixed, default: [] },
   },
   { timestamps: true },
 );

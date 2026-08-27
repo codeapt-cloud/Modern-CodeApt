@@ -65,10 +65,18 @@ export const AI_ACTION_WEIGHTS: Record<string, number> = {
   // no follow-up); interview_grading rides the protected INTERACTIVE tier so
   // judgement survives a busy pool. The deterministic floor scores the session
   // regardless of any reserve failure. ---
-  interview_analysis: 1, // resume + JD → skills/experience/gaps (one pass)
-  interview_generation: 2, // role+resume+JD → the main question plan (big output)
-  interview_followup: 1, // one adaptive probe after an answer
+  interview_analysis: 1, // resume + JD → skills/experience/gaps + terms (one pass)
+  interview_generation: 2, // role+resume+JD → the main question plan + greeting/closing (big output)
+  interview_followup: 1, // one adaptive probe + a neutral acknowledgement after an answer
   interview_grading: 1, // one LLM judgement pass per answered turn
+  // Step 35 G: a contextual (mishearing) correction pass per ANSWERED turn. New
+  // per-answer LLM call, deferrable tier (degrade → the term-list correction still
+  // applies). Worst case answered turns = 12 mains + 6 follow-ups = 18, so this
+  // label adds up to 18 units; the per-SESSION worst case rises from ~21 to ~39
+  // (analysis 1 + generation 2 + grading ≤18 + follow-up decisions ≤6 spent +
+  // correction ≤18). Cache hits + degrades still cost 0; the deterministic floor
+  // scores the session regardless of any reserve failure.
+  interview_correction: 1,
 };
 export const DEFAULT_AI_ACTION_WEIGHT = 1;
 

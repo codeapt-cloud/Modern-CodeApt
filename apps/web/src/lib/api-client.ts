@@ -4277,9 +4277,11 @@ export const api = {
     recordWarning: async (
       slug: string,
       attemptId: string,
+      reason?: string,
     ): Promise<{ warnings: number; terminated: boolean }> => {
       const { data } = await http.post<{ warnings: number; terminated: boolean }>(
         `${API_PREFIX}/c/${slug}/interviews/attempts/${attemptId}/warning`,
+        { reason },
       );
       return data;
     },
@@ -4432,9 +4434,11 @@ export const api = {
     },
     recordWarning: async (
       attemptId: string,
+      reason?: string,
     ): Promise<{ warnings: number; terminated: boolean }> => {
       const { data } = await http.post<{ warnings: number; terminated: boolean }>(
         `${API_PREFIX}/interviews/attempts/${attemptId}/warning`,
+        { reason },
       );
       return data;
     },

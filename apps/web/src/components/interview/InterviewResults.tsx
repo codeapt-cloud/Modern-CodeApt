@@ -141,6 +141,12 @@ export function InterviewResults({
             <p className="text-xs text-ink-muted">
               Feedback from your camera. These never affect your score.
             </p>
+            {observations.maxFaces > 1 ? (
+              <p className="text-xs text-warning-fg">
+                More than one face was detected in view at times. This notes that the
+                frame changed — not who was in it.
+              </p>
+            ) : null}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm">
               <Dim label="Looking away" value={observations.pctLookingAway} note="% of frames" />
               <Dim label="Out of frame" value={observations.secondsOutOfFrame} note="seconds" />

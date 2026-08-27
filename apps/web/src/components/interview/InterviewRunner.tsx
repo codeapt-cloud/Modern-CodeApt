@@ -10,7 +10,7 @@
  * primed during the answer so it speaks with no post-submit setup.
  */
 import type { FluencyResult, StartMockInterviewResponse } from "@codeapt/shared";
-import { fluencyFromEnvelope } from "@codeapt/shared";
+import { composeSpokenQuestion, fluencyFromEnvelope } from "@codeapt/shared";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
@@ -85,6 +85,16 @@ export function InterviewRunner({
   const [terminated, setTerminated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
+  // The conversational line the avatar just spoke before the question (greeting on
+  // the first turn, then a neutral acknowledgement of the previous answer). F.
+  const [spokenPrefix, setSpokenPrefix] = useState("");
+
+  // Conversational glue: greeting (from the start payload), the latest server
+  // acknowledgement, and the closing — all spoken, never scored.
+  const greetingRef = useRef<string>(attempt.greeting ?? "");
+  const ackRef = useRef<string>("");
+  const closingRef = useRef<string>("");
+  const spokenCountRef = useRef(0);
 
   const sessionRef = useRef<RecognitionSession>(INITIAL_RECOGNITION_SESSION);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -221,6 +231,10 @@ export function InterviewRunner({
             recognitionFailed: capture.recognitionFailed,
             latencySeconds: Math.max(0, latencyMs / 1000),
           });
+          // Conversational glue for the next spoken line (F): the acknowledgement
+          // precedes the next question; the closing plays when the interview ends.
+          ackRef.current = res.acknowledgement ?? "";
+          closingRef.current = res.closing ?? "";
           dispatch({ type: "answered", response: res });
         } catch (err) {
           // The submit was rejected. NOT_CURRENT_TURN means our index is stale —
@@ -258,20 +272,38 @@ export function InterviewRunner({
   }, []);
 
   // Proctoring: the hardened Communication profile, 3-warning server termination.
-  const onWarning = useCallback(() => {
-    void engine
-      .recordWarning(attempt.attemptId)
-      .then((res) => {
-        setWarnings(res.warnings);
-        if (res.terminated) {
-          setTerminated(true);
-          recorder.stop();
-          onFinished(observationsRef.current);
-        }
-      })
-      .catch(() => setWarnings((n) => n + 1));
+  // A reason is recorded for camera "frame changed" signals (Step 35 B); the DOM
+  // proctoring hook fires without one. Both ride the SAME warning machinery.
+  const doWarning = useCallback(
+    (reason?: string) => {
+      void engine
+        .recordWarning(attempt.attemptId, reason)
+        .then((res) => {
+          setWarnings(res.warnings);
+          if (res.terminated) {
+            setTerminated(true);
+            recorder.stop();
+            onFinished(observationsRef.current);
+          }
+        })
+        .catch(() => setWarnings((n) => n + 1));
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, attempt.attemptId]);
+    [engine, attempt.attemptId],
+  );
+  const onWarning = useCallback(() => doWarning(), [doWarning]);
+
+  // Person-change (Part B): a second face, or a face that left and returned, is a
+  // proctoring warning through the same path — detected, NOT identified.
+  const lastPersonSeqRef = useRef(0);
+  useEffect(() => {
+    const sig = camera.personSignal;
+    if (!sig || sig.seq === lastPersonSeqRef.current) return;
+    lastPersonSeqRef.current = sig.seq;
+    if (state.finished || terminated) return; // no warnings once the interview is over
+    doWarning(sig.reason);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camera.personSignal]);
   useProctoring({
     active: !state.finished && !terminated,
     onWarning,
@@ -300,7 +332,14 @@ export function InterviewRunner({
     setLiveTranscript("");
     firstSpeechAtRef.current = null;
     const turnIndex = currentTurn.index;
-    voice.speak(currentTurn.question, {
+    // First spoken turn → greet; thereafter → acknowledge the previous answer.
+    // Each prefix is consumed once so a re-ask (resync) doesn't repeat it.
+    const prefix = spokenCountRef.current === 0 ? greetingRef.current : ackRef.current;
+    greetingRef.current = "";
+    ackRef.current = "";
+    spokenCountRef.current += 1;
+    setSpokenPrefix(prefix);
+    voice.speak(composeSpokenQuestion(prefix, currentTurn.question), {
       onEnd: () => {
         questionEndedAtRef.current = performance.now();
         dispatch({ type: "question_spoken" });
@@ -344,12 +383,17 @@ export function InterviewRunner({
     }
   }, [state.phase, recorder.level]);
 
-  // Finish once.
+  // Finish once — speak the closing line first (F), then hand off to the report.
   useEffect(() => {
     if (state.finished && !finishedRef.current) {
       finishedRef.current = true;
-      voice.cancel();
-      onFinished(observationsRef.current);
+      const closing = closingRef.current;
+      if (closing) {
+        voice.speak(closing, { onEnd: () => onFinished(observationsRef.current) });
+      } else {
+        voice.cancel();
+        onFinished(observationsRef.current);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.finished]);
@@ -419,7 +463,12 @@ export function InterviewRunner({
                 </div>
 
                 {state.phase === "asking" ? (
-                  <p className="text-sm text-ink-muted">The interviewer is asking…</p>
+                  <p className="text-sm text-ink-muted">
+                    {spokenPrefix ? (
+                      <span className="italic">“{spokenPrefix}” </span>
+                    ) : null}
+                    The interviewer is asking…
+                  </p>
                 ) : state.phase === "thinking" ? (
                   <p className="flex items-center gap-2 text-sm text-ink-muted">
                     <Loader2 className="h-4 w-4 animate-spin" /> Thinking about your answer…
