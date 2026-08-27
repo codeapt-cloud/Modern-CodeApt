@@ -39,7 +39,11 @@ export type InterviewEvent =
   | { type: "question_spoken" }
   | { type: "answer_submitting" }
   | { type: "answered"; response: SubmitInterviewAnswerResponse }
-  | { type: "prefetch_synthesized" };
+  | { type: "prefetch_synthesized" }
+  // Re-sync to the server's authoritative `current` after a stale submit (409
+  // NOT_CURRENT_TURN). Does NOT touch counters — nothing was newly answered, we
+  // just realign; the runner then re-asks whatever turn the server is really on.
+  | { type: "resynced"; current: InterviewCurrentResponse };
 
 export const INITIAL_INTERVIEW_STATE: InterviewRunnerState = {
   phase: "intro",
@@ -92,9 +96,29 @@ export function interviewReducer(
     }
     case "prefetch_synthesized":
       return { ...state, prefetchSynthesized: true };
+    case "resynced": {
+      const done = isInterviewDone(event.current);
+      return {
+        ...state,
+        current: event.current,
+        phase: done ? "done" : "asking",
+        finished: done,
+        prefetched: done ? null : event.current.nextMainQuestion,
+        prefetchSynthesized: false,
+      };
+    }
     default:
       return state;
   }
+}
+
+/** The index the runner must submit for the CURRENT turn — always read from the
+ *  live reducer state, never a captured constant (the Step-34.2 stale-index bug).
+ *  Null when finished/expired/no-turn. */
+export function currentTurnIndex(state: InterviewRunnerState): number | null {
+  const c = state.current;
+  if (!c || !c.turn || c.expired || state.finished) return null;
+  return c.currentIndex;
 }
 
 /**

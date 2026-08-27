@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   INITIAL_INTERVIEW_STATE,
+  currentTurnIndex,
   interviewReducer,
   isInterviewDone,
   nextSpokenQuestion,
@@ -130,6 +131,92 @@ describe("wasPrefetchHit — B1: next question ready before submit returns", () 
   });
   it("MISSes when nothing was prefetched", () => {
     expect(wasPrefetchHit(null, submitRes())).toBe(false);
+  });
+});
+
+describe("turn-index tracking — the real loop (Step-34.2 stale-index regression)", () => {
+  // This drives the loop the way the COMPONENT now must: the submit index is read
+  // from currentTurnIndex(state) EVERY turn, and each server response advances the
+  // state. If the runner ever reverts to a captured index, this sequence breaks.
+  it("submits the LIVE index 0 → 1 (follow-up) → 2, never repeating", () => {
+    let s = interviewReducer(INITIAL_INTERVIEW_STATE, {
+      type: "started",
+      current: current({
+        currentIndex: 0,
+        turn: turn(0),
+        nextMainQuestion: { index: 1, question: "Q1", category: "technical" },
+      }),
+    });
+    const serverResponses: SubmitInterviewAnswerResponse[] = [
+      // answer 0 → a follow-up is spliced at index 1; the main shifts to 2.
+      submitRes({
+        index: 0,
+        followUpAdded: true,
+        current: current({
+          currentIndex: 1,
+          turn: turn(1, { isFollowUp: true, question: "Probe?" }),
+          nextMainQuestion: { index: 2, question: "Q1", category: "technical" },
+        }),
+      }),
+      // answer 1 (the follow-up) → the next main at index 2.
+      submitRes({
+        index: 1,
+        followUpAdded: false,
+        current: current({
+          currentIndex: 2,
+          turn: turn(2, { category: "technical" }),
+          nextMainQuestion: null,
+        }),
+      }),
+      // answer 2 → scored / done.
+      submitRes({
+        index: 2,
+        followUpAdded: false,
+        current: current({ status: "scored", turn: null, nextMainQuestion: null }),
+      }),
+    ];
+
+    const submitted: number[] = [];
+    let i = 0;
+    while (currentTurnIndex(s) !== null) {
+      const idx = currentTurnIndex(s)!; // the runner's ONLY index source
+      submitted.push(idx);
+      const res = serverResponses[i]!;
+      // The client must submit exactly the index the server is waiting on.
+      expect(res.index).toBe(idx);
+      s = interviewReducer(s, { type: "answered", response: res });
+      i += 1;
+    }
+    expect(submitted).toEqual([0, 1, 2]);
+    expect(s.finished).toBe(true);
+  });
+
+  it("a stale-index 409 recovers via resync: realign to the server's turn, no counter bump", () => {
+    let s = interviewReducer(INITIAL_INTERVIEW_STATE, {
+      type: "started",
+      current: current({ currentIndex: 0, turn: turn(0) }),
+    });
+    const answeredBefore = s.turnsAnswered;
+    // The server has already advanced to a follow-up at index 1 (our submit of 0
+    // 409'd). The runner fetches fresh `current` and resyncs.
+    const fresh = current({
+      currentIndex: 1,
+      turn: turn(1, { isFollowUp: true }),
+      nextMainQuestion: { index: 2, question: "Q1", category: "technical" },
+    });
+    s = interviewReducer(s, { type: "resynced", current: fresh });
+    expect(currentTurnIndex(s)).toBe(1); // now submits 1, not the stale 0
+    expect(s.turnsAnswered).toBe(answeredBefore); // resync is not an answer
+    expect(s.phase).toBe("asking"); // re-asks the resynced turn, never spins
+    expect(s.finished).toBe(false);
+  });
+
+  it("currentTurnIndex is null once finished/expired (loop terminates)", () => {
+    const done = interviewReducer(INITIAL_INTERVIEW_STATE, {
+      type: "started",
+      current: current({ status: "scored", turn: null }),
+    });
+    expect(currentTurnIndex(done)).toBeNull();
   });
 });
 

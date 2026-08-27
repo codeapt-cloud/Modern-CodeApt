@@ -37,6 +37,7 @@ import {
   shouldRestartRecognizer,
   type RecognitionSession,
 } from "../../lib/recognition-session.js";
+import { parseApiError } from "../../lib/api-client.js";
 import { uploadAudioToCloudinary } from "../../lib/audio-upload.js";
 import { useAudioRecorder } from "../../lib/use-audio-recorder.js";
 import { useInterviewVoice } from "../../lib/use-interview-voice.js";
@@ -82,6 +83,7 @@ export function InterviewRunner({
   const voice = useInterviewVoice();
   const [warnings, setWarnings] = useState(0);
   const [terminated, setTerminated] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
 
   const sessionRef = useRef<RecognitionSession>(INITIAL_RECOGNITION_SESSION);
@@ -91,6 +93,11 @@ export function InterviewRunner({
   const spokenIndexRef = useRef<number>(-1);
   const observationsRef = useRef<ObservationSummary | null>(null);
   const finishedRef = useRef(false);
+  // The LIVE reducer state, mirrored into a ref so the recorder's onUpload
+  // callback (whose identity is stable across turns) always reads the CURRENT
+  // turn index + attemptId — never the stale value captured at first render.
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const currentTurn = state.current?.turn ?? null;
 
@@ -189,7 +196,10 @@ export function InterviewRunner({
     windowSeconds: ANSWER_WINDOW_SECONDS,
     onUpload: useCallback(
       async (blob: Blob) => {
-        if (submittingRef.current || !state.current?.turn) return;
+        // Read the LIVE turn from the ref — the closure identity is stable across
+        // turns, so `state` captured here would be turn 0 forever (the bug).
+        const live = stateRef.current.current;
+        if (submittingRef.current || !live?.turn) return;
         submittingRef.current = true;
         stopTurnRecognition();
         dispatch({ type: "answer_submitting" });
@@ -199,32 +209,37 @@ export function InterviewRunner({
           firstSpeechAtRef.current !== null
             ? firstSpeechAtRef.current - questionEndedAtRef.current
             : 0;
+        const attemptId = live.attemptId;
+        const turnIndex = live.currentIndex;
         try {
           const audioUrl = await uploadAudioToCloudinary(engine.uploadSignature, blob);
           const capture = await captureBrowserResult(blob);
-          const res = await engine.submitAnswer(
-            state.current.attemptId,
-            state.current.currentIndex,
-            {
-              audioUrl,
-              transcript: capture.transcript,
-              fluency: capture.fluency,
-              recognitionFailed: capture.recognitionFailed,
-              latencySeconds: Math.max(0, latencyMs / 1000),
-            },
-          );
+          const res = await engine.submitAnswer(attemptId, turnIndex, {
+            audioUrl,
+            transcript: capture.transcript,
+            fluency: capture.fluency,
+            recognitionFailed: capture.recognitionFailed,
+            latencySeconds: Math.max(0, latencyMs / 1000),
+          });
           dispatch({ type: "answered", response: res });
-        } catch {
-          // Upload/submit failed — submit a silent answer so the loop advances.
-          try {
-            const res = await engine.submitAnswer(
-              state.current.attemptId,
-              state.current.currentIndex,
-              { silent: true },
-            );
-            dispatch({ type: "answered", response: res });
-          } catch {
-            /* leave in thinking; the reaper/expiry backstops an abandoned attempt */
+        } catch (err) {
+          // The submit was rejected. NOT_CURRENT_TURN means our index is stale —
+          // RE-SYNC from the server's authoritative `current` and continue (never
+          // blindly re-submit the same index; never spin forever). Anything else
+          // is surfaced as an error, exiting the "thinking" state.
+          const code = parseApiError(err).code;
+          if (code === "NOT_CURRENT_TURN") {
+            try {
+              const fresh = await engine.current(attemptId);
+              spokenIndexRef.current = -1; // allow the resynced turn to be re-asked
+              dispatch({ type: "resynced", current: fresh });
+            } catch {
+              setError("We lost sync with the interview. Please refresh to continue.");
+            }
+          } else if (code === "ATTEMPT_EXPIRED") {
+            setError("This interview's time has expired.");
+          } else {
+            setError("We couldn't submit that answer. Check your connection and try again.");
           }
         } finally {
           submittingRef.current = false;
@@ -341,6 +356,16 @@ export function InterviewRunner({
 
   if (!supported) {
     return <Alert variant="error">{SUPPORTED_BROWSERS_MESSAGE}</Alert>;
+  }
+  if (error) {
+    return (
+      <div className="space-y-3">
+        <Alert variant="error">{error}</Alert>
+        <Button variant="secondary" onClick={() => onFinished(observationsRef.current)}>
+          See your report so far
+        </Button>
+      </div>
+    );
   }
   if (terminated) {
     return (
