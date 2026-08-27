@@ -125,6 +125,9 @@ import {
   EnrollResult,
   GAME_DEFAULT_CLOCK_SECONDS,
   ESSAY_MAX_CONTENT_CHARS,
+  INTERVIEW_RESUME_MAX_CHARS,
+  INTERVIEW_JOB_DESCRIPTION_MAX_CHARS,
+  INTERVIEW_ROLE_MAX_CHARS,
   ESSAY_SCORE_WEIGHTS,
   EMAIL_SCORE_WEIGHTS,
   EXECUTION_PURPOSE_VALUES,
@@ -7039,9 +7042,9 @@ export type MockInterviewPlayListResponse = z.infer<
 /** START intake — the student supplies a resume (paste), a JD, and (optionally)
  *  a target role overriding the assessment default. Text only; no file upload. */
 export const startMockInterviewRequestSchema = z.object({
-  resumeText: z.string().trim().min(1).max(20000),
-  jobDescription: z.string().trim().max(20000).default(""),
-  role: z.string().trim().max(200).optional(),
+  resumeText: z.string().trim().min(1).max(INTERVIEW_RESUME_MAX_CHARS),
+  jobDescription: z.string().trim().max(INTERVIEW_JOB_DESCRIPTION_MAX_CHARS).default(""),
+  role: z.string().trim().max(INTERVIEW_ROLE_MAX_CHARS).optional(),
 });
 export type StartMockInterviewRequest = z.infer<
   typeof startMockInterviewRequestSchema

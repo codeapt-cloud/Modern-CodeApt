@@ -58,20 +58,21 @@ export type AvatarStatus =
   | "skipped-slow"
   | "failed";
 
-function statusTextFor(status: AvatarStatus, progress: number): string {
+function statusTextFor(status: AvatarStatus, progress: number, detail = ""): string {
+  const d = detail ? ` (${detail})` : "";
   switch (status) {
     case "loading":
       return `3D avatar loading… ${Math.round(progress * 100)}%`;
     case "unavailable-browser":
       return "3D avatar unavailable in this browser";
     case "unavailable-asset":
-      return "3D avatar unavailable — model not found (deploy the avatar file)";
+      return `3D avatar unavailable — model not found${d}`;
     case "skipped-datasaver":
       return "3D avatar skipped — data saver is on";
     case "skipped-slow":
       return "3D avatar skipped — connection too slow";
     case "failed":
-      return "3D avatar failed to load — using the simple avatar";
+      return `3D avatar failed to load${d} — using the simple avatar`;
     case "off":
     case "ready":
     default:
@@ -128,6 +129,9 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
   const [neuralActive, setNeuralActive] = useState(false);
   const [status, setStatus] = useState<AvatarStatus>(initialStatus);
   const [speaking, setSpeaking] = useState(false);
+  // A short, human reason for the current status (from the actual caught error) —
+  // never a swallowed failure. Shown in the UI and logged to the console.
+  const [detail, setDetail] = useState("");
 
   const controllerRef = useRef<AvatarController | null>(null);
   const containerRef = useRef<HTMLElement | null>(null);
@@ -150,10 +154,27 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
   const preload = useCallback(() => {
     if (preloadStartedRef.current) return;
     preloadStartedRef.current = true;
-    if (choice.tier === "speech-only") return; // status already set; SS is ready
+    // Every stage logs, so the sequence is visible in the console — no swallowed
+    // failures (Step 37.7). `msg(e)` extracts a readable reason from any throw.
+    const msg = (e: unknown): string =>
+      (e as { reason?: string })?.reason ||
+      (e as { message?: string })?.message ||
+      String(e);
+    const fail = (statusValue: AvatarStatus, e: unknown, where: string): void => {
+      console.error(`[avatar] ${where} FAILED:`, e);
+      setDetail(msg(e));
+      setStatus(statusValue);
+    };
+    console.info(
+      `[avatar] preload: tier=${choice.tier} forced=${choice.forced} motion=${choice.motion} reason="${choice.reason}" url=${AVATAR_GLB_URL}`,
+    );
+    if (choice.tier === "speech-only") {
+      console.info(`[avatar] preload: speech-only (${choice.reason}) — no 3D load.`);
+      return;
+    }
     const container = ensureContainer();
     if (!container) {
-      setStatus("failed");
+      fail("failed", new Error("no DOM container (document unavailable)"), "ensureContainer");
       return;
     }
     setStatus("loading");
@@ -161,6 +182,7 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
       // 1. MEASURED GLB fetch (never blocks the interview; aborts if truly slow).
       let objectUrl: string;
       try {
+        console.info(`[avatar] preload: fetching GLB ${AVATAR_GLB_URL} …`);
         const res = await fetchGlbObjectUrl(AVATAR_GLB_URL, {
           forced: choice.forced,
           onProgress: (loaded, total) => {
@@ -168,26 +190,35 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
           },
         });
         objectUrl = res.objectUrl;
+        console.info(`[avatar] preload: GLB ok (${res.bytes} bytes) → ${objectUrl}`);
       } catch (e) {
         const reason = (e as { reason?: GlbFailReason })?.reason;
-        setStatus(
+        fail(
           reason === "too-slow"
             ? "skipped-slow"
             : reason === "not-found" || reason === "not-glb"
               ? "unavailable-asset"
               : "failed",
+          e,
+          "GLB fetch",
         );
         return;
       }
       // 2. Build the avatar from the in-memory GLB (no re-download).
       try {
+        console.info("[avatar] preload: importing talkinghead-controller chunk …");
         const { createAvatarController } = await import("./avatar/talkinghead-controller.js");
+        console.info("[avatar] preload: controller chunk loaded; constructing TalkingHead …");
         const controller = await createAvatarController(container, {
           motion: choice.motion,
           glbUrl: objectUrl,
         });
         if (!controller) {
-          setStatus("failed");
+          fail(
+            "failed",
+            new Error("createAvatarController returned null — TalkingHead/three init threw (see the [avatar] controller error above)"),
+            "createAvatarController",
+          );
           return;
         }
         controllerRef.current = controller;
@@ -195,14 +226,21 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
         avatarVisibleRef.current = true;
         setAvatarVisible(true);
         setStatus("ready");
+        setDetail("");
+        console.info("[avatar] preload: avatar READY.");
         if (choice.tier === "3d-neural") {
-          void controller.enableNeural().then((ok) => ok && setNeuralActive(true));
+          void controller
+            .enableNeural()
+            .then((ok) => {
+              console.info(`[avatar] neural voice ${ok ? "connected" : "unavailable (using browser voice)"}`);
+              if (ok) setNeuralActive(true);
+            });
         }
-      } catch {
-        setStatus("failed");
+      } catch (e) {
+        fail("failed", e, "controller import/construct");
       }
     })();
-  }, [choice.tier, choice.motion, choice.forced, ensureContainer]);
+  }, [choice.tier, choice.motion, choice.forced, choice.reason, ensureContainer]);
 
   const attach = useCallback((el: HTMLElement | null) => {
     const container = containerRef.current;
@@ -285,7 +323,7 @@ export function useInterviewAvatar(enabled = true, neural: NeuralPolicy = "off")
     is3d: tier !== "speech-only" && status !== "failed" && status !== "unavailable-asset" && status !== "skipped-slow",
     motion: choice.motion,
     status,
-    statusText: statusTextFor(status, progress),
+    statusText: statusTextFor(status, progress, detail),
     preload,
     attach,
     setUiState,

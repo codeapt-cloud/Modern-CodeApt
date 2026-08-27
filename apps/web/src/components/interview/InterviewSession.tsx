@@ -8,6 +8,7 @@
 import type { StartMockInterviewResponse } from "@codeapt/shared";
 import { useEffect, useState } from "react";
 
+import { parseApiError } from "../../lib/api-client.js";
 import type { SessionObservations } from "../../lib/camera-observation.js";
 import type { InterviewEngine } from "../../lib/interview-engine.js";
 import { useCameraObservation } from "../../lib/use-camera-observation.js";
@@ -51,8 +52,16 @@ export function InterviewSession({
       const res = await start(values);
       setAttempt(res);
       setPhase("run");
-    } catch {
-      setError("Could not start the interview. Please try again.");
+    } catch (err) {
+      // Surface the real reason instead of a generic message (the too-long-paste
+      // 400 was previously hidden). The intake blocks over-limit text before we
+      // get here, so this is the belt-and-braces server message.
+      const { code, message } = parseApiError(err);
+      setError(
+        code === "VALIDATION_ERROR"
+          ? "Your resume or job description is too long, or a field is invalid — shorten the text and try again."
+          : message || "Could not start the interview. Please try again.",
+      );
     } finally {
       setStarting(false);
     }

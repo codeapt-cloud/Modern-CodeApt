@@ -500,6 +500,13 @@ export const INTERVIEW_PREP_SECONDS = 20;
  *  camera-observation layer (Part 2). */
 export const INTERVIEW_MAX_WARNINGS = 3;
 
+/** Intake text limits (Step 37.6). Shared by the request schema AND the intake UI
+ *  so the client can show a live count + block an over-limit submit, instead of the
+ *  server rejecting a long paste with an opaque 400. */
+export const INTERVIEW_RESUME_MAX_CHARS = 20000;
+export const INTERVIEW_JOB_DESCRIPTION_MAX_CHARS = 20000;
+export const INTERVIEW_ROLE_MAX_CHARS = 200;
+
 /** Default score awarded for a correct daily/quiz MCQ. */
 export const MCQ_CORRECT_MARKS = 5;
 

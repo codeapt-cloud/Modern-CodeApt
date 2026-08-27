@@ -4,6 +4,10 @@
  * no PDF extraction and the resume is personal data we keep minimal; see Part 1).
  * The text drives LLM question generation server-side.
  */
+import {
+  INTERVIEW_JOB_DESCRIPTION_MAX_CHARS,
+  INTERVIEW_RESUME_MAX_CHARS,
+} from "@codeapt/shared";
 import { useState } from "react";
 
 import { Alert } from "../ui/alert.js";
@@ -31,7 +35,17 @@ export function InterviewIntake({
   const [resumeText, setResumeText] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [role, setRole] = useState(defaultRole);
-  const ready = resumeText.trim().length > 0 && role.trim().length > 0;
+  // The server rejects an over-limit paste with an opaque 400; catch it here with a
+  // live count + a clear message, and block the submit (Step 37.6).
+  const resumeOver = resumeText.trim().length > INTERVIEW_RESUME_MAX_CHARS;
+  const jdOver = jobDescription.trim().length > INTERVIEW_JOB_DESCRIPTION_MAX_CHARS;
+  const ready =
+    resumeText.trim().length > 0 && role.trim().length > 0 && !resumeOver && !jdOver;
+  const counter = (len: number, max: number): JSX.Element => (
+    <span className={`text-[11px] ${len > max ? "text-error-fg" : "text-ink-muted"}`}>
+      {len.toLocaleString()} / {max.toLocaleString()} characters
+    </span>
+  );
 
   return (
     <Card>
@@ -54,7 +68,10 @@ export function InterviewIntake({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="iv-resume">Resume (paste text)</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="iv-resume">Resume (paste text)</Label>
+            {counter(resumeText.trim().length, INTERVIEW_RESUME_MAX_CHARS)}
+          </div>
           <Textarea
             id="iv-resume"
             rows={7}
@@ -64,7 +81,10 @@ export function InterviewIntake({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="iv-jd">Job description (optional)</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="iv-jd">Job description (optional)</Label>
+            {counter(jobDescription.trim().length, INTERVIEW_JOB_DESCRIPTION_MAX_CHARS)}
+          </div>
           <Textarea
             id="iv-jd"
             rows={5}
@@ -73,7 +93,17 @@ export function InterviewIntake({
             placeholder="Paste the job description…"
           />
         </div>
-        {!ready ? (
+        {resumeOver || jdOver ? (
+          <Alert variant="error">
+            {resumeOver ? "Your resume" : "The job description"} is too long — please
+            shorten it to under{" "}
+            {(resumeOver
+              ? INTERVIEW_RESUME_MAX_CHARS
+              : INTERVIEW_JOB_DESCRIPTION_MAX_CHARS
+            ).toLocaleString()}{" "}
+            characters. Paste the relevant text, not an entire document.
+          </Alert>
+        ) : resumeText.trim().length === 0 || role.trim().length === 0 ? (
           <Alert variant="info">A resume and a target role are required to begin.</Alert>
         ) : null}
         <Button

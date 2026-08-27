@@ -116,6 +116,7 @@ export async function createAvatarController(
     });
     // Wire the bundled lip-sync processor directly (ctor set `this.lipsync = {}`).
     (head as unknown as { lipsync: Record<string, unknown> }).lipsync.en = new lip.LipsyncEn();
+    console.info("[avatar] controller: TalkingHead constructed, loading GLB …");
     // The hook has already fetched the GLB (measured + validated) into an object
     // URL; TalkingHead loads it from memory (no re-download). Falls back to the
     // path if none was supplied.
@@ -125,7 +126,10 @@ export async function createAvatarController(
       lipsyncLang: "en",
       avatarMood: "neutral",
     });
-  } catch {
+    console.info("[avatar] controller: showAvatar done — 3D avatar ready.");
+  } catch (e) {
+    // Do NOT swallow: this is the throw that leaves the interview on the SVG.
+    console.error("[avatar] controller: TalkingHead/three/GLB init threw:", e);
     return null; // 3D avatar failed → caller stays on the static SVG
   }
 
@@ -148,8 +152,8 @@ export async function createAvatarController(
       const { words, wtimes, wdurations } = estimatedWordTimings(text, durationMs);
       const buf = silentCtx.createBuffer(1, Math.max(1, Math.round((durationMs / 1000) * 22050)), 22050);
       head.speakAudio({ audio: buf, words, wtimes, wdurations }, { isRaw: true });
-    } catch {
-      /* mouth won't move this turn; the hook still plays the audio */
+    } catch (e) {
+      console.warn("[avatar] estimated lip-sync failed this turn (audio still plays):", e);
     }
   }
 
@@ -173,7 +177,8 @@ export async function createAvatarController(
         await inst.connect();
         tts = inst;
         return true;
-      } catch {
+      } catch (e) {
+        console.warn("[avatar] neural TTS (HeadTTS/Kokoro) unavailable — browser voice:", e);
         tts = null;
         return false;
       }
@@ -195,7 +200,8 @@ export async function createAvatarController(
           if (vt.length) last = Math.max(last, (vt[vt.length - 1] ?? 0) + (vd[vd.length - 1] ?? 0));
         }
         if (last > 0) endMs = last;
-      } catch {
+      } catch (e) {
+        console.warn("[avatar] neural synth failed for this turn — estimated mouth:", e);
         speakEstimated(text, endMs);
       }
       await new Promise<void>((r) => setTimeout(r, endMs + 250));
