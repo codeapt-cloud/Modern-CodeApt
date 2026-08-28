@@ -94,6 +94,7 @@ import {
   type CollegeStudentPostingListResponse,
   type CreateCollegePostingInput,
   type CollegeSummaryResponse,
+  type CollegeInterviewCredits,
   type CollegeListResponse,
   type CreateCollegeAdminInput,
   type CollegeStudent,
@@ -4282,6 +4283,12 @@ export const api = {
       const { data } = await http.post<{ warnings: number; terminated: boolean }>(
         `${API_PREFIX}/c/${slug}/interviews/attempts/${attemptId}/warning`,
         { reason },
+      );
+      return data;
+    },
+    credits: async (slug: string): Promise<CollegeInterviewCredits> => {
+      const { data } = await http.get<CollegeInterviewCredits>(
+        `${API_PREFIX}/c/${slug}/interviews/credits`,
       );
       return data;
     },

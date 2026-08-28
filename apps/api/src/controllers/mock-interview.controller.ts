@@ -132,6 +132,12 @@ export const listCollegeInterviewsController = asyncHandler(
     res.status(200).json(await interview.listCollegeInterviews(tenantId(req)));
   },
 );
+/** College-admin/faculty readout of the interview credit quota (Step 38). */
+export const interviewCreditsController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(200).json(await interview.interviewCreditsStatus(tenantId(req)));
+  },
+);
 export const createCollegeInterviewController = asyncHandler(
   async (req: Request, res: Response) => {
     const input = mockInterviewUpsertSchema.parse(req.body);

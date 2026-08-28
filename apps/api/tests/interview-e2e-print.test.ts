@@ -11,6 +11,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 
 import { createApp } from "../src/app.js";
+import { CollegeModel } from "../src/models/college.model.js";
 import { UserModel } from "../src/models/user.model.js";
 import * as colleges from "../src/services/college.service.js";
 
@@ -84,6 +85,11 @@ describe("mock interview — end-to-end transcript", () => {
     const dto = await colleges.createCollege({ name: "e2e", slug: "mi-e2e" }, platform.userId);
     await colleges.setEntitlements(dto.id, { features: { interview: true } });
     await colleges.setEntitlements(dto.id, { subCapabilities: { "interview.interview": true } });
+    // Grant mock-interview credits (Step 38 quota) so the start isn't blocked.
+    await CollegeModel.updateOne(
+      { _id: new Types.ObjectId(dto.id) },
+      { $set: { "credits.interviewCredits": 100 } },
+    );
     const admin = await makeUser({ role: Role.COLLEGE_ADMIN, userType: UserType.COLLEGE, college: new Types.ObjectId(dto.id) });
     const unit = await request(app).post(`/api/c/mi-e2e/org-units`).set(auth(admin.token)).send({ type: "department", name: "D" });
     const created = await request(app).post(`/api/c/mi-e2e/students`).set(auth(admin.token)).send({ fullName: "Asha", email: "asha@x.com", rollNumber: "R1", orgUnitId: unit.body.id });

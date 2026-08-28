@@ -35,6 +35,7 @@ import {
   PenLine,
   Plus,
   Sparkles,
+  Ticket,
   Trophy,
   Upload,
   Users,
@@ -172,6 +173,15 @@ export function CollegeDashboardPage() {
     [slug, aiOn],
   );
   const credits = creditsQuery.data;
+
+  // Mock-interview credit readout (Step 38) — the super-admin-granted total,
+  // used, and remaining. Only when the interview feature is on.
+  const interviewOn = checkEntitlement(entitlements, CollegeFeature.INTERVIEW);
+  const interviewCreditsQuery = useQuery(
+    () => (interviewOn ? api.collegeInterview.credits(slug) : Promise.resolve(null)),
+    [slug, interviewOn],
+  );
+  const interviewCredits = interviewCreditsQuery.data;
 
   const sections = resolveSections(entitlements);
   const enabled = enabledFeatureCount(entitlements);
@@ -376,6 +386,46 @@ export function CollegeDashboardPage() {
                 ))}
               </div>
             ) : null}
+          </Card>
+        </Reveal>
+      ) : null}
+
+      {/* Mock-interview credits (Step 38) — read-only quota readout for operators. */}
+      {interviewOn && interviewCredits ? (
+        <Reveal variant="fadeInUp">
+          <Card className="p-5">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Ticket className="h-4 w-4 text-primary" />
+                <h2 className="font-semibold text-ink">Mock-interview credits</h2>
+                <span className="text-xs text-ink-muted">· 1 credit = 1 interview</span>
+              </div>
+              {interviewCredits.remaining === 0 ? (
+                <span className="rounded-full bg-error/10 px-2.5 py-0.5 text-xs font-medium text-error-fg">
+                  None left — contact your administrator
+                </span>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-xl border border-subtle bg-surface-base px-3 py-2">
+                <div className="text-xs text-ink-muted">Remaining</div>
+                <div className="font-mono text-lg font-semibold text-ink">
+                  {interviewCredits.remaining}
+                </div>
+              </div>
+              <div className="rounded-xl border border-subtle bg-surface-base px-3 py-2">
+                <div className="text-xs text-ink-muted">Granted</div>
+                <div className="font-mono text-lg font-semibold text-ink">
+                  {interviewCredits.granted}
+                </div>
+              </div>
+              <div className="rounded-xl border border-subtle bg-surface-base px-3 py-2">
+                <div className="text-xs text-ink-muted">Used</div>
+                <div className="font-mono text-lg font-semibold text-ink">
+                  {interviewCredits.used}
+                </div>
+              </div>
+            </div>
           </Card>
         </Reveal>
       ) : null}

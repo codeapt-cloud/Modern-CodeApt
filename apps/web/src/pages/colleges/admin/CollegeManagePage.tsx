@@ -25,6 +25,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { CollegeAdminDialog } from "../../../components/colleges/admin/CollegeAdminDialog.js";
 import { CollegeEditorDialog } from "../../../components/colleges/admin/CollegeEditorDialog.js";
 import { CreditsCard } from "../../../components/colleges/admin/CreditsCard.js";
+import { InterviewCreditsCard } from "../../../components/colleges/admin/InterviewCreditsCard.js";
 import { LoginBrandingCard } from "../../../components/colleges/admin/LoginBrandingCard.js";
 import { PageHeader } from "../../../components/layout/PageHeader.js";
 import { Alert } from "../../../components/ui/alert.js";
@@ -271,6 +272,9 @@ export function CollegeManagePage() {
 
       {/* AI credits (Stage 1) — per-college monthly AI budget */}
       <CreditsCard collegeId={collegeId} />
+
+      {/* Mock-interview credits (Step 38) — one-time settable total, 1 = 1 interview */}
+      <InterviewCreditsCard collegeId={collegeId} />
 
       {/* Login branding — public skin of /c/:slug/login */}
       <LoginBrandingCard

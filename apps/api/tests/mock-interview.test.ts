@@ -20,9 +20,18 @@ import {
   SubjectModel,
   TopicModel,
 } from "../src/models/curriculum.model.js";
+import { CollegeModel } from "../src/models/college.model.js";
 import { MockInterviewModel } from "../src/models/mock-interview.model.js";
 import { UserModel } from "../src/models/user.model.js";
 import * as colleges from "../src/services/college.service.js";
+
+/** Grant a college N mock-interview credits (Step 38 quota). */
+async function grantInterviewCredits(collegeId: string, n: number): Promise<void> {
+  await CollegeModel.updateOne(
+    { _id: new Types.ObjectId(collegeId) },
+    { $set: { "credits.interviewCredits": n } },
+  );
+}
 
 let app: Express;
 beforeAll(() => {
@@ -106,6 +115,7 @@ async function setupCollege(slug: string): Promise<{ collegeId: string; adminTok
   const dto = await colleges.createCollege({ name: slug, slug }, platform.userId);
   await colleges.setEntitlements(dto.id, { features: { interview: true } });
   await colleges.setEntitlements(dto.id, { subCapabilities: { "interview.interview": true } });
+  await grantInterviewCredits(dto.id, 100); // generous default so start tests pass
   const admin = await makeUser({
     role: Role.COLLEGE_ADMIN,
     userType: UserType.COLLEGE,
@@ -271,6 +281,65 @@ describe("degrade — AI unavailable", () => {
     expect(dims.vocabulary).toBeGreaterThan(0);
     expect(dims.concept).toBeNull(); // AI dimensions reweighted out
     expect(typeof result.overall).toBe("number"); // still a real score
+  });
+});
+
+describe("interview credits (Step 38 — 1 credit = 1 interview started)", () => {
+  it("blocks the start with NO_CREDITS when the college has none; status reflects it", async () => {
+    goodRouter();
+    const { collegeId, adminToken } = await setupCollege("mi-cred0");
+    await grantInterviewCredits(collegeId, 0);
+    const student = await addStudent("mi-cred0", adminToken, "c0@x.com");
+    const id = await makeCollegeInterview("mi-cred0", adminToken);
+
+    const res = await request(app)
+      .post(`/api/c/mi-cred0/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("NO_CREDITS");
+
+    const st = await request(app)
+      .get(`/api/c/mi-cred0/interviews/credits`)
+      .set(auth(adminToken));
+    expect(st.status).toBe(200);
+    expect(st.body).toMatchObject({ granted: 0, used: 0, remaining: 0 });
+  });
+
+  it("allows exactly the granted number of interviews, then blocks (used counts each start)", async () => {
+    goodRouter();
+    const { collegeId, adminToken } = await setupCollege("mi-cred2");
+    await grantInterviewCredits(collegeId, 2);
+    const student = await addStudent("mi-cred2", adminToken, "c2@x.com");
+    // maxAttempts 0 = unlimited per-user, so the COLLEGE credit is the only cap.
+    const id = await makeCollegeInterview("mi-cred2", adminToken, { maxAttempts: 0 });
+
+    const start = () =>
+      request(app)
+        .post(`/api/c/mi-cred2/interviews/${id}/attempts`)
+        .set(auth(student.token))
+        .send(START_BODY);
+
+    expect((await start()).status).toBe(201); // 1st
+    expect((await start()).status).toBe(201); // 2nd
+    const third = await start();
+    expect(third.status).toBe(409);
+    expect(third.body.error.code).toBe("NO_CREDITS");
+
+    const st = await request(app)
+      .get(`/api/c/mi-cred2/interviews/credits`)
+      .set(auth(adminToken));
+    expect(st.body).toMatchObject({ granted: 2, used: 2, remaining: 0 });
+  });
+
+  it("the credits readout endpoint is operator-only (a student can't read it)", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-credr");
+    const student = await addStudent("mi-credr", adminToken, "cr@x.com");
+    const res = await request(app)
+      .get(`/api/c/mi-credr/interviews/credits`)
+      .set(auth(student.token));
+    expect(res.status).toBe(403);
   });
 });
 

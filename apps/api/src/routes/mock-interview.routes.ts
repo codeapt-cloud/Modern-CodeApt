@@ -11,6 +11,7 @@ import { Router } from "express";
 import {
   clearInterviewAttemptController,
   createCollegeInterviewController,
+  interviewCreditsController,
   deleteCollegeInterviewController,
   getCollegeInterviewController,
   interviewCohortController,
@@ -107,6 +108,13 @@ collegeInterviewRouter.post(
   "/c/:collegeSlug/interviews",
   ...author,
   createCollegeInterviewController,
+);
+// Interview-credit quota readout for the college dashboard (Step 38). Literal
+// path — must precede "/interviews/:assessmentId" so it isn't read as an id.
+collegeInterviewRouter.get(
+  "/c/:collegeSlug/interviews/credits",
+  ...author,
+  interviewCreditsController,
 );
 collegeInterviewRouter.post(
   "/c/:collegeSlug/interviews/tts",

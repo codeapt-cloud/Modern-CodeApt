@@ -3697,8 +3697,23 @@ export const collegeCreditsSchema = z.object({
    * each student's own allocation (no allocation → no AI).
    */
   perStudentDistribution: z.boolean().default(false),
+  /**
+   * MOCK-INTERVIEW quota (separate from the AI token budget above): a one-time
+   * settable TOTAL number of interviews the college may run — 1 credit = 1
+   * interview started. Super-admin controlled; depletes as interviews run and is
+   * topped up by raising this number. Not monthly-resetting.
+   */
+  interviewCredits: z.number().int().nonnegative().default(0),
 });
 export type CollegeCredits = z.infer<typeof collegeCreditsSchema>;
+
+/** College-admin readout of the interview quota: total granted, used, remaining. */
+export const collegeInterviewCreditsSchema = z.object({
+  granted: z.number().int().nonnegative(),
+  used: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+});
+export type CollegeInterviewCredits = z.infer<typeof collegeInterviewCreditsSchema>;
 
 export const collegeSchema = z.object({
   id: z.string(),
@@ -3722,6 +3737,8 @@ export const setCollegeCreditsSchema = z
     tier: aiCreditTierSchema.optional(),
     /** Explicit monthly credits (null clears the override → use the tier). */
     monthlyOverride: z.number().int().nonnegative().nullable().optional(),
+    /** The one-time mock-interview total (1 credit = 1 interview). */
+    interviewCredits: z.number().int().nonnegative().optional(),
     /** Zero this period's consumption (adjust/reset). */
     reset: z.boolean().optional(),
   })

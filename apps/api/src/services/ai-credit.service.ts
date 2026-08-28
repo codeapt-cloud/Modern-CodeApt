@@ -209,6 +209,11 @@ export async function setCredits(
   if (input.monthlyOverride !== undefined) {
     college.credits.monthlyOverride = input.monthlyOverride;
   }
+  if (input.interviewCredits !== undefined) {
+    // The one-time mock-interview TOTAL (1 credit = 1 interview). Depletes as
+    // interviews run; raising this tops it up. Independent of the AI period.
+    college.credits.interviewCredits = input.interviewCredits;
+  }
   college.markModified("credits");
   await college.save();
 

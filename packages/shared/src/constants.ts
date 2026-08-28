@@ -825,6 +825,8 @@ export const InterviewErrorCode = {
   ATTEMPT_EXPIRED: "ATTEMPT_EXPIRED",
   /** Answer submitted for a turn other than the attempt's current index. */
   NOT_CURRENT_TURN: "NOT_CURRENT_TURN",
+  /** The college has no mock-interview credits left (super-admin quota). */
+  NO_CREDITS: "NO_CREDITS",
   ORG_UNIT_OUT_OF_SCOPE: "ORG_UNIT_OUT_OF_SCOPE",
   NOT_PUBLISHABLE: "NOT_PUBLISHABLE",
   NOT_DELETABLE: "NOT_DELETABLE",

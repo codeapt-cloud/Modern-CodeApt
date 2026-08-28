@@ -66,6 +66,9 @@ const creditsSchema = new Schema(
     // before (unchanged); true → the admin allocates the pool to students and
     // student AI is metered per student (no allocation → no AI).
     perStudentDistribution: { type: Boolean, default: false },
+    // Mock-interview quota (Step 38): a one-time settable TOTAL — 1 credit = 1
+    // interview started. Super-admin controlled; depletes as interviews run.
+    interviewCredits: { type: Number, default: 0, min: 0 },
   },
   { _id: false },
 );

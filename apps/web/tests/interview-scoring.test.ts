@@ -11,12 +11,22 @@
 import {
   aiActionWeight,
   computeInterviewReport,
+  interviewCreditsRemaining,
   latencyPenalty,
   scoreInterviewAnswerFloor,
   type FluencyResult,
   type InterviewPerAnswer,
 } from "@codeapt/shared";
 import { describe, expect, it } from "vitest";
+
+describe("interviewCreditsRemaining (Step 38 — 1 credit = 1 interview)", () => {
+  it("is granted minus used, clamped at 0", () => {
+    expect(interviewCreditsRemaining(100, 37)).toBe(63);
+    expect(interviewCreditsRemaining(5, 5)).toBe(0);
+    expect(interviewCreditsRemaining(3, 10)).toBe(0); // never negative
+    expect(interviewCreditsRemaining(0, 0)).toBe(0);
+  });
+});
 
 const GOOD_FLUENCY: FluencyResult = {
   wordCount: 60,

@@ -4,7 +4,7 @@
  * (pre-flight → intake → run → report). Mirrors CollegeSpeakingPage. Gated by the
  * INTERVIEW feature; "Manage" links to the authoring page for faculty.
  */
-import { CollegeFeature, checkEntitlement } from "@codeapt/shared";
+import { CollegeFeature, checkEntitlement, isCollegeOperator } from "@codeapt/shared";
 import { Settings2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -23,7 +23,12 @@ import { useCollege } from "./college-context.js";
 export function CollegeInterviewPage(): JSX.Element {
   const { slug, context } = useCollege();
   const entitled = checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW);
-  const canAuthor = checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview");
+  // Authoring is for college OPERATORS (admin/faculty) only — never students,
+  // even when the college has the interview sub-capability (Step 38 fix: this was
+  // previously gated on the entitlement alone, so students saw "Manage").
+  const canAuthor =
+    isCollegeOperator(context.membership.role) &&
+    checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview");
   const [picked, setPicked] = useState<{ id: string; role: string } | null>(null);
 
   const list = useQuery(

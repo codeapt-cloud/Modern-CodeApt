@@ -25,6 +25,16 @@ import { fluencyScore, type FluencyResult } from "./speech.js";
 
 const clamp = (n: number, lo = 0, hi = 100): number =>
   Math.max(lo, Math.min(hi, n));
+
+/**
+ * Remaining mock-interview credits for a college (Step 38): the super-admin
+ * granted TOTAL minus interviews already started, never negative. 1 credit = 1
+ * interview started. Pure so both the start-time gate and the dashboard readout
+ * agree on the arithmetic.
+ */
+export function interviewCreditsRemaining(granted: number, used: number): number {
+  return Math.max(0, Math.floor(granted) - Math.max(0, Math.floor(used)));
+}
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 const mean = (xs: readonly number[]): number =>
   xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length;

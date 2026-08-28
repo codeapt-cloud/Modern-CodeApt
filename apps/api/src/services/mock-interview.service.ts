@@ -36,6 +36,7 @@ import {
   computeInterviewReport,
   correctTranscript,
   dropDuplicateQuestions,
+  interviewCreditsRemaining,
   interviewAcknowledgement,
   interviewClosing,
   interviewGreeting,
@@ -45,6 +46,7 @@ import {
   isPlatformAdmin,
   sanitizeClientFluency,
   scoreInterviewAnswerFloor,
+  type CollegeInterviewCredits,
   type InterviewCurrentResponse,
   type InterviewPerAnswer,
   type InterviewReport,
@@ -581,6 +583,23 @@ async function countAttempts(userId: string, assessmentId: Types.ObjectId): Prom
   });
 }
 
+/**
+ * The college's mock-interview credit status (Step 38). `used` = every attempt
+ * ever STARTED for this college (1 credit = 1 interview started; retakes and
+ * abandoned/expired ones count); `granted` = the super-admin total; `remaining`
+ * clamps at 0. Powers both the start-time gate and the admin dashboard readout.
+ */
+export async function interviewCreditsStatus(
+  collegeId: string,
+): Promise<CollegeInterviewCredits> {
+  const [college, used] = await Promise.all([
+    CollegeModel.findById(collegeId).select("credits"),
+    MockInterviewAttemptModel.countDocuments({ college: new Types.ObjectId(collegeId) }),
+  ]);
+  const granted = college?.credits?.interviewCredits ?? 0;
+  return { granted, used, remaining: interviewCreditsRemaining(granted, used) };
+}
+
 export async function startInterview(
   userId: string,
   assessmentId: string,
@@ -588,6 +607,20 @@ export async function startInterview(
 ): Promise<StartMockInterviewResponse> {
   const assessment = await loadAssessmentOr404(assessmentId);
   await assertCanTakeInterview(userId, assessment);
+
+  // College interview-credit quota (Step 38): a tenant interview consumes one of
+  // the college's super-admin-granted credits per START (1 credit = 1 interview).
+  // Course-attached / platform interviews (college null) have no college quota.
+  if (assessment.college) {
+    const { remaining } = await interviewCreditsStatus(assessment.college.toString());
+    if (remaining <= 0) {
+      throw new AppError(
+        "Your college has no mock-interview credits left. Ask your administrator to request more.",
+        409,
+        InterviewErrorCode.NO_CREDITS,
+      );
+    }
+  }
 
   if (assessment.maxAttempts > 0) {
     const used = await countAttempts(userId, assessment._id);
