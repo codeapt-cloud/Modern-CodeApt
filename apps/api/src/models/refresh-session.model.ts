@@ -21,6 +21,14 @@ const refreshSessionSchema = new Schema(
     },
     // Current valid refresh-token identifier for this session.
     jti: { type: String, required: true },
+    // The immediately-previous jti + when we rotated to the current one. During a
+    // short grace window after rotation the previous jti is still accepted (it
+    // re-issues the current one, without rotating) — this tolerates concurrent /
+    // multi-tab refreshes that race the cookie update, instead of falsely flagging
+    // them as token reuse and killing the session. Beyond the window, a stale jti
+    // is still treated as replay.
+    prevJti: { type: String, default: null },
+    rotatedAt: { type: Date, default: null },
     revokedAt: { type: Date, default: null },
     // Absolute session expiry; TTL index reaps expired rows automatically.
     expiresAt: { type: Date, required: true },

@@ -203,6 +203,9 @@ function CodeSection({
     runner.phase === "processing";
   const canRun = canRunCode(code, disabled);
   const hasSamples = hasSampleCases(question);
+  // 10s run cooldown (avoids the server 429 "running too quickly").
+  const onCooldown = runner.cooldownMs > 0;
+  const cooldownSecs = Math.ceil(runner.cooldownMs / 1000);
   const locked = isLanguageLocked(question.allowedLanguages);
 
   // Switching language (only possible when OPEN): swap the stub ONLY if the
@@ -317,20 +320,28 @@ function CodeSection({
           size="sm"
           onClick={runSamples}
           loading={busy}
-          disabled={!canRun || busy || !hasSamples}
-          title={hasSamples ? undefined : "No sample cases for this question"}
+          disabled={!canRun || busy || onCooldown || !hasSamples}
+          title={
+            hasSamples
+              ? onCooldown
+                ? `Please wait ${cooldownSecs}s between runs`
+                : undefined
+              : "No sample cases for this question"
+          }
         >
           {!busy ? <Play className="h-4 w-4" /> : null}
-          {busy ? "Running…" : "Run sample cases"}
+          {busy ? "Running…" : onCooldown ? `Run in ${cooldownSecs}s` : "Run sample cases"}
         </Button>
         <Button
           type="button"
           size="sm"
           variant="outline"
           onClick={runCustom}
-          disabled={!canRun || busy}
+          disabled={!canRun || busy || onCooldown}
+          title={onCooldown ? `Please wait ${cooldownSecs}s between runs` : undefined}
         >
-          <Terminal className="h-4 w-4" /> Run custom input
+          <Terminal className="h-4 w-4" />{" "}
+          {onCooldown ? `Run in ${cooldownSecs}s` : "Run custom input"}
         </Button>
         <span className="text-xs text-ink-muted">
           Running tests your code — it does not submit the exam.
@@ -389,7 +400,9 @@ function RunOutput({
       <Alert variant="error">
         {errorStatus === 429
           ? "You're running code too quickly — wait a moment and try again."
-          : (error ?? "Execution failed.")}
+          : errorStatus === 401
+            ? "Your session expired — please refresh the page and sign in again, then re-run."
+            : (error ?? "Execution failed.")}
       </Alert>
     );
   }

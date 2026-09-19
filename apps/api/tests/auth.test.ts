@@ -171,30 +171,49 @@ describe("PATCH /api/me", () => {
 });
 
 describe("refresh rotation + reuse detection", () => {
-  it("rotates tokens and rejects a replayed refresh token", async () => {
+  it("rotates tokens and reuse-detects a genuinely stale (2-rotations-old) token", async () => {
     await register();
     const { body: login } = await loginWith("alice", "Password123");
     const r1 = login.refreshToken as string;
 
-    const first = await request(app)
-      .post("/api/auth/refresh")
-      .send({ refreshToken: r1 });
+    const first = await request(app).post("/api/auth/refresh").send({ refreshToken: r1 });
     expect(first.status).toBe(200);
     const r2 = first.body.refreshToken as string;
     expect(r2).not.toBe(r1);
 
-    // Replaying the old token is detected and kills the session.
-    const replay = await request(app)
-      .post("/api/auth/refresh")
-      .send({ refreshToken: r1 });
+    // A SECOND rotation → r1 is now older than the previous jti (r2). Replaying it
+    // is genuine reuse (beyond the one-rotation grace) → session killed.
+    const second = await request(app).post("/api/auth/refresh").send({ refreshToken: r2 });
+    expect(second.status).toBe(200);
+    const r3 = second.body.refreshToken as string;
+
+    const replay = await request(app).post("/api/auth/refresh").send({ refreshToken: r1 });
     expect(replay.status).toBe(401);
     expect(replay.body.error.code).toBe(AuthErrorCode.TOKEN_REUSE_DETECTED);
 
-    // The rotated token is now useless too (session revoked).
-    const afterReuse = await request(app)
-      .post("/api/auth/refresh")
-      .send({ refreshToken: r2 });
+    // The session is revoked, so even the latest token stops working.
+    const afterReuse = await request(app).post("/api/auth/refresh").send({ refreshToken: r3 });
     expect(afterReuse.status).toBe(401);
+  });
+
+  it("tolerates a concurrent/multi-tab refresh: the JUST-rotated token still works within the grace window", async () => {
+    await register();
+    const { body: login } = await loginWith("alice", "Password123");
+    const r1 = login.refreshToken as string;
+
+    const first = await request(app).post("/api/auth/refresh").send({ refreshToken: r1 });
+    expect(first.status).toBe(200);
+    const r2 = first.body.refreshToken as string;
+
+    // A racing tab still holding r1 (cookie hadn't propagated) refreshes within
+    // the grace window → NOT reuse; it re-issues, and the session stays alive.
+    const racing = await request(app).post("/api/auth/refresh").send({ refreshToken: r1 });
+    expect(racing.status).toBe(200);
+    expect(racing.body.refreshToken).toBeTruthy();
+
+    // The other tab's r2 keeps working — the session was never killed.
+    const stillValid = await request(app).post("/api/auth/refresh").send({ refreshToken: r2 });
+    expect(stillValid.status).toBe(200);
   });
 });
 

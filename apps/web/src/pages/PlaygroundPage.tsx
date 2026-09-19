@@ -63,6 +63,8 @@ export function PlaygroundPage() {
     runner.phase === "submitting" ||
     runner.phase === "queued" ||
     runner.phase === "processing";
+  const onCooldown = runner.cooldownMs > 0; // 10s run throttle
+  const cooldownSecs = Math.ceil(runner.cooldownMs / 1000);
 
   const changeLanguage = (next: CodeLanguage): void => {
     setSource((cur) => {
@@ -127,11 +129,12 @@ export function PlaygroundPage() {
           <Button
             onClick={run}
             loading={busy}
-            disabled={gradeDisabled}
+            disabled={gradeDisabled || onCooldown}
+            title={onCooldown ? `Please wait ${cooldownSecs}s between runs` : undefined}
             className="min-w-[7rem]"
           >
             {!busy ? <Play className="h-4 w-4" /> : null}
-            {busy ? "Running…" : "Run"}
+            {busy ? "Running…" : onCooldown ? `Run in ${cooldownSecs}s` : "Run"}
           </Button>
         </div>
       </header>

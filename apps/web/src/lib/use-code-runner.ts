@@ -30,11 +30,17 @@ export interface CodeRunnerState {
 }
 
 const POLL_MS = 900;
+/** Client-side throttle on the Run button: one run per 10s. Prevents the server
+ *  429 ("running code too quickly") AND the burst of concurrent requests after a
+ *  token expiry that can trip the refresh-rotation race (see auth.service). */
+export const RUN_COOLDOWN_MS = 10_000;
 const isTerminal = (s: string): boolean => s === "completed" || s === "failed";
 
 export function useCodeRunner(): CodeRunnerState & {
   run: (req: ExecuteRequest) => Promise<void>;
   reset: () => void;
+  /** Milliseconds left on the run cooldown, 0 when a run is allowed. */
+  cooldownMs: number;
 } {
   const [state, setState] = useState<CodeRunnerState>({
     phase: "idle",
@@ -44,15 +50,40 @@ export function useCodeRunner(): CodeRunnerState & {
     jobId: null,
     elapsedMs: null,
   });
+  const [cooldownMs, setCooldownMs] = useState(0);
 
   const startRef = useRef<number>(0);
+  const lastRunAtRef = useRef<number>(0);
+  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const stop = useCallback(() => {
     cleanupRef.current?.();
     cleanupRef.current = null;
   }, []);
 
-  useEffect(() => stop, [stop]);
+  const startCooldown = useCallback(() => {
+    lastRunAtRef.current = Date.now();
+    setCooldownMs(RUN_COOLDOWN_MS);
+    if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    cooldownTimerRef.current = setInterval(() => {
+      const left = RUN_COOLDOWN_MS - (Date.now() - lastRunAtRef.current);
+      if (left <= 0) {
+        setCooldownMs(0);
+        if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      } else {
+        setCooldownMs(left);
+      }
+    }, 250);
+  }, []);
+
+  useEffect(
+    () => () => {
+      stop();
+      if (cooldownTimerRef.current) clearInterval(cooldownTimerRef.current);
+    },
+    [stop],
+  );
 
   const track = useCallback((jobId: string) => {
     let stopped = false;
@@ -124,7 +155,16 @@ export function useCodeRunner(): CodeRunnerState & {
 
   const run = useCallback(
     async (req: ExecuteRequest) => {
+      // Cooldown guard (defensive — the button is also disabled). Ignore a run
+      // fired within RUN_COOLDOWN_MS of the last one.
+      if (
+        lastRunAtRef.current !== 0 &&
+        Date.now() - lastRunAtRef.current < RUN_COOLDOWN_MS
+      ) {
+        return;
+      }
       stop();
+      startCooldown();
       startRef.current = Date.now();
       setState({
         phase: "submitting",
@@ -157,7 +197,7 @@ export function useCodeRunner(): CodeRunnerState & {
         });
       }
     },
-    [stop, track],
+    [stop, startCooldown, track],
   );
 
   const reset = useCallback(() => {
@@ -172,5 +212,5 @@ export function useCodeRunner(): CodeRunnerState & {
     });
   }, [stop]);
 
-  return { ...state, run, reset };
+  return { ...state, run, reset, cooldownMs };
 }

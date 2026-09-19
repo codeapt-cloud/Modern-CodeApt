@@ -245,6 +245,11 @@ export async function login(
 // Refresh (rotation + reuse detection)
 // ---------------------------------------------------------------------------
 
+/** How long after a rotation the previous refresh jti is still accepted, to
+ *  tolerate concurrent / multi-tab refresh races (not a security relaxation:
+ *  beyond this a stale jti is still treated as reuse). */
+const REFRESH_ROTATION_GRACE_MS = 20_000;
+
 export async function refresh(token: string | undefined): Promise<AuthResult> {
   if (!token) {
     throw new AppError(
@@ -288,7 +293,22 @@ export async function refresh(token: string | undefined): Promise<AuthResult> {
     throw new AppError("Session revoked", 401, AuthErrorCode.SESSION_REVOKED);
   }
   if (session.jti !== claims.jti) {
-    // A rotated/old token was replayed → treat as compromise, kill the session.
+    // GRACE WINDOW: a concurrent / multi-tab refresh can present the just-rotated
+    // (previous) jti before the new cookie has propagated. Within a short window
+    // of the rotation, accept the previous jti and simply RE-ISSUE the current
+    // one (no further rotation) — the lagging client converges instead of the
+    // session being wrongly killed (the "refresh token required" reports).
+    const withinGrace =
+      session.prevJti != null &&
+      claims.jti === session.prevJti &&
+      session.rotatedAt != null &&
+      Date.now() - session.rotatedAt.getTime() <= REFRESH_ROTATION_GRACE_MS;
+    if (withinGrace) {
+      const profile = await getProfileOrThrow(user._id.toString());
+      const tokens = issueTokens(user, session._id.toString(), session.jti);
+      return { user, profile, ...tokens };
+    }
+    // A genuinely stale/old token replayed → treat as compromise, kill the session.
     session.revokedAt = new Date();
     await session.save();
     throw new AppError(
@@ -298,8 +318,11 @@ export async function refresh(token: string | undefined): Promise<AuthResult> {
     );
   }
 
-  // Rotate the jti in place; the session's absolute expiry is unchanged.
+  // Rotate the jti in place; the session's absolute expiry is unchanged. Keep the
+  // previous jti + rotation time so a racing refresh has the grace window above.
   const newJti = randomUUID();
+  session.prevJti = session.jti;
+  session.rotatedAt = new Date();
   session.jti = newJti;
   await session.save();
 
