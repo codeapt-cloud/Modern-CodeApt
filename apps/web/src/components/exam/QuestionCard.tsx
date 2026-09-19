@@ -85,7 +85,13 @@ export function QuestionCard({
       <div className="mb-4 flex items-start justify-between gap-3">
         <h3 className="font-medium text-ink">
           <span className="mr-2 font-mono text-ink-muted">Q{index + 1}.</span>
-          {question.text}
+          {/* Preserve the line breaks / indentation the author typed in the
+              (plain-text) question box — without this the browser collapses
+              every newline to a single space and the prompt reads as one run-on
+              paragraph. */}
+          <span className="whitespace-pre-wrap break-words align-top">
+            {question.text}
+          </span>
         </h3>
         <Badge variant="neutral">{question.marks} pts</Badge>
       </div>
@@ -175,7 +181,7 @@ function OptionRow({
     >
       {control}
       <span className="font-mono text-xs text-ink-muted">{letter}</span>
-      <span className="flex-1 text-ink">{text}</span>
+      <span className="flex-1 whitespace-pre-wrap break-words text-ink">{text}</span>
     </label>
   );
 }
