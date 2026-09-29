@@ -67,11 +67,20 @@ const REFRESHES: ModelRefresh[] = [
     reason:
       "OpenRouter free :free slugs rotate weekly → 404; openrouter/free auto-routes to a live free model",
   },
+  // NVIDIA rotates its hosted catalog hard: the raw Meta Llama NIMs (3.1-8b,
+  // 3.3-70b) all return 410 Gone. Migrate from any of those stale ids to a
+  // currently-listed "Free Endpoint" chat model.
   {
     name: "NVIDIA NIM Llama 3.1 8B",
     from: "meta/llama-3.1-8b-instruct",
-    to: "meta/llama-3.3-70b-instruct",
-    reason: "NVIDIA retired meta/llama-3.1-8b-instruct on this endpoint → 410 Gone",
+    to: "nvidia/nemotron-3.5-lightning-30b-a3b",
+    reason: "NVIDIA retired meta/llama-3.1-8b-instruct → 410 Gone",
+  },
+  {
+    name: "NVIDIA NIM Llama 3.1 8B",
+    from: "meta/llama-3.3-70b-instruct",
+    to: "nvidia/nemotron-3.5-lightning-30b-a3b",
+    reason: "NVIDIA also retired meta/llama-3.3-70b-instruct → 410 Gone",
   },
 ];
 

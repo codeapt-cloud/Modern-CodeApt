@@ -159,13 +159,15 @@ export const PROVIDER_CATALOG: SeedProvider[] = [
     limits: { requestsPerMinute: 60 },
   },
   {
-    // NVIDIA retired meta/llama-3.1-8b-instruct on this endpoint (→ 410 Gone);
-    // meta/llama-3.3-70b-instruct is currently served. Model ids drift — Edit +
-    // Test from the AI Providers page against build.nvidia.com's current catalog.
+    // NVIDIA rotates its hosted catalog HARD — the raw Meta Llama NIMs and even
+    // older Nemotron ids (llama-3.x-nemotron-*) return 410 Gone. Only models listed
+    // with a "Free Endpoint" on build.nvidia.com are callable via this hosted API.
+    // Keep this on a currently-listed general chat model; Edit + Test from the AI
+    // Providers page whenever it drifts.
     name: "NVIDIA NIM Llama 3.1 8B",
     kind: ProviderKind.OPENAI_COMPAT,
     baseUrl: "https://integrate.api.nvidia.com/v1",
-    model: "meta/llama-3.3-70b-instruct",
+    model: "nvidia/nemotron-3.5-lightning-30b-a3b",
     keyUrl: "https://build.nvidia.com/",
     priority: 100,
     capability: ProviderCapability.CAPABLE,
