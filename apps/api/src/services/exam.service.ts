@@ -16,6 +16,7 @@ import {
   ExamErrorCode,
   ExamQuestionType,
   EXAM_MAX_WARNINGS,
+  EXAM_SUBMIT_GRACE_MS,
   JobStatus,
   QueueName,
   StudentErrorCode,
@@ -43,6 +44,7 @@ import { Types, type HydratedDocument } from "mongoose";
 import { AppError } from "../errors/app-error.js";
 import { assertAccessCode } from "../lib/access-code.js";
 import { enqueueCodeJob } from "../lib/execution-queue.js";
+import { logger } from "../lib/logger.js";
 import { resolveExamDisplayTitle } from "../lib/exam-title.js";
 import {
   ExamModel,
@@ -164,6 +166,9 @@ async function effectiveFlags(
 interface Caller {
   userId?: string;
   token?: string;
+  /** Trusted server context (the auto-submit sweep) — bypasses owner/token auth.
+   *  NEVER settable from a request; only internal callers pass this. */
+  system?: boolean;
 }
 
 async function loadAndAuthorize(
@@ -185,6 +190,9 @@ async function loadAndAuthorize(
       ExamErrorCode.ATTEMPT_NOT_FOUND,
     );
   }
+  // Trusted internal caller (the auto-submit sweep): the attempt still had to
+  // exist (404 above), but no owner/token match is required.
+  if (caller.system) return attempt;
   const tokenOk = !!caller.token && caller.token === attempt.attemptToken;
   const ownerOk =
     !!caller.userId &&
@@ -1000,6 +1008,63 @@ export async function finalizeAttempt(
     readResponseData(fresh).breakdown ?? breakdown,
     resultsVisible,
   );
+}
+
+/**
+ * Server-side BACKSTOP for exam completion. Finalizes in-progress attempts whose
+ * current section is past its hard deadline + EXAM_SUBMIT_GRACE_MS — i.e. the
+ * taker's timer ran out but no submit arrived (tab closed, went offline, network
+ * dropped). It runs the SAME `submitAttempt` pipeline (auto=true) so the last
+ * autosaved answers are graded exactly as a normal auto-submit: MCQs inline, CODE
+ * questions enqueued for grading. Idempotent — a submitted/graded attempt is
+ * skipped, and an ACTIVE taker keeps advancing sections (resetting the clock)
+ * before expiry, so only genuinely-abandoned attempts are ever caught here.
+ *
+ * Runs periodically from the API bootstrap (never in request context). Pure over
+ * `now` for testing.
+ */
+export async function autoSubmitExpiredExamAttempts(
+  now: Date = new Date(),
+): Promise<{ submitted: number; checked: number }> {
+  const candidates = await StudentExamAttemptModel.find({
+    status: ExamAttemptStatus.IN_PROGRESS,
+    sectionStartTime: { $ne: null },
+  });
+  // Cache sections per exam — many attempts often share one exam.
+  const sectionsCache = new Map<string, SectionDoc[]>();
+  let submitted = 0;
+  for (const attempt of candidates) {
+    const attemptId = attempt._id.toString();
+    try {
+      if (!attempt.sectionStartTime) continue;
+      const examId = attempt.exam.toString();
+      let sections = sectionsCache.get(examId);
+      if (!sections) {
+        sections = await loadSections(attempt.exam);
+        sectionsCache.set(examId, sections);
+      }
+      const section = sections[currentSectionIndex(attempt, sections)];
+      if (!section) continue;
+      const deadlineMs =
+        attempt.sectionStartTime.getTime() +
+        section.durationMinutes * 60_000 +
+        EXAM_SUBMIT_GRACE_MS;
+      if (now.getTime() <= deadlineMs) continue;
+
+      await submitAttempt(attemptId, { system: true }, true);
+      submitted += 1;
+    } catch (err) {
+      // Never let one bad attempt abort the sweep — log and move on.
+      logger.warn({ err, attemptId }, "exam auto-submit skipped an attempt");
+    }
+  }
+  if (submitted > 0) {
+    logger.info(
+      { submitted, checked: candidates.length },
+      "auto-submitted expired exam attempts",
+    );
+  }
+  return { submitted, checked: candidates.length };
 }
 
 interface JobLike {

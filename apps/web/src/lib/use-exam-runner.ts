@@ -297,6 +297,28 @@ export function useExamRunner(params: {
     }
   }, [remaining, phase]);
 
+  // --- Answer-persistence safety net ----------------------------------------
+  // The per-change autosave (800ms debounce) is the primary path; this adds a
+  // 15s heartbeat flush plus a flush when the tab is hidden or closed, so answers
+  // survive a student going offline / leaving without submitting. The server-side
+  // sweep then auto-submits those saved answers when the timer expires. All
+  // best-effort: a hard crash can still lose the last few seconds of typing.
+  useEffect(() => {
+    if (phase !== "running") return;
+    const HEARTBEAT_MS = 15_000;
+    const heartbeat = window.setInterval(() => void doSave(), HEARTBEAT_MS);
+    const flushOnHide = (): void => {
+      if (document.visibilityState === "hidden") void doSave();
+    };
+    window.addEventListener("pagehide", flushOnHide);
+    document.addEventListener("visibilitychange", flushOnHide);
+    return () => {
+      window.clearInterval(heartbeat);
+      window.removeEventListener("pagehide", flushOnHide);
+      document.removeEventListener("visibilitychange", flushOnHide);
+    };
+  }, [phase, doSave]);
+
   // --- One-question navigation + review flags -------------------------------
 
   const markVisited = useCallback((questionId: string): void => {

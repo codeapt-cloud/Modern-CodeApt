@@ -8,6 +8,7 @@
 import {
   CodeLanguage,
   EXAM_MAX_WARNINGS,
+  ExamAttemptStatus,
   ExamQuestionType,
   JobStatus,
   TopicType,
@@ -41,6 +42,7 @@ import {
   TopicModel,
 } from "../src/models/curriculum.model.js";
 import { ExecutionJobModel } from "../src/models/execution.model.js";
+import { autoSubmitExpiredExamAttempts } from "../src/services/exam.service.js";
 
 let app: Express;
 beforeAll(() => {
@@ -364,6 +366,56 @@ describe("section timer", () => {
       .send({});
     expect(submit.body.status).toBe("graded");
     expect(submit.body.autoSubmitted).toBe(true);
+  });
+
+  it("server backstop auto-submits an expired, abandoned attempt with its saved answers", async () => {
+    const { token, userId } = await registerAndLogin();
+    const { exam, qSingle } = await makeExam({ enroll: userId });
+    const start = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    const attemptId = start.body.attemptId as string;
+
+    // Student answers Q1 (persisted by autosave), then "goes offline".
+    const save = await request(app)
+      .post(`/api/attempts/${attemptId}/section/answers`)
+      .set(auth(token))
+      .send({
+        answers: [{ questionId: qSingle._id.toString(), selectedOptions: [1] }],
+      });
+    expect(save.status).toBe(200);
+
+    // Their timer runs out while the tab is gone (past duration + grace).
+    await StudentExamAttemptModel.updateOne(
+      { _id: attemptId },
+      { $set: { sectionStartTime: new Date(Date.now() - 60 * 60 * 1000) } },
+    );
+
+    const res = await autoSubmitExpiredExamAttempts(new Date());
+    expect(res.submitted).toBe(1);
+
+    const attempt = await StudentExamAttemptModel.findById(attemptId).lean();
+    expect(attempt?.status).toBe(ExamAttemptStatus.GRADED);
+    expect(attempt?.isAutoSubmitted).toBe(true);
+    expect(attempt?.score).toBe(5); // the saved correct MCQ was graded
+
+    // Idempotent: a second sweep finds nothing to do.
+    const again = await autoSubmitExpiredExamAttempts(new Date());
+    expect(again.submitted).toBe(0);
+  });
+
+  it("backstop leaves an active (not-yet-expired) attempt untouched", async () => {
+    const { token, userId } = await registerAndLogin();
+    const { exam } = await makeExam({ enroll: userId });
+    const start = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    const attemptId = start.body.attemptId as string;
+
+    const res = await autoSubmitExpiredExamAttempts(new Date());
+    expect(res.submitted).toBe(0);
+    const attempt = await StudentExamAttemptModel.findById(attemptId).lean();
+    expect(attempt?.status).toBe(ExamAttemptStatus.IN_PROGRESS);
   });
 });
 

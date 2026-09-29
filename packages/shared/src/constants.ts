@@ -441,6 +441,16 @@ export const CODING_REFRESH_MAX_PER_MINUTE = 20;
 export const EXAM_MAX_WARNINGS = 2;
 
 /**
+ * Grace period after an exam section's hard deadline before the server-side
+ * auto-submit sweep finalizes an abandoned in-progress attempt. It absorbs the
+ * clock skew + the last in-flight autosave/submit round-trip, so a taker who is
+ * still online (whose client auto-submits at 0) is never pre-empted by the
+ * backstop. An ACTIVE taker keeps advancing sections before expiry (which resets
+ * the section clock), so only a truly-abandoned/offline attempt sits past this.
+ */
+export const EXAM_SUBMIT_GRACE_MS = 60 * 1000;
+
+/**
  * Communication scored attempts (Step 32) get their OWN, stricter threshold: the
  * attempt is TERMINATED (scored so far is committed, marked "unauthorised actions
  * detected") once the warning count reaches this. Set to 3 (vs the exam's
