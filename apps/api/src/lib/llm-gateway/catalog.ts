@@ -33,10 +33,15 @@ export interface SeedProvider {
 
 export const PROVIDER_CATALOG: SeedProvider[] = [
   {
+    // Groq DECOMMISSIONED the Llama free-tier chat models on 2026-08-16
+    // (llama-3.1-8b-instant / llama-3.3-70b-versatile → 404). Its own migration
+    // target for the small/fast slot is openai/gpt-oss-20b. Name kept stable so
+    // the insert-only seed keeps matching existing rows (rename in the UI if
+    // desired); model ids drift, so a super-admin can Edit + Test this any time.
     name: "Groq Llama 3.1 8B",
     kind: ProviderKind.OPENAI_COMPAT,
     baseUrl: "https://api.groq.com/openai/v1",
-    model: "llama-3.1-8b-instant",
+    model: "openai/gpt-oss-20b",
     keyUrl: "https://console.groq.com/keys",
     priority: 10,
     capability: ProviderCapability.FAST,
@@ -72,10 +77,12 @@ export const PROVIDER_CATALOG: SeedProvider[] = [
     limits: { requestsPerMinute: 30, requestsPerDay: 1500 },
   },
   {
+    // Same 2026-08-16 Groq decommission as above; the capable-slot migration
+    // target is openai/gpt-oss-120b. Name kept stable for the insert-only seed.
     name: "Groq Llama 3.3 70B",
     kind: ProviderKind.OPENAI_COMPAT,
     baseUrl: "https://api.groq.com/openai/v1",
-    model: "llama-3.3-70b-versatile",
+    model: "openai/gpt-oss-120b",
     keyUrl: "https://console.groq.com/keys",
     priority: 40,
     capability: ProviderCapability.CAPABLE,
@@ -111,14 +118,15 @@ export const PROVIDER_CATALOG: SeedProvider[] = [
     limits: { requestsPerDay: 10000 },
   },
   {
-    // OpenRouter rotates which slugs are served on the free tier — retired ids
-    // (e.g. `meta-llama/llama-3.3-70b-instruct:free`) 404. Seed a currently-live
-    // free slug; a super-admin can Edit it to any live `:free` slug from
-    // GET /api/v1/models (or drop `:free` for the cheap paid variant).
+    // OpenRouter rotates which individual `:free` slugs are served weekly, so any
+    // pinned slug eventually 404s. `openrouter/free` is OpenRouter's OWN routing
+    // model that auto-selects a currently-available free model — resilient to that
+    // churn. A super-admin can still Edit it to a specific live `:free` slug (from
+    // GET /api/v1/models) or drop `:free` for a cheap paid variant.
     name: "OpenRouter Free",
     kind: ProviderKind.OPENAI_COMPAT,
     baseUrl: "https://openrouter.ai/api/v1",
-    model: "inclusionai/ling-3.0-flash:free",
+    model: "openrouter/free",
     keyUrl: "https://openrouter.ai/keys",
     priority: 70,
     capability: ProviderCapability.CAPABLE,
@@ -151,10 +159,13 @@ export const PROVIDER_CATALOG: SeedProvider[] = [
     limits: { requestsPerMinute: 60 },
   },
   {
+    // NVIDIA retired meta/llama-3.1-8b-instruct on this endpoint (→ 410 Gone);
+    // meta/llama-3.3-70b-instruct is currently served. Model ids drift — Edit +
+    // Test from the AI Providers page against build.nvidia.com's current catalog.
     name: "NVIDIA NIM Llama 3.1 8B",
     kind: ProviderKind.OPENAI_COMPAT,
     baseUrl: "https://integrate.api.nvidia.com/v1",
-    model: "meta/llama-3.1-8b-instruct",
+    model: "meta/llama-3.3-70b-instruct",
     keyUrl: "https://build.nvidia.com/",
     priority: 100,
     capability: ProviderCapability.CAPABLE,

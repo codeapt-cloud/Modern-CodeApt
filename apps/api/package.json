@@ -29,6 +29,7 @@
     "seed:cts-paper": "tsx src/scripts/seed-cts-paper.ts",
     "seed:demo": "tsx src/scripts/seed-demo.ts",
     "gateway:healthcheck": "tsx src/scripts/gateway-healthcheck.ts",
+    "gateway:refresh-models": "tsx src/scripts/refresh-provider-models.ts",
     "fix:migration-dupes": "tsx src/scripts/fix-migration-duplicates.ts"
   },
   "dependencies": {
