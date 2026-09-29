@@ -3,7 +3,11 @@
 FROM node:20-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+# Pin pnpm to the repo's packageManager version (see apps/api/Dockerfile note):
+# a bare `corepack enable` can fetch LATEST pnpm and change install behavior.
+# Keep in sync with root package.json.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /repo
 
 FROM base AS build

@@ -3,7 +3,14 @@
 FROM node:20-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable
+# Pin pnpm to the repo's packageManager version. A bare `corepack enable` lets
+# newer corepack ignore the pin and fetch LATEST pnpm (e.g. 12.x), whose
+# `pnpm deploy` handles `workspace:*` differently and fails with
+# "no package named @codeapt/shared is present in the workspace". Prepare the
+# exact version explicitly and disable the interactive download prompt so the
+# build is deterministic and non-blocking. Keep in sync with root package.json.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /repo
 
 FROM base AS build
