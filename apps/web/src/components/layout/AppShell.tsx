@@ -38,6 +38,9 @@ export interface AppShellProps {
   onLogout?: () => void;
   /** Extra item(s) for the account menu (e.g. "Switch to personal account"). */
   accountExtra?: ReactNode;
+  /** Extra control(s) in the top bar, left of the theme toggle (e.g. the
+   *  assistant launcher). Shown only when the caller provides it. */
+  headerExtra?: ReactNode;
   children: ReactNode;
 }
 
@@ -78,6 +81,7 @@ export function AppShell({
   user,
   onLogout,
   accountExtra,
+  headerExtra,
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -152,6 +156,7 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-2">
+            {headerExtra}
             <ThemeToggle />
             {user ? (
               <DropdownMenu>

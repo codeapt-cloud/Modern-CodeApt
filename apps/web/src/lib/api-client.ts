@@ -95,6 +95,8 @@ import {
   type CreateCollegePostingInput,
   type CollegeSummaryResponse,
   type CollegeInterviewCredits,
+  type AdminAssistantChatInput,
+  type AdminAssistantReply,
   type CollegeListResponse,
   type CreateCollegeAdminInput,
   type CollegeStudent,
@@ -4617,6 +4619,33 @@ export const api = {
     ): Promise<AiBuildGameSetResponse> => {
       const { data } = await http.post<AiBuildGameSetResponse>(
         `${API_PREFIX}/admin/game-sets/ai-build`,
+        body,
+      );
+      return data;
+    },
+  },
+
+  // --- Admin Assistant (Step 40: read-only GUIDE — chat only, no writes) ---
+  // College entrypoint (college admins; super admins may also use it): the tenant
+  // is pinned server-side from the slug. Platform entrypoint (super admin): no slug.
+  collegeAssistant: {
+    chat: async (
+      slug: string,
+      body: AdminAssistantChatInput,
+    ): Promise<AdminAssistantReply> => {
+      const { data } = await http.post<AdminAssistantReply>(
+        `${API_PREFIX}/c/${slug}/assistant/chat`,
+        body,
+      );
+      return data;
+    },
+  },
+  adminAssistant: {
+    chat: async (
+      body: AdminAssistantChatInput,
+    ): Promise<AdminAssistantReply> => {
+      const { data } = await http.post<AdminAssistantReply>(
+        `${API_PREFIX}/admin/assistant/chat`,
         body,
       );
       return data;

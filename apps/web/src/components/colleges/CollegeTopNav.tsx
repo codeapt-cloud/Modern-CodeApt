@@ -47,8 +47,10 @@ import {
   type CollegeNavIcon,
   type ResolvedSection,
 } from "../../lib/college-nav.js";
+import { assistantAvailableInCollege } from "../../lib/assistant-availability.js";
 import { cn } from "../../lib/cn.js";
 import { roleLabel } from "../../lib/role-label.js";
+import { AssistantLauncher } from "../assistant/AssistantLauncher.js";
 import { ThemeToggle } from "../ThemeToggle.js";
 import { Avatar } from "../ui/avatar.js";
 import { Badge } from "../ui/badge.js";
@@ -271,8 +273,15 @@ export function CollegeTopNav({
           ))}
         </nav>
 
-        {/* Right: theme + account */}
+        {/* Right: assistant (if enabled) + theme + account */}
         <div className="ml-auto flex items-center gap-2">
+          {assistantAvailableInCollege({
+            userRole: role,
+            membershipRole: role,
+            entitlements,
+          }) ? (
+            <AssistantLauncher scope={{ kind: "college", slug }} />
+          ) : null}
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

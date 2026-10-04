@@ -24,3 +24,4 @@ export * from "./ai-credit.model.js";
 export * from "./student-ai-credit.model.js";
 export * from "./ai-governor.model.js";
 export * from "./game.model.js";
+export * from "./admin-assistant.model.js";

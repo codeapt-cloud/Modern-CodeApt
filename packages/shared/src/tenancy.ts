@@ -111,7 +111,7 @@ export const SUB_CAPABILITY_CATALOG: Record<
   [CollegeFeature.POSTINGS]: ["external_apply"],
   [CollegeFeature.QUESTION_BANKS]: [],
   // One place for all per-college AI: assisted essay scoring + AI Test Builder.
-  [CollegeFeature.AI]: ["essay_grading", "question_generation"],
+  [CollegeFeature.AI]: ["essay_grading", "question_generation", "admin_assistant"],
   // Attendance groups + (later) sessions. No sub-capabilities in Prompt 1.
   [CollegeFeature.ATTENDANCE]: [],
   // Coding-profile tracking. Leaderboard arrives in Prompt 2; none in Prompt 1.

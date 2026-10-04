@@ -5,6 +5,7 @@
 import { Router } from "express";
 
 import { adminRouter } from "./admin.routes.js";
+import { adminAssistantRouter } from "./admin-assistant.routes.js";
 import { authRouter } from "./auth.routes.js";
 import { challengeRouter } from "./challenge.routes.js";
 import { collegeRouter } from "./college.routes.js";
@@ -78,6 +79,7 @@ apiRouter.use(uploadAdminRouter);
 // speech engine today). requireAdmin.
 apiRouter.use(platformSettingsRouter);
 apiRouter.use(adminRouter);
+apiRouter.use(adminAssistantRouter);
 // Multi-tenant colleges (Phase 0 foundation).
 apiRouter.use(collegeAdminRouter);
 apiRouter.use(collegeRouter);

@@ -7251,3 +7251,63 @@ export type MockInterviewCohortReport = z.infer<
 export const interviewTtsRequestSchema = z.object({
   text: z.string().trim().min(1).max(600),
 });
+
+// ---------------------------------------------------------------------------
+// Admin Assistant (Step 38) — chat request + reply/proposal DTOs
+// ---------------------------------------------------------------------------
+
+/** One turn of the (client-held) conversation. The server is stateless between
+ *  requests: the caller sends the running transcript each time. */
+export const adminAssistantTurnSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1).max(8000),
+});
+export type AdminAssistantTurn = z.infer<typeof adminAssistantTurnSchema>;
+
+export const adminAssistantChatSchema = z.object({
+  messages: z.array(adminAssistantTurnSchema).min(1).max(40),
+  /** Compact facts resolved by reads on earlier turns (ids looked up, lists seen),
+   *  echoed back by the client so the assistant has cross-turn memory and need not
+   *  re-run the same read every turn. The latest user message still overrides any
+   *  fact it contradicts. */
+  knownFacts: z.array(z.string().max(1000)).max(60).optional(),
+});
+export type AdminAssistantChatInput = z.infer<typeof adminAssistantChatSchema>;
+
+/** One step of structured how-to guidance (Step 41). Rendered as a checkable row,
+ *  never parsed from markdown on the client. */
+export interface AdminGuideStep {
+  /** The instruction for this step. */
+  text: string;
+  /** Optional in-app deep link — ALWAYS a known capability-map route (the server
+   *  drops any route not in the map, which the Step-40 test asserts exists in the
+   *  SPA), so a step can never link somewhere that doesn't exist. */
+  route?: string;
+  /** The literal control label to look for (rendered as a chip). */
+  control?: string;
+  /** A thing that must be true first (rendered distinctly from the action). */
+  prerequisite?: string;
+  /** A gotcha to expect (rendered distinctly from the action). */
+  gotcha?: string;
+}
+
+/** The assistant's reply to one chat request. Step 40/41: a read-only GUIDE — no
+ *  proposal/approval. A turn is a plain message (clarify / not-possible), a
+ *  structured step-by-step guide, or an AI-unavailable degrade. */
+export interface AdminAssistantReply {
+  kind: "message" | "guide" | "unavailable";
+  /** Plain text for kind "message"; a short lead-in for kind "guide". */
+  message: string;
+  /** Present for kind "guide": the ordered, checkable steps. */
+  steps?: AdminGuideStep[];
+  /** Tool names run while answering this request (READ tools only — the guide has
+   *  no write tools), in order, so the UI can show "ran: list_exams". */
+  toolsUsed: string[];
+  /** Cumulative compact facts (prior knownFacts + this turn's read results) for the
+   *  client to echo back next turn — the assistant's cross-turn memory. */
+  facts: string[];
+  /** AI credit units spent answering THIS request (sum per-conversation client-side). */
+  creditsSpent: number;
+  /** Model turns taken this request (≤ ADMIN_ASSISTANT_MAX_STEPS). */
+  modelTurns: number;
+}

@@ -909,6 +909,21 @@ export const JOB_APPLICATION_STATUS_VALUES =
   Object.values(JobApplicationStatus);
 
 /**
+ * Admin-assistant audit phase (Step 40: the assistant is a read-only GUIDE, so the
+ * only outcome recorded is a READ. The enum is kept as the single place to add
+ * phases if the surface ever grows again — but there are intentionally no write
+ * phases, because there are no write tools.)
+ */
+export const AdminAssistantAuditPhase = {
+  READ: "read",
+} as const;
+export type AdminAssistantAuditPhase =
+  (typeof AdminAssistantAuditPhase)[keyof typeof AdminAssistantAuditPhase];
+export const ADMIN_ASSISTANT_AUDIT_PHASE_VALUES = Object.values(
+  AdminAssistantAuditPhase,
+);
+
+/**
  * Posting employment type. The original stored a free-text `employment_type`;
  * this typed set (added for a filterable, validated UI) is the minimal sensible
  * enumeration for a campus placement board.

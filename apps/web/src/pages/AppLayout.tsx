@@ -32,10 +32,12 @@ import {
 } from "lucide-react";
 import { Outlet, useNavigate } from "react-router-dom";
 
+import { AssistantLauncher } from "../components/assistant/AssistantLauncher.js";
 import { AppShell, type NavItem } from "../components/layout/AppShell.js";
 import { DropdownMenuItem } from "../components/ui/dropdown-menu.js";
 import { useToast } from "../components/ui/toast.js";
 import { api } from "../lib/api-client.js";
+import { assistantAvailableOnPlatform } from "../lib/assistant-availability.js";
 import { imageUrl } from "../lib/cloudinary.js";
 import { homePathForUser } from "../lib/home-nav.js";
 import { useQuery } from "../lib/use-query.js";
@@ -137,6 +139,11 @@ export function AppLayout() {
         avatarUrl: imageUrl(profile?.avatarUrl),
       }}
       onLogout={handleLogout}
+      headerExtra={
+        user && assistantAvailableOnPlatform(user.role) ? (
+          <AssistantLauncher scope={{ kind: "platform" }} />
+        ) : undefined
+      }
       accountExtra={
         collegeHome ? (
           <DropdownMenuItem onSelect={() => navigate(collegeHome)}>

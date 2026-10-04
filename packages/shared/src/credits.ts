@@ -77,6 +77,15 @@ export const AI_ACTION_WEIGHTS: Record<string, number> = {
   // correction ≤18). Cache hits + degrades still cost 0; the deterministic floor
   // scores the session regardless of any reserve failure.
   interview_correction: 1,
+
+  // --- Admin Assistant (Step 38). One unit per model turn — each clarifying
+  // question, each tool-selection decision, and each read-summarisation is a
+  // single callLlmChatJson pass. A multi-turn exchange (underspecified request →
+  // a couple of clarifying questions → a proposal) therefore spends a handful of
+  // units; the per-conversation cost is the SUM of the turns it took and is
+  // reported back on each reply. College-initiated → charged to that college;
+  // super-admin platform conversations pass no collegeId and are not charged. ---
+  admin_assistant: 1,
 };
 export const DEFAULT_AI_ACTION_WEIGHT = 1;
 

@@ -848,6 +848,31 @@ export const InterviewErrorCode = {
 export type InterviewErrorCode =
   (typeof InterviewErrorCode)[keyof typeof InterviewErrorCode];
 
+// --- Admin Assistant (Step 38) ---------------------------------------------
+
+/** Hard cap on model turns per chat request — bounds cost + stops any tool loop.
+ *  Each turn is one callLlmChatJson pass (one credit unit). */
+export const ADMIN_ASSISTANT_MAX_STEPS = 4;
+
+/** Max read-tool result characters fed back into the model within one turn, so a
+ *  large list can't blow the prompt budget. */
+export const ADMIN_ASSISTANT_MAX_READ_CHARS = 6000;
+
+// Step 40: the assistant is a read-only GUIDE — no proposals/approvals, so the
+// proposal TTL, the bulk-confirm threshold, and every proposal/confirm error code
+// are gone. These are the only codes a read-only guide can raise.
+export const AdminAssistantErrorCode = {
+  NOT_ENABLED: "NOT_ENABLED",
+  TOOL_NOT_FOUND: "TOOL_NOT_FOUND",
+  TOOL_FORBIDDEN: "TOOL_FORBIDDEN",
+  INVALID_ARGS: "INVALID_ARGS",
+  /** Cross-tenant access attempt — a college admin reaching another college. */
+  TENANT_FORBIDDEN: "TENANT_FORBIDDEN",
+  LLM_UNAVAILABLE: "LLM_UNAVAILABLE",
+} as const;
+export type AdminAssistantErrorCode =
+  (typeof AdminAssistantErrorCode)[keyof typeof AdminAssistantErrorCode];
+
 /** CommunicationAssessment composite (Step 21). */
 export const CommunicationErrorCode = {
   ASSESSMENT_NOT_FOUND: "ASSESSMENT_NOT_FOUND",
