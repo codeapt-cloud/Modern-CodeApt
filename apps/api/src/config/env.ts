@@ -28,6 +28,33 @@ const envSchema = z.object({
   MONGODB_URI: z.string().min(1, "MONGODB_URI is required"),
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
 
+  // --- MongoDB connection pool (per API process) ---
+  // Mongoose defaults maxPoolSize to 100. On a throttled shared tier (e.g.
+  // Atlas M0, ~110 usable connections) a single process can monopolise the
+  // whole budget; on a dedicated/self-hosted server you WANT a healthy pool.
+  // Tune per deployment. maxConnecting caps simultaneous handshake attempts so
+  // a connection stampede (600 exam starts at once) doesn't thrash the server.
+  MONGO_MAX_POOL_SIZE: z.coerce.number().int().positive().default(100),
+  MONGO_MIN_POOL_SIZE: z.coerce.number().int().nonnegative().default(0),
+  MONGO_MAX_CONNECTING: z.coerce.number().int().positive().default(10),
+  // How long the driver waits to select a server / for a socket op before
+  // failing fast (ms). Short-ish so a saturated DB surfaces errors instead of
+  // hanging requests forever.
+  MONGO_SERVER_SELECTION_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(10_000),
+  MONGO_SOCKET_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
+
+  // --- Exam content cache (anti-stampede) ---
+  // Published exam content (sections, questions, visible sample cases, the
+  // college org-unit tree) is identical for every taker and does not change
+  // mid-sitting, yet the start path re-reads it per student. A short in-process
+  // TTL cache collapses that read flood (~75:1 read amplification observed when
+  // 600 students started at once). 0 disables the cache entirely.
+  EXAM_CONTENT_CACHE_TTL_MS: z.coerce.number().int().nonnegative().default(30_000),
+
   // --- Auth secrets (required; no fallbacks) ---
   JWT_ACCESS_SECRET: z
     .string()

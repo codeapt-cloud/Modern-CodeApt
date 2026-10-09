@@ -54,6 +54,14 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: codeapt-api
     restart: unless-stopped
+    # CPU ceiling (see the budget note on the asr service). The API is IO-bound
+    # (it coordinates; the heavy CPU work is Piston/ASR/worker), so a single
+    # process with 2 cores of headroom carries MCQ/text loads into the low
+    # thousands concurrent. Scaling PAST that needs multiple API replicas, which
+    # is NOT drop-in here: the auto-submit sweep (index.ts setInterval) would run
+    # once per replica, and the express-rate-limit limiters use an in-process
+    # store — both must become single-instance / Redis-backed first.
+    cpus: "2.0"
     # No depends_on for mongo/redis: in production those are MANAGED (external,
     # via .env), and the local containers are opt-in behind the `local-db`
     # profile — a depends_on would break a bare `up` (dependency not enabled)
@@ -82,6 +90,7 @@ services:
       dockerfile: apps/worker/Dockerfile
     container_name: codeapt-worker
     restart: unless-stopped
+    cpus: "2.0"
     # Same as api: load the whole .env so ENCRYPTION_KEY / ASR_URL / ESSAY_LLM_*
     # reach the worker; `environment:` still wins for the keys it sets.
     env_file:
@@ -90,7 +99,12 @@ services:
       NODE_ENV: production
       MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI in .env (the managed database — NOT a local container)}
       REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
-      WORKER_CONCURRENCY: "5"
+      # Jobs run in parallel. The worker mostly WAITS on Piston/ASR (IO-bound
+      # orchestration), so this can comfortably exceed its core count; the real
+      # execution CPU is bounded by the piston/asr caps. 8 keeps a coding-exam
+      # "Run" burst moving without letting it flood Piston. (The speech queue has
+      # its own tighter concurrency cap in the worker so ASR can't be swamped.)
+      WORKER_CONCURRENCY: "8"
       # Self-hosted Piston on the compose network (service `piston`, below). A
       # self-hosted instance serves its API at /api/v2 (the ".../piston" segment
       # is public-emkc routing only). Override via .env to point elsewhere.
@@ -100,28 +114,31 @@ services:
       ASR_URL: ${ASR_URL:-http://asr:2600}
       ASR_TIMEOUT_MS: "30000"
 
-  # faster-whisper ASR (Communication speech spine). CPU-heavy, so it is the one
-  # service with an explicit CPU cap.
+  # faster-whisper ASR (Communication speech spine). CPU-heavy per request.
   #
-  # ONE-SIDED CAP — READ THIS. `cpus: "2.0"` GUARANTEES only that ASR cannot
-  # exceed 2 cores. It does NOT reserve anything for worker/api/mongo/redis:
-  # no other service has a limit, so they still contend freely for whatever
-  # cores are left, and nothing protects them from EACH OTHER. This bounds the
-  # greediest new tenant (ASR), which is the acute risk, but it is not a full
-  # CPU budget. To actually partition the box, add `cpus:` to the neighbours
-  # too — that requires knowing the box size, which is NOT in the repo (no VPS
-  # notes exist) and must come from whoever owns the deploy. Recommended full
-  # division once the core count is known (see the Step-10 report):
-  #   4 vCPU: asr 2.0, worker 1.0, api 0.5, mongo 0.5   (Piston external)
-  #   8 vCPU: asr 3.0, worker 2.0, api 1.5, mongo 1.0, redis 0.5 (+ Piston if co-located)
-  # ASR_THREADS in the image bounds the model's own thread pool as a second lever.
+  # CPU BUDGET — THIS BOX IS AN 8 vCPU / 32 GB VPS, co-locating EVERY service
+  # (app + Mongo + Redis + Piston), and must stay robust whether the load is
+  # MCQ, coding, OR speech exams. Every CPU-using service below carries a `cpus:`
+  # ceiling so no single service can monopolise the box during a burst. These
+  # are CEILINGS, not reservations: a service may burst into cores its idle
+  # neighbours aren't using, but can never exceed its own cap. The ceilings sum
+  # to slightly MORE than 8 on purpose (asr 3 + piston 2.5 + worker 2 + api 2 +
+  # mongo 1.5 + redis 0.5 = 11.5) so spare capacity is shareable while the
+  # greediest tenants (ASR, Piston) are still bounded. The split favours the two
+  # heaviest paths — speech (asr) and code execution (piston) — because those,
+  # not the IO-bound API, are what cap coding/speech throughput.
+  #
+  #   Re-tune only if the box changes size:
+  #     4 vCPU: asr 2.0, piston 1.5, worker 1.0, api 1.0, mongo 1.0, redis 0.5
+  #     16 vCPU: asr 5.0, piston 5.0, worker 4.0, api 3.0, mongo 2.0, redis 1.0
+  # ASR_THREADS bounds the model's own thread pool as a second lever (≤ cpus).
   asr:
     build:
       context: .
       dockerfile: apps/asr/Dockerfile
     container_name: codeapt-asr
     restart: unless-stopped
-    cpus: "2.0"
+    cpus: "3.0"
     # NO env_file on purpose. Unlike api/worker, this Python service reads NONE
     # of the shared .env vars — only ASR_MODEL / ASR_COMPUTE / ASR_THREADS /
     # PIPER_BIN / TTS_VOICE_* / TTS_MAX_CHARS (Dockerfile ENV defaults, overridden
@@ -131,7 +148,8 @@ services:
     environment:
       ASR_MODEL: small
       ASR_COMPUTE: int8
-      ASR_THREADS: "2"
+      # Match the cpus ceiling above so the model actually uses its cores.
+      ASR_THREADS: "3"
     ports:
       - "2600:2600"
 
@@ -157,6 +175,10 @@ services:
     container_name: codeapt-piston
     restart: unless-stopped
     privileged: true
+    # CPU ceiling (see the budget note on the asr service). Code execution is the
+    # ceiling for coding exams; capping it keeps a stampede of "Run" clicks from
+    # eating every core and starving the API/Mongo.
+    cpus: "2.5"
     volumes:
       - piston-data:/piston/packages
 
@@ -180,6 +202,14 @@ services:
     image: mongo:7
     container_name: codeapt-mongo
     restart: unless-stopped
+    # CPU ceiling (see the budget note on the asr service). Once the DB is
+    # self-hosted here (migrated off the managed tier) this is the primary
+    # database, not a throwaway dev store.
+    cpus: "1.5"
+    # Bound the WiredTiger cache so Mongo can't balloon into the RAM the app
+    # services need. On 32 GB, ~8 GB is generous for the cached/indexed working
+    # set; the OS file cache uses the rest. Raise only if the dataset outgrows it.
+    command: ["--wiredTigerCacheSizeGB", "8"]
     ports:
       - "127.0.0.1:27017:27017"
     volumes:
@@ -195,6 +225,7 @@ services:
     image: redis:7-alpine
     container_name: codeapt-redis
     restart: unless-stopped
+    cpus: "0.5"
     ports:
       - "127.0.0.1:6379:6379"
     volumes:

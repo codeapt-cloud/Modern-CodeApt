@@ -40,6 +40,12 @@ await mongoose.connect(process.env.MONGODB_URI);
 beforeEach(async () => {
   const { collections } = mongoose.connection;
   await Promise.all(Object.values(collections).map((c) => c.deleteMany({})));
+  // The exam-content cache is a process-level Map that survives DB wipes; clear
+  // it so a cached payload from a prior test can never bleed into the next.
+  const { __clearExamContentCache } = await import(
+    "../src/lib/exam-content-cache.js"
+  );
+  __clearExamContentCache();
 });
 
 afterAll(async () => {

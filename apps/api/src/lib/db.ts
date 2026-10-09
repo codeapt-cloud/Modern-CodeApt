@@ -43,7 +43,18 @@ export async function connectDatabase(): Promise<void> {
   bindConnectionListeners();
   // Strict query keeps typos in filters from silently matching nothing.
   mongoose.set("strictQuery", true);
-  await mongoose.connect(env.MONGODB_URI);
+  // Pool + timeout tuning (see env.ts). maxConnecting throttles the handshake
+  // stampede when hundreds of requests arrive at once; maxPoolSize caps the
+  // per-process connection budget so one API replica can't exhaust a shared
+  // DB tier. serverSelection/socket timeouts make a saturated DB fail fast
+  // instead of hanging every request indefinitely.
+  await mongoose.connect(env.MONGODB_URI, {
+    maxPoolSize: env.MONGO_MAX_POOL_SIZE,
+    minPoolSize: env.MONGO_MIN_POOL_SIZE,
+    maxConnecting: env.MONGO_MAX_CONNECTING,
+    serverSelectionTimeoutMS: env.MONGO_SERVER_SELECTION_TIMEOUT_MS,
+    socketTimeoutMS: env.MONGO_SOCKET_TIMEOUT_MS,
+  });
 }
 
 export async function disconnectDatabase(): Promise<void> {

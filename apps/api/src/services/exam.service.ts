@@ -49,7 +49,6 @@ import { resolveExamDisplayTitle } from "../lib/exam-title.js";
 import {
   ExamModel,
   ExamQuestionModel,
-  ExamSectionModel,
   ExamTestCaseModel,
   ExamAttemptCounterModel,
   PublicExamLinkModel,
@@ -65,8 +64,14 @@ import {
   TopicModel,
 } from "../models/curriculum.model.js";
 import { ExecutionJobModel } from "../models/execution.model.js";
-import { OrgUnitModel } from "../models/org-unit.model.js";
 import { UserModel } from "../models/user.model.js";
+import {
+  getCachedSections,
+  getCachedSectionQuestions,
+  getCachedExamQuestions,
+  getCachedVisibleCases,
+  getCachedCollegeOrgUnits,
+} from "../lib/exam-content-cache.js";
 
 type AttemptDoc = HydratedDocument<StudentExamAttempt>;
 type ExamDoc = HydratedDocument<Exam>;
@@ -211,7 +216,8 @@ async function loadAndAuthorize(
 // --- Section helpers --------------------------------------------------------
 
 async function loadSections(examId: Types.ObjectId): Promise<SectionDoc[]> {
-  return ExamSectionModel.find({ exam: examId }).sort({ order: 1, _id: 1 });
+  // Cached: identical for every taker, re-read on every start/view/grade.
+  return getCachedSections(examId);
 }
 
 function sanitizeQuestion(
@@ -278,12 +284,7 @@ async function buildSectionView(
     throw new AppError("Section not found", 404, ExamErrorCode.EXAM_NOT_FOUND);
   }
   const data = readResponseData(attempt);
-  const questions = await ExamQuestionModel.find({ section: section._id }).sort(
-    {
-      order: 1,
-      _id: 1,
-    },
-  );
+  const questions = await getCachedSectionQuestions(section._id);
   // Visible (non-hidden) sample cases for the CODE questions in this section.
   const codeIds = questions
     .filter((q) => q.questionType === ExamQuestionType.CODE)
@@ -293,10 +294,7 @@ async function buildSectionView(
     { input: string; expectedOutput: string }[]
   >();
   if (codeIds.length > 0) {
-    const cases = await ExamTestCaseModel.find({
-      question: { $in: codeIds },
-      isHidden: false,
-    }).sort({ order: 1, _id: 1 });
+    const cases = await getCachedVisibleCases(section._id, codeIds);
     for (const c of cases) {
       const key = c.question.toString();
       const list = visibleByQ.get(key) ?? [];
@@ -480,9 +478,7 @@ export async function assertCanTakeExam(
     }
     const targets = (exam.orgUnits ?? []).map((u) => u.toString());
     if (targets.length > 0) {
-      const units = await OrgUnitModel.find({ college: exam.college }).select(
-        "_id parent",
-      );
+      const units = await getCachedCollegeOrgUnits(exam.college);
       const refs = units.map((u) => ({
         id: u._id.toString(),
         parentId: u.parent ? u.parent.toString() : null,
@@ -843,7 +839,7 @@ export async function submitAttempt(
   }
 
   const sections = await loadSections(exam._id);
-  const questions = await ExamQuestionModel.find({ exam: exam._id });
+  const questions = await getCachedExamQuestions(exam._id);
   const data = readResponseData(attempt);
 
   // Auto-submit if triggered by the client OR the current section expired.
@@ -954,7 +950,7 @@ export async function finalizeAttempt(
 
   // All terminal — compute the full breakdown.
   const sections = await loadSections(exam._id);
-  const questions = await ExamQuestionModel.find({ exam: exam._id });
+  const questions = await getCachedExamQuestions(exam._id);
   const questionsBySection = new Map<string, QuestionDoc[]>();
   for (const q of questions) {
     const key = q.section.toString();
