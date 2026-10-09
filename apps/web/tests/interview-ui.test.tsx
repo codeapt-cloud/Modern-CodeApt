@@ -14,7 +14,6 @@ import { InterviewTranscript } from "../src/components/interview/InterviewTransc
 import { InterviewResults } from "../src/components/interview/InterviewResults.js";
 import type { InterviewMessage } from "../src/lib/interview-runner.js";
 import type { SessionObservations } from "../src/lib/camera-observation.js";
-import type { InterviewEngine } from "../src/lib/interview-engine.js";
 
 afterEach(cleanup);
 
@@ -63,9 +62,7 @@ describe("InterviewResults renders observation sentences (B)", () => {
     terminated: false,
     terminatedReason: null,
   };
-  const engine = {
-    result: () => Promise.resolve(result),
-  } as unknown as InterviewEngine;
+  const loadResult = (): Promise<MockInterviewAttemptResult> => Promise.resolve(result);
 
   const observations: SessionObservations = {
     available: true,
@@ -84,7 +81,7 @@ describe("InterviewResults renders observation sentences (B)", () => {
   };
 
   it("shows the plain-language presence observations in the report", async () => {
-    render(<InterviewResults engine={engine} attemptId="a1" observations={observations} />);
+    render(<InterviewResults loadResult={loadResult} attemptId="a1" observations={observations} />);
     expect(await screen.findByText(/looked away from the camera for about 38%/)).toBeTruthy();
     expect(screen.getByText(/out of frame for about 12s/)).toBeTruthy();
     expect(screen.getByText(/paused for about 7s before answering question 3/)).toBeTruthy();
@@ -102,7 +99,7 @@ describe("InterviewResults renders observation sentences (B)", () => {
       longPauses: [],
       sentences: [],
     };
-    render(<InterviewResults engine={engine} attemptId="a1" observations={empty} />);
+    render(<InterviewResults loadResult={loadResult} attemptId="a1" observations={empty} />);
     // The report itself renders (summary), but no presence card / sentences.
     expect(await screen.findByText(/Backend Engineer interview/)).toBeTruthy();
     expect(screen.queryByTestId("observation-sentences")).toBeNull();

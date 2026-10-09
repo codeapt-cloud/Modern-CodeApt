@@ -18,6 +18,7 @@ import {
   interviewCohortExportController,
   interviewCurrentController,
   interviewInProgressController,
+  operatorInterviewReportController,
   interviewResultController,
   interviewTtsController,
   listAvailableInterviewsController,
@@ -126,6 +127,12 @@ collegeInterviewRouter.get(
   "/c/:collegeSlug/interviews/:assessmentId/attempts",
   ...author,
   listInterviewAttemptsController,
+);
+// Operator individual-report drill-down — any attempt in a tenant interview.
+collegeInterviewRouter.get(
+  "/c/:collegeSlug/interviews/:assessmentId/attempts/:attemptId/report",
+  ...author,
+  operatorInterviewReportController,
 );
 collegeInterviewRouter.delete(
   "/c/:collegeSlug/interviews/:assessmentId/attempts/:attemptId",

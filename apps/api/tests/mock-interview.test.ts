@@ -572,3 +572,51 @@ describe("targeting — cohorts + individual students (union)", () => {
     expect(res.body.error.code).toBe("ORG_UNIT_OUT_OF_SCOPE");
   });
 });
+
+describe("operator reporting — individual report drill-down", () => {
+  it("an operator opens ANY student's full report; a student cannot read another's via the operator route", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-rep");
+    const student = await addStudent("mi-rep", adminToken, "rep@x.com");
+    const id = await makeCollegeInterview("mi-rep", adminToken);
+
+    // The student completes an attempt.
+    const result = await completeCollegeInterview("mi-rep", id, student.token);
+    const attemptId = result.attemptId as string;
+
+    // Operator sees it in the attempt list…
+    const list = await request(app)
+      .get(`/api/c/mi-rep/interviews/${id}/attempts`)
+      .set(auth(adminToken));
+    expect(list.status).toBe(200);
+    expect(list.body.items.some((a: { attemptId: string }) => a.attemptId === attemptId)).toBe(true);
+
+    // …and can open the FULL individual report (transcript + dimensions).
+    const report = await request(app)
+      .get(`/api/c/mi-rep/interviews/${id}/attempts/${attemptId}/report`)
+      .set(auth(adminToken));
+    expect(report.status).toBe(200);
+    expect(report.body.attemptId).toBe(attemptId);
+    expect(Array.isArray(report.body.perQuestion)).toBe(true);
+
+    // A plain student is refused the operator route (not faculty + sub-cap).
+    const denied = await request(app)
+      .get(`/api/c/mi-rep/interviews/${id}/attempts/${attemptId}/report`)
+      .set(auth(student.token));
+    expect(denied.status).toBe(403);
+  });
+
+  it("is tenant-scoped: college B's operator cannot read college A's attempt report", async () => {
+    goodRouter();
+    const a = await setupCollege("mi-rep-a");
+    const b = await setupCollege("mi-rep-b");
+    const student = await addStudent("mi-rep-a", a.adminToken, "repa@x.com");
+    const id = await makeCollegeInterview("mi-rep-a", a.adminToken);
+    const result = await completeCollegeInterview("mi-rep-a", id, student.token);
+
+    const cross = await request(app)
+      .get(`/api/c/mi-rep-b/interviews/${id}/attempts/${result.attemptId}/report`)
+      .set(auth(b.adminToken));
+    expect(cross.status).toBe(404);
+  });
+});

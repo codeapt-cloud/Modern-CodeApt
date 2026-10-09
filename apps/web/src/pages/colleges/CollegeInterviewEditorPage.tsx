@@ -105,6 +105,9 @@ export function CollegeInterviewEditorPage(): JSX.Element {
                     {iv.isPublished ? "Unpublish" : "Publish"}
                   </Button>
                   <Button variant="ghost" size="sm" asChild>
+                    <Link to={`/c/${slug}/interviews/${iv.id}/reports`}>Reports</Link>
+                  </Button>
+                  <Button variant="ghost" size="sm" asChild>
                     <Link to={`/c/${slug}/interviews/${iv.id}/cohort`}>Cohort</Link>
                   </Button>
                   {!iv.isPublished ? (

@@ -210,6 +210,17 @@ export const clearInterviewAttemptController = asyncHandler(
     res.status(204).send();
   },
 );
+export const operatorInterviewReportController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(200).json(
+      await interview.getInterviewAttemptReportForOperator(
+        tenantId(req),
+        req.params.assessmentId ?? "",
+        req.params.attemptId ?? "",
+      ),
+    );
+  },
+);
 export const interviewCohortController = asyncHandler(
   async (req: Request, res: Response) => {
     res

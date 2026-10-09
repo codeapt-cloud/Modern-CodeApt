@@ -29,8 +29,10 @@ import {
   Users,
 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { StatCard } from "../../components/colleges/StatCard.js";
+import { Button } from "../../components/ui/button.js";
 import { Reveal } from "../../components/motion/Reveal.js";
 import { Stagger, StaggerItem } from "../../components/motion/Stagger.js";
 import { PageHeader } from "../../components/layout/PageHeader.js";
@@ -487,6 +489,13 @@ export function CollegeAnalyticsPage() {
     context.entitlements,
     CollegeFeature.ANALYTICS,
   );
+  // Mock-interview reporting lives on its own surface (per-interview attempts +
+  // individual reports); surface a jump-off here when the college has it.
+  const hasInterviews = checkEntitlement(
+    context.entitlements,
+    CollegeFeature.INTERVIEW,
+    "interview",
+  );
 
   if (!entitled) {
     return (
@@ -515,6 +524,20 @@ export function CollegeAnalyticsPage() {
         title="Analytics"
         description="How your students are performing across exams, essays, courses, and the daily challenge — over your scope."
       />
+      {hasInterviews ? (
+        <Card className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-ink">Mock interview reports</h3>
+            <p className="text-sm text-ink-muted">
+              Review every student&apos;s interview attempts, open individual scored
+              reports, and export the cohort summary.
+            </p>
+          </div>
+          <Button variant="secondary" size="sm" asChild>
+            <Link to={`/c/${slug}/interviews/manage`}>Open interview reports</Link>
+          </Button>
+        </Card>
+      ) : null}
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>

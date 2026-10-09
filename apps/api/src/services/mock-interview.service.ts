@@ -1232,6 +1232,28 @@ export async function clearInterviewAttempt(
   if (res.deletedCount === 0) throw ATTEMPT_NOT_FOUND();
 }
 
+/**
+ * Operator view of ONE attempt's full report (transcript + per-dimension
+ * breakdown) — the individual-report drill-down for faculty/admins. Unlike the
+ * student `getInterviewResult` (owner-scoped), this loads the attempt scoped to
+ * the tenant interview, so an operator can review any student's attempt.
+ */
+export async function getInterviewAttemptReportForOperator(
+  collegeId: string,
+  assessmentId: string,
+  attemptId: string,
+): Promise<MockInterviewAttemptResult> {
+  const assessment = await loadTenant(collegeId, assessmentId);
+  if (!Types.ObjectId.isValid(attemptId)) throw ATTEMPT_NOT_FOUND();
+  const attempt = await MockInterviewAttemptModel.findOne({
+    _id: new Types.ObjectId(attemptId),
+    assessment: assessment._id,
+  });
+  if (!attempt) throw ATTEMPT_NOT_FOUND();
+  await finalizeIfExpired(attempt, new Date());
+  return toResult(attempt);
+}
+
 export async function getInterviewCohortReport(
   collegeId: string,
   assessmentId: string,

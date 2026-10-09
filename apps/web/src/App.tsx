@@ -350,6 +350,10 @@ const CollegeInterviewCohortPage = named(
   () => import("./pages/colleges/CollegeInterviewCohortPage.js"),
   "CollegeInterviewCohortPage",
 );
+const CollegeInterviewReportsPage = named(
+  () => import("./pages/colleges/CollegeInterviewReportsPage.js"),
+  "CollegeInterviewReportsPage",
+);
 const CollegeCommunicationCohortPage = named(
   () => import("./pages/colleges/CollegeCommunicationCohortPage.js"),
   "CollegeCommunicationCohortPage",
@@ -771,6 +775,10 @@ export function App() {
               <Route
                 path="interviews/:assessmentId/cohort"
                 element={<CollegeInterviewCohortPage />}
+              />
+              <Route
+                path="interviews/:assessmentId/reports"
+                element={<CollegeInterviewReportsPage />}
               />
               <Route
                 path="communication/assessments"

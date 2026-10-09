@@ -106,7 +106,11 @@ export function InterviewSession({
   }
   if (phase === "done" && attempt) {
     return (
-      <InterviewResults engine={engine} attemptId={attempt.attemptId} observations={observations} />
+      <InterviewResults
+        loadResult={(id) => engine.result(id)}
+        attemptId={attempt.attemptId}
+        observations={observations}
+      />
     );
   }
   return <Alert variant="info">Preparing…</Alert>;

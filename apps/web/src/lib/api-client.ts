@@ -4360,6 +4360,17 @@ export const api = {
       );
       return data;
     },
+    /** Operator drill-down: ANY attempt's full report (transcript + dimensions). */
+    attemptReport: async (
+      slug: string,
+      id: string,
+      attemptId: string,
+    ): Promise<MockInterviewAttemptResult> => {
+      const { data } = await http.get<MockInterviewAttemptResult>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/attempts/${attemptId}/report`,
+      );
+      return data;
+    },
     cohort: async (
       slug: string,
       id: string,

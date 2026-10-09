@@ -8,7 +8,6 @@
 import type { MockInterviewAttemptResult } from "@codeapt/shared";
 import { useEffect, useState } from "react";
 
-import type { InterviewEngine } from "../../lib/interview-engine.js";
 import type { SessionObservations } from "../../lib/camera-observation.js";
 import { Alert } from "../ui/alert.js";
 import { Badge } from "../ui/badge.js";
@@ -28,11 +27,12 @@ function Dim({ label, value, note }: { label: string; value: number | null; note
 }
 
 export function InterviewResults({
-  engine,
+  loadResult,
   attemptId,
   observations,
 }: {
-  engine: InterviewEngine;
+  /** Fetch the report for this attempt (student: own; operator: any). */
+  loadResult: (attemptId: string) => Promise<MockInterviewAttemptResult>;
   attemptId: string;
   observations?: SessionObservations | null;
 }): JSX.Element {
@@ -41,14 +41,13 @@ export function InterviewResults({
 
   useEffect(() => {
     let live = true;
-    engine
-      .result(attemptId)
+    loadResult(attemptId)
       .then((r) => live && setData(r))
-      .catch(() => live && setError("Could not load your report."));
+      .catch(() => live && setError("Could not load the report."));
     return () => {
       live = false;
     };
-  }, [engine, attemptId]);
+  }, [loadResult, attemptId]);
 
   if (error) return <Alert variant="error">{error}</Alert>;
   if (!data) return <Skeleton className="h-64 w-full rounded-2xl" />;
