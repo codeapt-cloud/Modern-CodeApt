@@ -6996,7 +6996,14 @@ export const mockInterviewUpsertSchema = z.object({
     maxFollowUpsPerSession: 4,
   }),
   seedQuestions: z.array(interviewSeedQuestionSchema).max(12).default([]),
+  /**
+   * Tenant targeting (college surface). An interview is visible to a student
+   * when its targets are EMPTY (whole college) OR the student is in a targeted
+   * cohort (`orgUnitIds`, descendant-inclusive) OR named individually
+   * (`assignedUserIds`) — the two are a de-duplicated UNION.
+   */
   orgUnitIds: z.array(z.string().min(1)).max(500).optional(),
+  assignedUserIds: z.array(z.string().min(1)).max(5000).optional(),
   /** PLATFORM-surface course attach (college:null) — a MOCK_INTERVIEW topic. */
   topicId: z.string().trim().optional(),
 });
@@ -7014,6 +7021,12 @@ export const mockInterviewDetailSchema = z.object({
   plan: interviewPlanSchema,
   seedQuestions: z.array(interviewSeedQuestionSchema),
   orgUnitIds: z.array(z.string()),
+  /** Individually-assigned student ids (union with the cohort targeting). */
+  assignedUserIds: z.array(z.string()),
+  /** Those students resolved to {id,name,rollNumber} for the editor chips. */
+  assignedStudents: z.array(
+    z.object({ id: z.string(), name: z.string(), rollNumber: z.string() }),
+  ),
   topicId: z.string(),
   createdAt: z.string(),
 });

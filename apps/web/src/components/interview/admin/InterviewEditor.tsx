@@ -6,8 +6,13 @@
  * question PLAN (counts + follow-up caps), the duration/attempt cap, and optional
  * fixed SEED questions.
  */
-import type { MockInterviewUpsert, OrgUnitTreeNode, Role } from "@codeapt/shared";
-import { useEffect, useState } from "react";
+import type {
+  CollegeStudent,
+  MockInterviewUpsert,
+  OrgUnitTreeNode,
+  Role,
+} from "@codeapt/shared";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import { CourseTopicPicker } from "../../curriculum/CourseTopicPicker.js";
@@ -36,6 +41,7 @@ interface Draft {
   maxFollowUpsPerSession: number;
   seedQuestions: SeedQuestion[];
   orgUnitIds: string[];
+  assignedUserIds: string[];
   topicId: string;
 }
 
@@ -52,6 +58,7 @@ const EMPTY: Draft = {
   maxFollowUpsPerSession: 4,
   seedQuestions: [],
   orgUnitIds: [],
+  assignedUserIds: [],
   topicId: "",
 };
 
@@ -70,9 +77,78 @@ function toUpsert(d: Draft, surface: "college" | "platform"): MockInterviewUpser
       maxFollowUpsPerSession: d.maxFollowUpsPerSession,
     },
     seedQuestions: d.seedQuestions,
-    ...(surface === "college" ? { orgUnitIds: d.orgUnitIds } : {}),
+    ...(surface === "college"
+      ? { orgUnitIds: d.orgUnitIds, assignedUserIds: d.assignedUserIds }
+      : {}),
     ...(surface === "platform" && d.topicId ? { topicId: d.topicId } : {}),
   };
+}
+
+/** Searchable multi-select of the college's students (individual assignment). */
+function StudentAssignPicker({
+  students,
+  value,
+  onChange,
+}: {
+  students: CollegeStudent[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+}): JSX.Element {
+  const [q, setQ] = useState("");
+  const selected = useMemo(() => new Set(value), [value]);
+  const toggle = (id: string): void =>
+    onChange(selected.has(id) ? value.filter((x) => x !== id) : [...value, id]);
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    const base = term
+      ? students.filter(
+          (s) =>
+            s.fullName.toLowerCase().includes(term) ||
+            s.rollNumber.toLowerCase().includes(term),
+        )
+      : students;
+    return base.slice(0, 50);
+  }, [students, q]);
+
+  return (
+    <div className="space-y-1.5">
+      <Label>Assign individual students (optional)</Label>
+      <p className="text-xs text-ink-muted">
+        Leave both this and the cohorts empty to make the interview available to
+        the whole college. Otherwise only the selected cohorts and students can take it.
+      </p>
+      <Input
+        placeholder="Search students by name or roll number…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      {value.length > 0 ? (
+        <p className="text-xs text-ink-muted" data-testid="assign-count">
+          {value.length} student{value.length === 1 ? "" : "s"} selected
+        </p>
+      ) : null}
+      <div className="max-h-48 overflow-y-auto rounded-md border border-subtle">
+        {filtered.length === 0 ? (
+          <p className="p-3 text-sm text-ink-muted">No matching students.</p>
+        ) : (
+          filtered.map((s) => (
+            <label
+              key={s.id}
+              className="flex cursor-pointer items-center gap-2 border-b border-subtle px-3 py-2 text-sm last:border-b-0 hover:bg-surface-overlay"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(s.id)}
+                onChange={() => toggle(s.id)}
+              />
+              <span className="truncate text-ink">{s.fullName}</span>
+              <span className="ml-auto shrink-0 text-xs text-ink-muted">{s.rollNumber}</span>
+            </label>
+          ))
+        )}
+      </div>
+    </div>
+  );
 }
 
 function NumberField({
@@ -107,6 +183,7 @@ export function InterviewEditor({
   surface,
   assessmentId,
   orgUnitTree = [],
+  students = [],
   role,
   onSaved,
   onBack,
@@ -115,6 +192,7 @@ export function InterviewEditor({
   surface: "college" | "platform";
   assessmentId: string | null;
   orgUnitTree?: OrgUnitTreeNode[];
+  students?: CollegeStudent[];
   role?: Role;
   onSaved: (id: string) => void;
   onBack: () => void;
@@ -145,6 +223,7 @@ export function InterviewEditor({
           maxFollowUpsPerSession: a.plan.maxFollowUpsPerSession,
           seedQuestions: a.seedQuestions,
           orgUnitIds: a.orgUnitIds,
+          assignedUserIds: a.assignedUserIds,
           topicId: a.topicId,
         });
         setLoading(false);
@@ -295,12 +374,19 @@ export function InterviewEditor({
               </div>
             ) : null
           ) : (
-            <OrgUnitTargetPicker
-              tree={orgUnitTree}
-              value={d.orgUnitIds}
-              onChange={(ids) => set("orgUnitIds", ids)}
-              role={roleValue}
-            />
+            <div className="space-y-4">
+              <OrgUnitTargetPicker
+                tree={orgUnitTree}
+                value={d.orgUnitIds}
+                onChange={(ids) => set("orgUnitIds", ids)}
+                role={roleValue}
+              />
+              <StudentAssignPicker
+                students={students}
+                value={d.assignedUserIds}
+                onChange={(ids) => set("assignedUserIds", ids)}
+              />
+            </div>
           )}
         </CardContent>
       </Card>

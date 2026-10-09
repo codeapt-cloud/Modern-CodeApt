@@ -49,6 +49,9 @@ const mockInterviewSchema = new Schema(
     college: { type: Schema.Types.ObjectId, ref: "College", default: null },
     topic: { type: Schema.Types.ObjectId, ref: "Topic", default: null },
     orgUnits: { type: [Schema.Types.ObjectId], ref: "OrgUnit", default: [] },
+    // Individually-assigned students (college surface). Union with `orgUnits`:
+    // both empty ⇒ whole college; either set ⇒ only the union may take it.
+    assignedUsers: { type: [Schema.Types.ObjectId], ref: "User", default: [] },
     isPublished: { type: Boolean, default: false },
     title: { type: String, required: true, trim: true },
     description: { type: String, default: "" },

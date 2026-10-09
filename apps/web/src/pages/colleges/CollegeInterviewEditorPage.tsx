@@ -22,6 +22,7 @@ export function CollegeInterviewEditorPage(): JSX.Element {
   const { slug, context } = useCollege();
   const authApi = useMemo(() => collegeInterviewAuthoringApi(slug), [slug]);
   const tree = useQuery(() => api.collegeOrgUnits.listTree(slug), [slug]);
+  const students = useQuery(() => api.collegeStudents.list(slug), [slug]);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [tick, setTick] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -44,6 +45,7 @@ export function CollegeInterviewEditorPage(): JSX.Element {
         surface="college"
         assessmentId={editing === "new" ? null : editing}
         orgUnitTree={tree.data?.items ?? []}
+        students={students.data?.items ?? []}
         role={context.membership.role}
         onSaved={() => setTick((n) => n + 1)}
         onBack={() => {

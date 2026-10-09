@@ -494,3 +494,81 @@ describe("publish gate", () => {
     expect(await MockInterviewModel.findById(id)).not.toBeNull();
   });
 });
+
+describe("targeting — cohorts + individual students (union)", () => {
+  /** Create a student in a brand-new org unit; return ids + the unit id. */
+  async function studentInUnit(
+    slug: string,
+    adminToken: string,
+    email: string,
+  ): Promise<{ id: string; token: string; unitId: string }> {
+    const unit = await request(app)
+      .post(`/api/c/${slug}/org-units`)
+      .set(auth(adminToken))
+      .send({ type: "department", name: `D-${email}` });
+    const created = await request(app)
+      .post(`/api/c/${slug}/students`)
+      .set(auth(adminToken))
+      .send({ fullName: email, email, rollNumber: email, orgUnitId: unit.body.id });
+    await UserModel.updateOne({ _id: created.body.id }, { $set: { forcePasswordChange: false } });
+    const login = await request(app)
+      .post("/api/auth/login")
+      .send({ identifier: email, password: TEMP_PW });
+    return { id: created.body.id as string, token: login.body.accessToken as string, unitId: unit.body.id as string };
+  }
+
+  const start = (slug: string, id: string, token: string) =>
+    request(app).post(`/api/c/${slug}/interviews/${id}/attempts`).set(auth(token)).send(START_BODY);
+
+  it("union: a cohort-targeted student AND an individually-assigned student can start; a third is refused", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-tgt");
+    const a = await studentInUnit("mi-tgt", adminToken, "a@tgt.com"); // via cohort
+    const b = await studentInUnit("mi-tgt", adminToken, "b@tgt.com"); // via individual
+    const c = await studentInUnit("mi-tgt", adminToken, "c@tgt.com"); // neither
+
+    const id = await makeCollegeInterview("mi-tgt", adminToken, {
+      orgUnitIds: [a.unitId],
+      assignedUserIds: [b.id],
+    });
+
+    expect((await start("mi-tgt", id, a.token)).status).toBe(201); // in targeted cohort
+    expect((await start("mi-tgt", id, b.token)).status).toBe(201); // named individually
+    const denied = await start("mi-tgt", id, c.token);
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe("ORG_UNIT_OUT_OF_SCOPE");
+  });
+
+  it("no targets at all → available to the whole college", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-all");
+    const c = await studentInUnit("mi-all", adminToken, "c@all.com");
+    const id = await makeCollegeInterview("mi-all", adminToken); // no orgUnitIds / assignedUserIds
+    expect((await start("mi-all", id, c.token)).status).toBe(201);
+  });
+
+  it("individually-assigned student persists + is echoed with name in the detail", async () => {
+    const { adminToken } = await setupCollege("mi-echo");
+    const s = await studentInUnit("mi-echo", adminToken, "echo@x.com");
+    const created = await request(app)
+      .post(`/api/c/mi-echo/interviews`)
+      .set(auth(adminToken))
+      .send(upsertBody({ assignedUserIds: [s.id] }));
+    expect(created.status).toBe(201);
+    expect(created.body.assignedUserIds).toEqual([s.id]);
+    expect(created.body.assignedStudents).toHaveLength(1);
+    expect(created.body.assignedStudents[0].id).toBe(s.id);
+    expect(created.body.assignedStudents[0].name).toBe("echo@x.com");
+  });
+
+  it("refuses an assigned id that is not a student of this college", async () => {
+    const { adminToken } = await setupCollege("mi-bad");
+    const outsider = await makeUser(); // individual user, different tenant
+    const res = await request(app)
+      .post(`/api/c/mi-bad/interviews`)
+      .set(auth(adminToken))
+      .send(upsertBody({ assignedUserIds: [outsider.userId] }));
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe("ORG_UNIT_OUT_OF_SCOPE");
+  });
+});

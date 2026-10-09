@@ -30,6 +30,7 @@ import {
   InterviewQuestionSource,
   InterviewScoreSource,
   MockInterviewStatus,
+  Role,
   TopicType,
   collectDescendantUnitIds,
   buildResumeQuestions,
@@ -131,18 +132,28 @@ export async function assertCanTakeInterview(
       throw NOT_FOUND();
     }
     const targets = (assessment.orgUnits ?? []).map((u) => u.toString());
-    if (targets.length > 0) {
-      const units = await OrgUnitModel.find({ college: assessment.college }).select(
-        "_id parent",
-      );
-      const refs = units.map((u) => ({
-        id: u._id.toString(),
-        parentId: u.parent ? u.parent.toString() : null,
-      }));
-      const studentUnit = user.orgUnit ? user.orgUnit.toString() : null;
-      const allowed = new Set(collectDescendantUnitIds(refs, targets));
-      if (!studentUnit || !allowed.has(studentUnit)) {
-        throw OUT_OF_SCOPE("This interview is not assigned to your cohort");
+    const assigned = (assessment.assignedUsers ?? []).map((u) => u.toString());
+    // No targets at all → the whole college. Otherwise the student must be in
+    // the UNION of the targeted cohorts (descendant-inclusive) and the
+    // individually-assigned students.
+    if (targets.length > 0 || assigned.length > 0) {
+      if (assigned.includes(userId)) return; // named individually
+      let inCohort = false;
+      if (targets.length > 0) {
+        const units = await OrgUnitModel.find({ college: assessment.college }).select(
+          "_id parent",
+        );
+        const refs = units.map((u) => ({
+          id: u._id.toString(),
+          parentId: u.parent ? u.parent.toString() : null,
+        }));
+        const studentUnit = user.orgUnit ? user.orgUnit.toString() : null;
+        inCohort =
+          !!studentUnit &&
+          new Set(collectDescendantUnitIds(refs, targets)).has(studentUnit);
+      }
+      if (!inCohort) {
+        throw OUT_OF_SCOPE("This interview is not assigned to you");
       }
     }
     return;
@@ -291,6 +302,25 @@ async function validateOrgUnits(
   return found.map((u) => u._id);
 }
 
+/** Individually-assigned students — each must be a STUDENT of this college. */
+async function validateAssignedUsers(
+  collegeId: string,
+  userIds: readonly string[] | undefined,
+): Promise<Types.ObjectId[]> {
+  if (!userIds || userIds.length === 0) return [];
+  const ids = [...new Set(userIds)].filter((id) => Types.ObjectId.isValid(id));
+  if (ids.length === 0) return [];
+  const found = await UserModel.find({
+    _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
+    college: new Types.ObjectId(collegeId),
+    role: Role.STUDENT,
+  }).select("_id");
+  if (found.length !== ids.length) {
+    throw OUT_OF_SCOPE("One or more students are unknown in this college");
+  }
+  return found.map((u) => u._id);
+}
+
 async function resolveInterviewTopic(
   topicId: string,
   excludeId?: Types.ObjectId,
@@ -321,7 +351,21 @@ async function resolveInterviewTopic(
 // ---------------------------------------------------------------------------
 // Projections.
 // ---------------------------------------------------------------------------
-function toDetail(doc: AssessmentDoc): MockInterviewDetail {
+async function toDetail(doc: AssessmentDoc): Promise<MockInterviewDetail> {
+  const assignedUserIds = (doc.assignedUsers ?? []).map((u) => u.toString());
+  // Names + roll numbers live on ProfileModel (not User), keyed by user id.
+  const assignedStudents =
+    assignedUserIds.length > 0
+      ? (
+          await ProfileModel.find({
+            user: { $in: (doc.assignedUsers ?? []) as Types.ObjectId[] },
+          }).select("user fullName rollNumber")
+        ).map((p) => ({
+          id: p.user.toString(),
+          name: p.fullName ?? "",
+          rollNumber: p.rollNumber ?? "",
+        }))
+      : [];
   return {
     id: doc._id.toString(),
     title: doc.title,
@@ -345,6 +389,8 @@ function toDetail(doc: AssessmentDoc): MockInterviewDetail {
       promptAudioVoiceVersion: s.promptAudioVoiceVersion ?? "",
     })),
     orgUnitIds: (doc.orgUnits ?? []).map((u) => u.toString()),
+    assignedUserIds,
+    assignedStudents,
     topicId: doc.topic ? doc.topic.toString() : "",
     createdAt: (doc.createdAt as Date).toISOString(),
   };
@@ -402,8 +448,15 @@ export async function createCollegeInterview(
 ): Promise<MockInterviewDetail> {
   const scope = createTenantScope(collegeId);
   const orgUnits = await validateOrgUnits(collegeId, input.orgUnitIds);
+  const assignedUsers = await validateAssignedUsers(collegeId, input.assignedUserIds);
   const doc = await MockInterviewModel.create(
-    scope.attach({ topic: null, orgUnits, isPublished: false, ...buildAssessmentFields(input) }),
+    scope.attach({
+      topic: null,
+      orgUnits,
+      assignedUsers,
+      isPublished: false,
+      ...buildAssessmentFields(input),
+    }),
   );
   return toDetail(doc);
 }
@@ -427,8 +480,10 @@ export async function updateCollegeInterview(
 ): Promise<MockInterviewDetail> {
   const doc = await loadTenant(collegeId, assessmentId);
   const orgUnits = await validateOrgUnits(collegeId, input.orgUnitIds);
+  const assignedUsers = await validateAssignedUsers(collegeId, input.assignedUserIds);
   Object.assign(doc, buildAssessmentFields(input));
   doc.orgUnits = orgUnits;
+  doc.assignedUsers = assignedUsers;
   await doc.save();
   return toDetail(doc);
 }
@@ -1256,8 +1311,10 @@ export async function listAvailableForCollege(
   const studentUnit = user?.orgUnit ? user.orgUnit.toString() : null;
   const visible = docs.filter((d) => {
     const targets = (d.orgUnits ?? []).map((u) => u.toString());
-    if (targets.length === 0) return true;
-    if (!studentUnit) return false;
+    const assigned = (d.assignedUsers ?? []).map((u) => u.toString());
+    if (targets.length === 0 && assigned.length === 0) return true; // whole college
+    if (assigned.includes(userId)) return true; // named individually
+    if (targets.length === 0 || !studentUnit) return false;
     return new Set(collectDescendantUnitIds(refs, targets)).has(studentUnit);
   });
   return { items: await toPlayList(userId, visible) };
