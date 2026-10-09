@@ -620,3 +620,71 @@ describe("operator reporting — individual report drill-down", () => {
     expect(cross.status).toBe(404);
   });
 });
+
+describe("operator attempt management — reset + delete", () => {
+  it("reset deletes ALL a student's attempts so a capped student can try again", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-reset");
+    const student = await addStudent("mi-reset", adminToken, "reset@x.com");
+    const id = await makeCollegeInterview("mi-reset", adminToken, { maxAttempts: 1 });
+    await completeCollegeInterview("mi-reset", id, student.token);
+
+    // Cap reached → a retry is refused.
+    const blocked = await request(app)
+      .post(`/api/c/mi-reset/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe("ATTEMPT_LIMIT_REACHED");
+
+    // Operator resets that student.
+    const reset = await request(app)
+      .delete(`/api/c/mi-reset/interviews/${id}/students/${student.id}/attempts`)
+      .set(auth(adminToken));
+    expect(reset.status).toBe(200);
+    expect(reset.body.deleted).toBeGreaterThanOrEqual(1);
+
+    // Their attempts are gone from the operator list…
+    const list = await request(app)
+      .get(`/api/c/mi-reset/interviews/${id}/attempts`)
+      .set(auth(adminToken));
+    expect(list.body.items.filter((a: { userId: string }) => a.userId === student.id)).toHaveLength(0);
+
+    // …and they can start again.
+    const retry = await request(app)
+      .post(`/api/c/mi-reset/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    expect(retry.status).toBe(201);
+  });
+
+  it("delete removes a single attempt record (operator only)", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-del");
+    const student = await addStudent("mi-del", adminToken, "del@x.com");
+    const id = await makeCollegeInterview("mi-del", adminToken, { maxAttempts: 0 });
+    const r1 = await completeCollegeInterview("mi-del", id, student.token);
+
+    const before = await request(app)
+      .get(`/api/c/mi-del/interviews/${id}/attempts`)
+      .set(auth(adminToken));
+    const n0 = before.body.items.length as number;
+    expect(n0).toBeGreaterThanOrEqual(1);
+
+    // A student cannot delete attempts (author-gated).
+    const denied = await request(app)
+      .delete(`/api/c/mi-del/interviews/${id}/attempts/${r1.attemptId}`)
+      .set(auth(student.token));
+    expect(denied.status).toBe(403);
+
+    const del = await request(app)
+      .delete(`/api/c/mi-del/interviews/${id}/attempts/${r1.attemptId}`)
+      .set(auth(adminToken));
+    expect(del.status).toBe(204);
+
+    const after = await request(app)
+      .get(`/api/c/mi-del/interviews/${id}/attempts`)
+      .set(auth(adminToken));
+    expect(after.body.items.length).toBe(n0 - 1);
+  });
+});

@@ -210,6 +210,17 @@ export const clearInterviewAttemptController = asyncHandler(
     res.status(204).send();
   },
 );
+export const resetInterviewForUserController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(200).json(
+      await interview.resetInterviewAttemptsForUser(
+        tenantId(req),
+        req.params.assessmentId ?? "",
+        req.params.userId ?? "",
+      ),
+    );
+  },
+);
 export const operatorInterviewReportController = asyncHandler(
   async (req: Request, res: Response) => {
     res.status(200).json(

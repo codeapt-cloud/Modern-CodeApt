@@ -4371,6 +4371,21 @@ export const api = {
       );
       return data;
     },
+    /** Delete ONE attempt record. */
+    clearAttempt: async (slug: string, id: string, attemptId: string): Promise<void> => {
+      await http.delete(`${API_PREFIX}/c/${slug}/interviews/${id}/attempts/${attemptId}`);
+    },
+    /** Reset a student: delete all their attempts on this interview so they can retry. */
+    resetUser: async (
+      slug: string,
+      id: string,
+      userId: string,
+    ): Promise<{ deleted: number }> => {
+      const { data } = await http.delete<{ deleted: number }>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/students/${userId}/attempts`,
+      );
+      return data;
+    },
     cohort: async (
       slug: string,
       id: string,

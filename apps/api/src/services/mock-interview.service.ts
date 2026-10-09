@@ -1254,6 +1254,25 @@ export async function getInterviewAttemptReportForOperator(
   return toResult(attempt);
 }
 
+/**
+ * Reset ONE student on ONE interview: delete all their attempts for it. Because
+ * the attempt cap counts attempt DOCUMENTS (not a counter), removing them frees
+ * the student to try again — the fix for an interrupted/broken sitting.
+ */
+export async function resetInterviewAttemptsForUser(
+  collegeId: string,
+  assessmentId: string,
+  userId: string,
+): Promise<{ deleted: number }> {
+  const assessment = await loadTenant(collegeId, assessmentId);
+  if (!Types.ObjectId.isValid(userId)) throw ATTEMPT_NOT_FOUND();
+  const res = await MockInterviewAttemptModel.deleteMany({
+    assessment: assessment._id,
+    user: new Types.ObjectId(userId),
+  });
+  return { deleted: res.deletedCount ?? 0 };
+}
+
 export async function getInterviewCohortReport(
   collegeId: string,
   assessmentId: string,

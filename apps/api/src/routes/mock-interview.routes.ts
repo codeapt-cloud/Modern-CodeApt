@@ -19,6 +19,7 @@ import {
   interviewCurrentController,
   interviewInProgressController,
   operatorInterviewReportController,
+  resetInterviewForUserController,
   interviewResultController,
   interviewTtsController,
   listAvailableInterviewsController,
@@ -138,6 +139,12 @@ collegeInterviewRouter.delete(
   "/c/:collegeSlug/interviews/:assessmentId/attempts/:attemptId",
   ...author,
   clearInterviewAttemptController,
+);
+// Reset a single student on this interview (delete all their attempts → retry).
+collegeInterviewRouter.delete(
+  "/c/:collegeSlug/interviews/:assessmentId/students/:userId/attempts",
+  ...author,
+  resetInterviewForUserController,
 );
 collegeInterviewRouter.get(
   "/c/:collegeSlug/interviews/:assessmentId/cohort",

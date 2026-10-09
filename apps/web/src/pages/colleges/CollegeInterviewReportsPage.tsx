@@ -6,6 +6,7 @@
  * here from the Manage list ("Reports") and the Analytics hub. Author-gated.
  */
 import { CollegeFeature, checkEntitlement } from "@codeapt/shared";
+import { Download } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -16,7 +17,8 @@ import { Button } from "../../components/ui/button.js";
 import { Card, CardContent } from "../../components/ui/card.js";
 import { EmptyState } from "../../components/ui/empty-state.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
-import { api } from "../../lib/api-client.js";
+import { api, parseApiError } from "../../lib/api-client.js";
+import { triggerBlobDownload } from "../../lib/download.js";
 import { useQuery } from "../../lib/use-query.js";
 import { useCollege } from "./college-context.js";
 
@@ -28,14 +30,43 @@ export function CollegeInterviewReportsPage(): JSX.Element {
   const { slug, context } = useCollege();
   const { assessmentId = "" } = useParams();
   const canView = checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview");
+  const [tick, setTick] = useState(0);
   const attempts = useQuery(
     () =>
       canView
         ? api.collegeInterview.listAttempts(slug, assessmentId)
         : Promise.reject(new Error("Not authorized")),
-    [slug, assessmentId, canView],
+    [slug, assessmentId, canView, tick],
   );
   const [open, setOpen] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const act = async (key: string, fn: () => Promise<unknown>): Promise<void> => {
+    setBusyId(key);
+    setActionError(null);
+    try {
+      await fn();
+      setTick((n) => n + 1);
+    } catch (e) {
+      setActionError(parseApiError(e).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const download = async (): Promise<void> => {
+    setDownloading(true);
+    setActionError(null);
+    try {
+      triggerBlobDownload(await api.collegeInterview.exportCohort(slug, assessmentId));
+    } catch (e) {
+      setActionError(parseApiError(e).message);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   if (open) {
     return (
@@ -67,9 +98,17 @@ export function CollegeInterviewReportsPage(): JSX.Element {
           <Button variant="secondary" size="sm" asChild>
             <Link to={`/c/${slug}/interviews/${assessmentId}/cohort`}>Cohort summary</Link>
           </Button>
+          <Button
+            size="sm"
+            onClick={() => void download()}
+            disabled={downloading || (attempts.data?.items.length ?? 0) === 0}
+          >
+            <Download className="mr-2 h-4 w-4" /> {downloading ? "Preparing…" : "Export .xlsx"}
+          </Button>
         </div>
       </div>
 
+      {actionError ? <Alert variant="error">{actionError}</Alert> : null}
       {attempts.error ? <Alert variant="error">{attempts.error}</Alert> : null}
 
       {attempts.loading ? (
@@ -112,10 +151,48 @@ export function CollegeInterviewReportsPage(): JSX.Element {
                     <td className="px-3 py-2 text-xs">{a.source}</td>
                     <td className="px-3 py-2 text-xs text-ink-muted">{when(a.startedAt)}</td>
                     <td className="px-3 py-2 text-xs text-ink-muted">{when(a.scoredAt)}</td>
-                    <td className="px-3 py-2 text-right">
-                      <Button size="sm" variant="secondary" onClick={() => setOpen(a.attemptId)}>
-                        View report
-                      </Button>
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => setOpen(a.attemptId)}>
+                          View report
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busyId !== null}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Reset ${a.userName || "this student"}? This deletes ALL their attempts for this interview so they can try again.`,
+                              )
+                            ) {
+                              void act(`reset:${a.userId}`, () =>
+                                api.collegeInterview.resetUser(slug, assessmentId, a.userId),
+                              );
+                            }
+                          }}
+                        >
+                          {busyId === `reset:${a.userId}` ? "Resetting…" : "Reset"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={busyId !== null}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                "Delete this single attempt record? This cannot be undone.",
+                              )
+                            ) {
+                              void act(`del:${a.attemptId}`, () =>
+                                api.collegeInterview.clearAttempt(slug, assessmentId, a.attemptId),
+                              );
+                            }
+                          }}
+                        >
+                          {busyId === `del:${a.attemptId}` ? "Deleting…" : "Delete"}
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
