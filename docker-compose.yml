@@ -199,7 +199,7 @@ services:
 
   mongo:
     profiles: ["local-db"]
-    image: mongo:7
+    image: mongo:8
     container_name: codeapt-mongo
     restart: unless-stopped
     # CPU ceiling (see the budget note on the asr service). Once the DB is
