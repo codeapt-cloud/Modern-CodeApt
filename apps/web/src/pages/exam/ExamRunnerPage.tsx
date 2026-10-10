@@ -93,7 +93,10 @@ export function ExamRunnerPage() {
     return (
       <ExamRunner
         attemptId={started.attemptId}
-        token={null}
+        // Send the per-attempt token (like the public runner) so the attempt
+        // stays authorized even if the login session lapses mid-exam — the
+        // engine calls use "owner session OR attempt token".
+        token={started.attemptToken}
         initial={started}
         onExit={() => navigate(returnTo)}
         exitLabel={exitLabel}

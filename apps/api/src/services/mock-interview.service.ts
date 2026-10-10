@@ -25,6 +25,7 @@ import {
   INTERVIEW_MAX_QUESTIONS,
   INTERVIEW_MAX_WARNINGS,
   INTERVIEW_PREP_SECONDS,
+  INTERVIEW_TURN_BUDGET_SECONDS,
   InterviewErrorCode,
   type InterviewQuestionCategory,
   InterviewQuestionSource,
@@ -783,7 +784,12 @@ export async function startInterview(
   }
 
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + assessment.durationMinutes * 60 * 1000);
+  // Baseline = the author's duration, but never less than the time needed to
+  // ask every planned question at the per-question budget. extendDeadline keeps
+  // it ahead as follow-ups are spliced, so the interview runs to completion.
+  const authorBudgetMs = assessment.durationMinutes * 60 * 1000;
+  const turnBudgetMs = turns.length * INTERVIEW_TURN_BUDGET_SECONDS * 1000;
+  const expiresAt = new Date(now.getTime() + Math.max(authorBudgetMs, turnBudgetMs));
   const attempt = await MockInterviewAttemptModel.create({
     user: new Types.ObjectId(userId),
     assessment: assessment._id,
@@ -1008,6 +1014,9 @@ export async function submitInterviewAnswer(
       reindexTurns(attempt);
       attempt.followUpsUsed += 1;
       followUpAdded = true;
+      // The spliced follow-up earns its own time — extend the deadline so adding
+      // a probe never pushes the student toward expiry.
+      extendDeadline(attempt, now);
     }
   } else {
     turn.answered = false;
@@ -1033,6 +1042,9 @@ export async function submitInterviewAnswer(
     await finalizeAttempt(attempt, MockInterviewStatus.SCORED, now);
     closing = attempt.closing || interviewClosing();
   } else {
+    // Guarantee the next question its full budget from now, so a slow but
+    // active student always has time to finish the remaining questions.
+    extendDeadline(attempt, now);
     await attempt.save();
   }
   return respond();
@@ -1042,6 +1054,22 @@ function reindexTurns(attempt: AttemptDoc): void {
   attempt.turns.forEach((t, i) => {
     t.index = i;
   });
+}
+
+/**
+ * Keep the overall deadline ahead of the questions STILL to be asked, so the
+ * interview runs until the (capped) question set is complete and an actively-
+ * progressing student is never expired mid-interview. The deadline is set to at
+ * least `remainingTurns × TURN_BUDGET` from `now`, and is only ever EXTENDED,
+ * never shrunk — a fast student keeps whatever larger author budget they had,
+ * and each spliced follow-up earns its own time. Bounded because the turn count
+ * is hard-capped. Returns nothing; mutates attempt.expiresAt in place.
+ */
+function extendDeadline(attempt: AttemptDoc, now: Date): void {
+  const remaining = Math.max(0, attempt.turns.length - attempt.currentIndex);
+  const floor = now.getTime() + remaining * INTERVIEW_TURN_BUDGET_SECONDS * 1000;
+  const current = attempt.expiresAt?.getTime() ?? 0;
+  if (floor > current) attempt.expiresAt = new Date(floor);
 }
 
 async function planFor(assessmentId: Types.ObjectId): Promise<{

@@ -21,7 +21,10 @@ import {
   TopicModel,
 } from "../src/models/curriculum.model.js";
 import { CollegeModel } from "../src/models/college.model.js";
-import { MockInterviewModel } from "../src/models/mock-interview.model.js";
+import {
+  MockInterviewModel,
+  MockInterviewAttemptModel,
+} from "../src/models/mock-interview.model.js";
 import { UserModel } from "../src/models/user.model.js";
 import * as colleges from "../src/services/college.service.js";
 
@@ -686,5 +689,58 @@ describe("operator attempt management — reset + delete", () => {
       .get(`/api/c/mi-del/interviews/${id}/attempts`)
       .set(auth(adminToken));
     expect(after.body.items.length).toBe(n0 - 1);
+  });
+});
+
+describe("time budget — runs until the questions are completed", () => {
+  it("start deadline covers every question at the per-question budget, not just durationMinutes", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-budget");
+    const student = await addStudent("mi-budget", adminToken, "budget@x.com");
+    // Tiny author duration (1 min) with 2 main questions: the per-question
+    // budget must override it so the student isn't cut off.
+    const id = await makeCollegeInterview("mi-budget", adminToken, {
+      durationMinutes: 1,
+      plan: { behaviouralCount: 1, technicalCount: 1, maxFollowUpsPerAnswer: 0, maxFollowUpsPerSession: 0 },
+    });
+    const start = await request(app)
+      .post(`/api/c/mi-budget/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    expect(start.status).toBe(201);
+    // 1 author minute = 60s; two questions × budget ≫ that → budget-driven.
+    expect(start.body.remainingSeconds).toBeGreaterThan(120);
+  });
+
+  it("each answer pushes the deadline out to cover the remaining questions (no mid-interview expiry)", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-slow");
+    const student = await addStudent("mi-slow", adminToken, "slow@x.com");
+    const id = await makeCollegeInterview("mi-slow", adminToken, {
+      durationMinutes: 1,
+      plan: { behaviouralCount: 1, technicalCount: 1, maxFollowUpsPerAnswer: 0, maxFollowUpsPerSession: 0 },
+    });
+    const start = await request(app)
+      .post(`/api/c/mi-slow/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    const attemptId = start.body.attemptId as string;
+
+    // Simulate a slow student whose deadline is nearly up (but not past).
+    await MockInterviewAttemptModel.updateOne(
+      { _id: attemptId },
+      { $set: { expiresAt: new Date(Date.now() + 4000) } },
+    );
+    const sub = await request(app)
+      .post(`/api/c/mi-slow/interviews/attempts/${attemptId}/answers/0`)
+      .set(auth(student.token))
+      .send({ audioUrl: "https://res.cloudinary.com/demo/video/upload/a.webm", transcript: ANSWER, fluency: FLUENCY, latencySeconds: 2 });
+    expect(sub.status).toBe(202);
+
+    // Not expired, still in progress, and the deadline was pushed well out to
+    // cover the next question.
+    const after = await MockInterviewAttemptModel.findById(attemptId).lean();
+    expect(after?.status).toBe("in_progress");
+    expect(after?.expiresAt && new Date(after.expiresAt).getTime()).toBeGreaterThan(Date.now() + 60_000);
   });
 });

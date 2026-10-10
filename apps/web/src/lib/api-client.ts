@@ -411,6 +411,37 @@ async function runRefresh(): Promise<void> {
   return refreshPromise;
 }
 
+// --- Proactive session keep-alive ------------------------------------------
+// The access token is short-lived (15m) but activities (exams up to ~2h, mock
+// interviews, speaking) run far longer. If it lapses mid-activity the user is
+// interrupted (an exam engine call 403s; an interview 401s and can fail to
+// recover under load). Rather than wait for that failure, refresh the token in
+// the BACKGROUND before it expires while a tab is open and signed in, and again
+// whenever a backgrounded tab becomes visible. Single-flight via runRefresh, so
+// it never stampedes the refresh-rotation guard. Returns a stop function.
+const SESSION_KEEPALIVE_MS = 12 * 60 * 1000; // < the 15m access TTL
+
+export function startSessionKeepAlive(): () => void {
+  const tick = (): void => {
+    void runRefresh().catch(() => undefined); // a failure surfaces via the 401 path
+  };
+  const timer = setInterval(tick, SESSION_KEEPALIVE_MS);
+  const onVisible = (): void => {
+    if (typeof document !== "undefined" && document.visibilityState === "visible") {
+      tick();
+    }
+  };
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onVisible);
+  }
+  return () => {
+    clearInterval(timer);
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onVisible);
+    }
+  };
+}
+
 http.interceptors.response.use(
   (res) => res,
   async (error: unknown) => {

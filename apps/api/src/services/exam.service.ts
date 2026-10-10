@@ -534,6 +534,23 @@ export async function startAttempt(
     );
   }
 
+  // RESUME-OR-START: if this user already has an in-progress attempt for this
+  // exam, return it (at its current section) instead of creating + counting a
+  // new one. This is what lets a student who was interrupted — a dropped
+  // session, a reload, a network blip — get straight back into their attempt,
+  // and is why an interruption no longer trips ATTEMPT_LIMIT_REACHED. The access
+  // code is NOT re-required on resume (it was validated at first start).
+  const existing = await StudentExamAttemptModel.findOne({
+    exam: exam._id,
+    user: new Types.ObjectId(userId),
+    status: ExamAttemptStatus.IN_PROGRESS,
+  });
+  if (existing) {
+    const idx = currentSectionIndex(existing, sections);
+    const view = await buildSectionView(existing, exam, sections, idx, new Date());
+    return { ...view, attemptToken: existing.attemptToken };
+  }
+
   // Optional per-exam start-code gate — checked BEFORE the attempt counter so a
   // wrong/missing code never consumes one of the student's attempts.
   assertAccessCode(exam.accessCodeEnabled, exam.accessCode, accessCode);

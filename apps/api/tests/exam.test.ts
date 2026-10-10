@@ -449,7 +449,7 @@ describe("admin exam list", () => {
 });
 
 describe("attempt limits + reset audit", () => {
-  it("blocks a second start and reset re-enables it with an audit row", async () => {
+  it("resumes an in-progress start, blocks a NEW one after finishing, and reset re-enables it", async () => {
     const admin = await registerAndLogin("admin");
     const { token, userId } = await registerAndLogin();
     const { exam } = await makeExam({ enroll: userId });
@@ -458,6 +458,20 @@ describe("attempt limits + reset audit", () => {
       .post(`/api/exams/${exam._id.toString()}/attempts`)
       .set(auth(token));
     expect(first.status).toBe(201);
+
+    // RESUME: a second start while the attempt is in progress returns the SAME
+    // attempt (no new attempt, no limit error) — the interruption fix.
+    const resumed = await request(app)
+      .post(`/api/exams/${exam._id.toString()}/attempts`)
+      .set(auth(token));
+    expect(resumed.status).toBe(201);
+    expect(resumed.body.attemptId).toBe(first.body.attemptId);
+
+    // Finish that attempt → the single allowed attempt is now consumed.
+    await StudentExamAttemptModel.updateOne(
+      { _id: first.body.attemptId },
+      { $set: { status: ExamAttemptStatus.SUBMITTED } },
+    );
     const second = await request(app)
       .post(`/api/exams/${exam._id.toString()}/attempts`)
       .set(auth(token));

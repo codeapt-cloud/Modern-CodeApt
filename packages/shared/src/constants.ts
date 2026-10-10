@@ -505,6 +505,19 @@ export const INTERVIEW_MAX_QUESTIONS = 12;
 export const INTERVIEW_ANSWER_WINDOW_SECONDS = 120;
 export const INTERVIEW_PREP_SECONDS = 20;
 
+/**
+ * Per-question TIME BUDGET used to keep the overall deadline ahead of the
+ * questions still to be asked, so a student is never cut off mid-interview and
+ * the session runs until the (capped) question set is complete. It covers one
+ * question end-to-end: prep + the answer window + headroom for the avatar's
+ * spoken prompt (TTS), transcription, grading and network. The overall deadline
+ * is always kept ≥ remainingTurns × this budget (and ≥ the author's
+ * durationMinutes), never shrunk. The turn count is hard-capped
+ * (INTERVIEW_MAX_QUESTIONS + INTERVIEW_MAX_FOLLOWUPS_PER_SESSION), so the total
+ * stays bounded. */
+export const INTERVIEW_TURN_BUDGET_SECONDS =
+  INTERVIEW_PREP_SECONDS + INTERVIEW_ANSWER_WINDOW_SECONDS + 60;
+
 /** A mock interview terminates on the same three-warning budget as speaking's
  *  hardened Communication profile (Step 32) — a solo practice session under a
  *  camera-observation layer (Part 2). */

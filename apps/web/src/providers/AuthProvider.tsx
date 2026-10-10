@@ -26,7 +26,12 @@ import {
   type ReactNode,
 } from "react";
 
-import { api, parseApiError, setAuthEventHandlers } from "../lib/api-client.js";
+import {
+  api,
+  parseApiError,
+  setAuthEventHandlers,
+  startSessionKeepAlive,
+} from "../lib/api-client.js";
 
 export type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -103,6 +108,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
     return () => setAuthEventHandlers({});
   }, [refresh]);
+
+  // While signed in, keep the access token fresh in the background so no long
+  // activity (exam / interview / speaking) is interrupted by a silent lapse.
+  useEffect(() => {
+    if (state.status !== "authenticated") return;
+    return startSessionKeepAlive();
+  }, [state.status]);
 
   const login = useCallback(async (input: LoginInput) => {
     const res = await api.auth.login(input);
