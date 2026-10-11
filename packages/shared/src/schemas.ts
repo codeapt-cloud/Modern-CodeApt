@@ -6595,10 +6595,19 @@ export type RescoreResponse = z.infer<typeof rescoreResponseSchema>;
  *  speech engine a new speaking assessment inherits. */
 export const platformSettingsSchema = z.object({
   defaultSpeechEngine: speechEngineSchema,
+  /**
+   * When true, AI tasks marked `sensitive` (interviews, speaking, essays —
+   * resume/answer text) MAY use providers that train on data. Default false
+   * keeps the privacy guard on: sensitive tasks skip training providers, and if
+   * none are data-safe the task degrades (deterministic floor). Turn this on
+   * only if your deployment accepts that personal text may be used for training
+   * in exchange for the AI always working on the available providers. */
+  allowTrainingProvidersForSensitive: z.boolean(),
 });
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
 export const platformSettingsUpdateSchema = z.object({
   defaultSpeechEngine: speechEngineSchema.optional(),
+  allowTrainingProvidersForSensitive: z.boolean().optional(),
 });
 export type PlatformSettingsUpdate = z.infer<
   typeof platformSettingsUpdateSchema

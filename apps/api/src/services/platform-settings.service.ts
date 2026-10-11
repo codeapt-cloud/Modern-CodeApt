@@ -26,7 +26,19 @@ export async function getPlatformSettings(): Promise<PlatformSettings> {
   return {
     defaultSpeechEngine:
       (doc.defaultSpeechEngine as SpeechEngineT) ?? SpeechEngine.WHISPER,
+    allowTrainingProvidersForSensitive:
+      doc.allowTrainingProvidersForSensitive ?? false,
   };
+}
+
+/** Whether sensitive AI tasks may use training providers. Safe-false on error
+ *  so a settings read failure can never silently weaken the privacy guard. */
+export async function getAllowTrainingProvidersForSensitive(): Promise<boolean> {
+  try {
+    return (await getPlatformSettings()).allowTrainingProvidersForSensitive;
+  } catch {
+    return false;
+  }
 }
 
 /** The default engine a new speaking assessment inherits when the author omits
@@ -46,9 +58,15 @@ export async function updatePlatformSettings(
   if (input.defaultSpeechEngine !== undefined) {
     doc.defaultSpeechEngine = input.defaultSpeechEngine;
   }
+  if (input.allowTrainingProvidersForSensitive !== undefined) {
+    doc.allowTrainingProvidersForSensitive =
+      input.allowTrainingProvidersForSensitive;
+  }
   await doc.save();
   return {
     defaultSpeechEngine:
       (doc.defaultSpeechEngine as SpeechEngineT) ?? SpeechEngine.WHISPER,
+    allowTrainingProvidersForSensitive:
+      doc.allowTrainingProvidersForSensitive ?? false,
   };
 }

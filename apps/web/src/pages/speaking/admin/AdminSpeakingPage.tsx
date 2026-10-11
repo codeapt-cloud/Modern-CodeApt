@@ -39,6 +39,15 @@ export function AdminSpeakingPage() {
       setActionError(parseApiError(err).message);
     }
   };
+  const setAllowTraining = async (v: boolean): Promise<void> => {
+    setActionError(null);
+    try {
+      await api.platformSettings.update({ allowTrainingProvidersForSensitive: v });
+      settings.refetch();
+    } catch (err) {
+      setActionError(parseApiError(err).message);
+    }
+  };
 
   // Publish refusal (NOT_PUBLISHABLE names the offending item / empty case) and
   // delete refusal (published, or has attempts) must surface the SERVER's reason.
@@ -109,6 +118,26 @@ export function AdminSpeakingPage() {
           <span className="text-xs text-ink-muted">
             Authors can override per assessment; existing assessments are unaffected.
           </span>
+          <label className="mt-2 flex w-full items-start gap-2 border-t border-subtle pt-3 text-sm text-ink">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              data-testid="allow-training-sensitive"
+              disabled={settings.loading || !settings.data}
+              checked={settings.data?.allowTrainingProvidersForSensitive ?? false}
+              onChange={(e) => void setAllowTraining(e.target.checked)}
+            />
+            <span>
+              Allow AI on training providers for sensitive tasks
+              <span className="block text-xs text-ink-muted">
+                Interviews, speaking and essays send personal text (resumes, answers).
+                By default these only use providers that don&apos;t train on data — if
+                none is configured, the AI degrades (e.g. interview reports show the
+                deterministic floor). Enable this to let those tasks use any available
+                provider, accepting that the text may be used for training.
+              </span>
+            </span>
+          </label>
         </CardContent>
       </Card>
 

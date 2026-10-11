@@ -32,6 +32,7 @@ import {
   refundStudentCredits,
 } from "../../services/student-ai-credit.service.js";
 import { getGovernorConfig } from "../../services/ai-governor.service.js";
+import { getAllowTrainingProvidersForSensitive } from "../../services/platform-settings.service.js";
 import { cacheGet, cacheKey, cacheSet, isCacheable } from "./cache.js";
 import { enqueuePacedAiJob } from "../execution-queue.js";
 import { loadProviderRuntimes } from "./provider-source.js";
@@ -136,11 +137,20 @@ export async function gatewayCallLlmChatJson(
     { role: "user", content: userPrompt },
   ];
 
+  // Sensitive tasks (personal text) normally skip providers that train on data.
+  // A super admin may opt the deployment into using training providers for
+  // sensitive tasks (so the AI keeps working when no data-safe provider exists);
+  // in that case drop the `sensitive` restriction for selection. Default off.
+  let effectivePolicy = policy;
+  if (policy?.sensitive && (await getAllowTrainingProvidersForSensitive())) {
+    effectivePolicy = { ...policy, sensitive: false };
+  }
+
   // Capture the winning provider + its usage (last 2xx that parsed → the result).
   let winner: { id: string; usage: AdapterUsage } | null = null;
   const result = await routeChatJson({
     providers,
-    policy,
+    policy: effectivePolicy,
     now,
     callAdapter: (p) => adapterFor(p.kind).chatJson(p, messages),
     onSuccess: (p, usage) => {

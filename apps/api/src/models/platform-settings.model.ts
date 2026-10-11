@@ -18,6 +18,10 @@ const platformSettingsSchema = new Schema(
       enum: SPEECH_ENGINE_VALUES,
       default: SpeechEngine.WHISPER,
     },
+    // When true, `sensitive` AI tasks may use providers that train on data (so
+    // the AI keeps working even when no data-safe provider is configured).
+    // Default false preserves the privacy guard.
+    allowTrainingProvidersForSensitive: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

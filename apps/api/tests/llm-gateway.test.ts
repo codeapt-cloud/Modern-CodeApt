@@ -24,6 +24,7 @@ import {
   recordProviderUsage,
 } from "../src/lib/llm-gateway/usage-rollup.js";
 import { seedAiProviders } from "../src/lib/llm-gateway/seed.js";
+import { updatePlatformSettings } from "../src/services/platform-settings.service.js";
 import { PROVIDER_CATALOG } from "../src/lib/llm-gateway/catalog.js";
 import { getUsageTrends } from "../src/services/ai-provider-admin.service.js";
 import {
@@ -342,5 +343,49 @@ describe("seam — callLlmChatJson routes through the installed gateway", () => 
     });
     const out = await callLlmChatJson({ model: "m", timeoutMs: 1 }, "s", "u");
     expect(out).toBeNull();
+  });
+});
+
+describe("sensitive tasks + training providers (platform toggle)", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    await updatePlatformSettings({ allowTrainingProvidersForSensitive: false });
+  });
+
+  it("degrades a sensitive task when the only provider trains on data (default)", async () => {
+    // One enabled provider, and it trains on data — exactly the live situation.
+    await makeProvider({
+      name: "Trainer",
+      baseUrl: "https://trainer.test/v1",
+      key: "sk-t",
+      trainsOnData: true,
+    });
+    vi.stubGlobal("fetch", openAiFetchOk('{"concept":80}'));
+
+    const out = await gatewayCallLlmChatJson("system", "user", {
+      kind: "grading",
+      sensitive: true,
+      feature: "interview_grading",
+    });
+    // Filtered out → no eligible provider → null (deterministic-floor signal).
+    expect(out).toBeNull();
+  });
+
+  it("uses the training provider for a sensitive task once the platform allows it", async () => {
+    await makeProvider({
+      name: "Trainer",
+      baseUrl: "https://trainer.test/v1",
+      key: "sk-t",
+      trainsOnData: true,
+    });
+    vi.stubGlobal("fetch", openAiFetchOk('{"concept":80}'));
+    await updatePlatformSettings({ allowTrainingProvidersForSensitive: true });
+
+    const out = await gatewayCallLlmChatJson("system", "user", {
+      kind: "grading",
+      sensitive: true,
+      feature: "interview_grading",
+    });
+    expect(out).toEqual({ concept: 80 });
   });
 });
