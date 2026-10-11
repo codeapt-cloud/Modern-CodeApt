@@ -744,3 +744,45 @@ describe("time budget — runs until the questions are completed", () => {
     expect(after?.expiresAt && new Date(after.expiresAt).getTime()).toBeGreaterThan(Date.now() + 60_000);
   });
 });
+
+describe("bulk AI re-score of deterministic-floor attempts", () => {
+  it("upgrades floored attempts to AI-hybrid once AI is available", async () => {
+    const { adminToken } = await setupCollege("mi-rescore");
+    const student = await addStudent("mi-rescore", adminToken, "rs@x.com");
+
+    // Complete an interview with AI UNAVAILABLE → scored on the deterministic floor.
+    registerLlmRouter(null);
+    const id = await makeCollegeInterview("mi-rescore", adminToken);
+    const res = await completeCollegeInterview("mi-rescore", id, student.token);
+
+    const before = await request(app)
+      .get(`/api/c/mi-rescore/interviews/${id}/attempts/${res.attemptId}/report`)
+      .set(auth(adminToken));
+    expect(before.body.source).toBe("deterministic_floor");
+
+    // AI now works → bulk re-score flips the cohort to AI-hybrid.
+    goodRouter();
+    const rescore = await request(app)
+      .post(`/api/c/mi-rescore/interviews/${id}/rescore`)
+      .set(auth(adminToken));
+    expect(rescore.status).toBe(200);
+    expect(rescore.body.attempted).toBeGreaterThanOrEqual(1);
+    expect(rescore.body.rescored).toBe(rescore.body.attempted);
+    expect(rescore.body.stillFloor).toBe(0);
+
+    const after = await request(app)
+      .get(`/api/c/mi-rescore/interviews/${id}/attempts/${res.attemptId}/report`)
+      .set(auth(adminToken));
+    expect(after.body.source).toBe("ai_hybrid");
+  });
+
+  it("is operator-only (a student cannot trigger a re-score)", async () => {
+    const { adminToken } = await setupCollege("mi-rescore-guard");
+    const student = await addStudent("mi-rescore-guard", adminToken, "rsg@x.com");
+    const id = await makeCollegeInterview("mi-rescore-guard", adminToken);
+    const denied = await request(app)
+      .post(`/api/c/mi-rescore-guard/interviews/${id}/rescore`)
+      .set(auth(student.token));
+    expect(denied.status).toBe(403);
+  });
+});

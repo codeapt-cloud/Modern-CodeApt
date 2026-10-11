@@ -7246,6 +7246,17 @@ export type MockInterviewAttemptAdminList = z.infer<
   typeof mockInterviewAttemptAdminListSchema
 >;
 
+/** Result of a bulk AI re-score of an interview's deterministic-floor attempts. */
+export const interviewRescoreResultSchema = z.object({
+  /** Floored, finished attempts considered. */
+  attempted: z.number().int(),
+  /** Of those, how many are now AI-hybrid after re-grading. */
+  rescored: z.number().int(),
+  /** Still on the floor (AI returned nothing — e.g. no transcript / unavailable). */
+  stillFloor: z.number().int(),
+});
+export type InterviewRescoreResult = z.infer<typeof interviewRescoreResultSchema>;
+
 export const mockInterviewCohortRowSchema = z.object({
   userId: z.string(),
   userName: z.string(),

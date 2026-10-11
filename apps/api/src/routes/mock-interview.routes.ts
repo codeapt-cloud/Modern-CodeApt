@@ -19,6 +19,7 @@ import {
   interviewCurrentController,
   interviewInProgressController,
   operatorInterviewReportController,
+  rescoreInterviewController,
   resetInterviewForUserController,
   interviewResultController,
   interviewTtsController,
@@ -134,6 +135,12 @@ collegeInterviewRouter.get(
   "/c/:collegeSlug/interviews/:assessmentId/attempts/:attemptId/report",
   ...author,
   operatorInterviewReportController,
+);
+// Bulk: re-score this interview's deterministic-floor attempts through the AI.
+collegeInterviewRouter.post(
+  "/c/:collegeSlug/interviews/:assessmentId/rescore",
+  ...author,
+  rescoreInterviewController,
 );
 collegeInterviewRouter.delete(
   "/c/:collegeSlug/interviews/:assessmentId/attempts/:attemptId",

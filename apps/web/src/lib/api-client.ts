@@ -256,6 +256,7 @@ import {
   type MockInterviewUpsert,
   type MockInterviewAttemptResult,
   type MockInterviewAttemptAdminList,
+  type InterviewRescoreResult,
   type MockInterviewCohortReport,
   type StartMockInterviewRequest,
   type StartMockInterviewResponse,
@@ -4414,6 +4415,13 @@ export const api = {
     ): Promise<{ deleted: number }> => {
       const { data } = await http.delete<{ deleted: number }>(
         `${API_PREFIX}/c/${slug}/interviews/${id}/students/${userId}/attempts`,
+      );
+      return data;
+    },
+    /** Bulk-upgrade deterministic-floor attempts to AI-hybrid (re-grade stored answers). */
+    rescore: async (slug: string, id: string): Promise<InterviewRescoreResult> => {
+      const { data } = await http.post<InterviewRescoreResult>(
+        `${API_PREFIX}/c/${slug}/interviews/${id}/rescore`,
       );
       return data;
     },

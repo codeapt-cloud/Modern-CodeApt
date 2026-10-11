@@ -68,6 +68,34 @@ export function CollegeInterviewReportsPage(): JSX.Element {
     }
   };
 
+  const [rescoring, setRescoring] = useState(false);
+  const [rescoreNote, setRescoreNote] = useState<string | null>(null);
+  const rescore = async (): Promise<void> => {
+    if (
+      !window.confirm(
+        "Re-score every deterministic-floor attempt on this interview with AI? " +
+          "This re-grades the stored answers and uses AI credits.",
+      )
+    ) {
+      return;
+    }
+    setRescoring(true);
+    setActionError(null);
+    setRescoreNote(null);
+    try {
+      const r = await api.collegeInterview.rescore(slug, assessmentId);
+      setRescoreNote(
+        `Re-scored ${r.rescored} of ${r.attempted} floored attempt${r.attempted === 1 ? "" : "s"} to AI-hybrid` +
+          (r.stillFloor > 0 ? ` · ${r.stillFloor} still on the floor (no AI judgement available).` : "."),
+      );
+      setTick((n) => n + 1);
+    } catch (e) {
+      setActionError(parseApiError(e).message);
+    } finally {
+      setRescoring(false);
+    }
+  };
+
   if (open) {
     return (
       <div className="space-y-4">
@@ -99,6 +127,15 @@ export function CollegeInterviewReportsPage(): JSX.Element {
             <Link to={`/c/${slug}/interviews/${assessmentId}/cohort`}>Cohort summary</Link>
           </Button>
           <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void rescore()}
+            loading={rescoring}
+            disabled={rescoring || (attempts.data?.items.length ?? 0) === 0}
+          >
+            {rescoring ? "Re-scoring…" : "Re-score floored with AI"}
+          </Button>
+          <Button
             size="sm"
             onClick={() => void download()}
             disabled={downloading || (attempts.data?.items.length ?? 0) === 0}
@@ -108,6 +145,7 @@ export function CollegeInterviewReportsPage(): JSX.Element {
         </div>
       </div>
 
+      {rescoreNote ? <Alert variant="success">{rescoreNote}</Alert> : null}
       {actionError ? <Alert variant="error">{actionError}</Alert> : null}
       {attempts.error ? <Alert variant="error">{attempts.error}</Alert> : null}
 

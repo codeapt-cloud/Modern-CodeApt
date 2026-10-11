@@ -210,6 +210,16 @@ export const clearInterviewAttemptController = asyncHandler(
     res.status(204).send();
   },
 );
+export const rescoreInterviewController = asyncHandler(
+  async (req: Request, res: Response) => {
+    res.status(200).json(
+      await interview.rescoreCollegeInterviewFloored(
+        tenantId(req),
+        req.params.assessmentId ?? "",
+      ),
+    );
+  },
+);
 export const resetInterviewForUserController = asyncHandler(
   async (req: Request, res: Response) => {
     res.status(200).json(

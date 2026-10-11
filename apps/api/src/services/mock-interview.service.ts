@@ -52,6 +52,7 @@ import {
   type InterviewCurrentResponse,
   type InterviewPerAnswer,
   type InterviewReport,
+  type InterviewRescoreResult,
   type InterviewTurnView,
   type MockInterviewAttemptAdminList,
   type MockInterviewAttemptResult,
@@ -1299,6 +1300,75 @@ export async function resetInterviewAttemptsForUser(
     user: new Types.ObjectId(userId),
   });
   return { deleted: res.deletedCount ?? 0 };
+}
+
+/**
+ * Re-grade ONE finished attempt's stored transcripts through the AI judge and
+ * recompute its report. Used to upgrade attempts that were scored on the
+ * deterministic floor (AI was unavailable at the time) now that a usable
+ * provider exists. Audio/transcription is NOT redone — only the already-stored
+ * answers are graded. Returns true when the attempt became AI-hybrid.
+ */
+async function rescoreAttemptWithAi(attempt: AttemptDoc): Promise<boolean> {
+  if (attempt.reportSource === InterviewScoreSource.AI_HYBRID) return false;
+  const meterCollege = meterFor(attempt.college);
+  const meter: AiMeter = {
+    collegeId: meterCollege,
+    userId: await resolveStudentMeterId(meterCollege, attempt.user.toString()),
+  };
+  let graded = false;
+  for (const turn of attempt.turns) {
+    if (!turn.answered || turn.ai) continue; // skip unanswered / already-judged
+    const transcript = (turn.transcript ?? "").trim();
+    if (!transcript) continue;
+    const judged = await gradeAnswer(
+      turn.question,
+      transcript,
+      turn.category as InterviewQuestionCategory,
+      attempt.role,
+      meter,
+    );
+    if (judged) {
+      turn.ai = judged.scores;
+      if (!turn.feedback) turn.feedback = judged.feedback;
+      graded = true;
+    }
+  }
+  if (!graded) return false; // AI still returned nothing → leave on the floor
+  const report = buildReport(attempt);
+  attempt.report = report;
+  attempt.reportSource = report.source;
+  attempt.summary = summarize(attempt.role, report);
+  attempt.markModified("turns");
+  await attempt.save();
+  return report.source === InterviewScoreSource.AI_HYBRID;
+}
+
+/**
+ * Bulk: re-score every deterministic-floor attempt on a tenant interview and
+ * flip the cohort results to AI-hybrid where the AI now returns a judgement.
+ * Sequential on purpose — kinder to provider rate limits; it is an
+ * operator-triggered action, not a hot path.
+ */
+export async function rescoreCollegeInterviewFloored(
+  collegeId: string,
+  assessmentId: string,
+): Promise<InterviewRescoreResult> {
+  const assessment = await loadTenant(collegeId, assessmentId);
+  const attempts = await MockInterviewAttemptModel.find({
+    assessment: assessment._id,
+    reportSource: InterviewScoreSource.DETERMINISTIC_FLOOR,
+    status: { $in: [MockInterviewStatus.SCORED, MockInterviewStatus.EXPIRED] },
+  });
+  let rescored = 0;
+  for (const a of attempts) {
+    if (await rescoreAttemptWithAi(a)) rescored += 1;
+  }
+  return {
+    attempted: attempts.length,
+    rescored,
+    stillFloor: attempts.length - rescored,
+  };
 }
 
 export async function getInterviewCohortReport(
