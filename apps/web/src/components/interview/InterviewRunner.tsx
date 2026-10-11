@@ -243,7 +243,17 @@ export function InterviewRunner({
             ? firstSpeechAtRef.current - questionEndedAtRef.current
             : 0;
         try {
-          const audioUrl = await uploadAudioToCloudinary(engine.uploadSignature, blob);
+          // Audio is uploaded for replay + the Whisper re-score ONLY; the live
+          // score comes from the transcript + fluency. So a Cloudinary hiccup
+          // must NEVER reject the student's answer — fall back to no audio and
+          // still submit the transcript. (This was the cause of "answer not
+          // accepting": a failed upload aborted the whole submit.)
+          let audioUrl = "";
+          try {
+            audioUrl = await uploadAudioToCloudinary(engine.uploadSignature, blob);
+          } catch (uploadErr) {
+            console.warn("[interview] audio upload failed; submitting transcript only", uploadErr);
+          }
           const capture = await captureBrowserResult(blob);
           const res = await engine.submitAnswer(attemptId, turnIndex, {
             audioUrl,

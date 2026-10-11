@@ -317,15 +317,14 @@ describe("interview credits (Step 38 — 1 credit = 1 interview started)", () =>
     // maxAttempts 0 = unlimited per-user, so the COLLEGE credit is the only cap.
     const id = await makeCollegeInterview("mi-cred2", adminToken, { maxAttempts: 0 });
 
-    const start = () =>
-      request(app)
-        .post(`/api/c/mi-cred2/interviews/${id}/attempts`)
-        .set(auth(student.token))
-        .send(START_BODY);
-
-    expect((await start()).status).toBe(201); // 1st
-    expect((await start()).status).toBe(201); // 2nd
-    const third = await start();
+    // Each interview must be COMPLETED before the next counts as a new start —
+    // an in-progress attempt is resumed (it would NOT burn another credit).
+    await completeCollegeInterview("mi-cred2", id, student.token); // credit 1
+    await completeCollegeInterview("mi-cred2", id, student.token); // credit 2
+    const third = await request(app)
+      .post(`/api/c/mi-cred2/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
     expect(third.status).toBe(409);
     expect(third.body.error.code).toBe("NO_CREDITS");
 
@@ -784,5 +783,35 @@ describe("bulk AI re-score of deterministic-floor attempts", () => {
       .post(`/api/c/mi-rescore-guard/interviews/${id}/rescore`)
       .set(auth(student.token));
     expect(denied.status).toBe(403);
+  });
+});
+
+describe("interview resume (no lockout / no double-charge on interruption)", () => {
+  it("a second start while in progress resumes the SAME attempt, not a new one", async () => {
+    goodRouter();
+    const { adminToken } = await setupCollege("mi-resume");
+    const student = await addStudent("mi-resume", adminToken, "resume@x.com");
+    const id = await makeCollegeInterview("mi-resume", adminToken, { maxAttempts: 1 });
+
+    const first = await request(app)
+      .post(`/api/c/mi-resume/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    expect(first.status).toBe(201);
+    const attemptId = first.body.attemptId as string;
+
+    // Start again mid-interview → resumes (same attempt), never 409, never a new one.
+    const again = await request(app)
+      .post(`/api/c/mi-resume/interviews/${id}/attempts`)
+      .set(auth(student.token))
+      .send(START_BODY);
+    expect(again.status).toBe(201);
+    expect(again.body.attemptId).toBe(attemptId);
+
+    // Exactly ONE attempt exists for this student.
+    const list = await request(app)
+      .get(`/api/c/mi-resume/interviews/${id}/attempts`)
+      .set(auth(adminToken));
+    expect(list.body.items.filter((a: { userId: string }) => a.userId === student.id)).toHaveLength(1);
   });
 });

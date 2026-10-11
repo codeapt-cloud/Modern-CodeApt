@@ -665,6 +665,28 @@ export async function startInterview(
   const assessment = await loadAssessmentOr404(assessmentId);
   await assertCanTakeInterview(userId, assessment);
 
+  // RESUME-OR-START: if this student already has an in-progress attempt for this
+  // interview, resume it (return its current turn) instead of creating a new one.
+  // This means an interruption — a reload, a dropped connection — gets the
+  // student straight back in, never "used all attempts", and never double-charges
+  // a credit (the credit was consumed at the first start).
+  const resumable = await MockInterviewAttemptModel.findOne({
+    assessment: assessment._id,
+    user: new Types.ObjectId(userId),
+    status: MockInterviewStatus.IN_PROGRESS,
+  });
+  if (resumable) {
+    const now = new Date();
+    return {
+      ...buildCurrent(resumable, now),
+      title: assessment.title,
+      aiGenerated: resumable.turns.some(
+        (t) => t.source === InterviewQuestionSource.LLM,
+      ),
+      greeting: resumable.greeting ?? "",
+    };
+  }
+
   // College interview-credit quota (Step 38): a tenant interview consumes one of
   // the college's super-admin-granted credits per START (1 credit = 1 interview).
   // Course-attached / platform interviews (college null) have no college quota.
