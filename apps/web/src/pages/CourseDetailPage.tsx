@@ -6,6 +6,7 @@ import {
 } from "@codeapt/shared";
 import {
   ArrowLeft,
+  BookOpen,
   CheckCircle2,
   ClipboardList,
   FileText,
@@ -24,6 +25,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { CourseThumb } from "../components/course/CourseThumb.js";
 import { PriceTag } from "../components/course/PriceTag.js";
+import { Markdown } from "../components/player/Markdown.js";
 import { Alert } from "../components/ui/alert.js";
 import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
@@ -109,6 +111,14 @@ export function CourseDetailPage() {
   }
 
   const enrolled = data.enrollment.isEnrolled;
+  const descriptionText = data.description?.trim() ?? "";
+  const firstParagraph = descriptionText
+    ? descriptionText.split(/\r?\n\s*\r?\n/)[0]?.trim() ?? ""
+    : "";
+  const isMultiSection = Boolean(
+    descriptionText &&
+      (descriptionText.includes("\n") || descriptionText.length > 220),
+  );
 
   return (
     <div className="space-y-8">
@@ -138,7 +148,14 @@ export function CourseDetailPage() {
             <h1 className="text-3xl font-bold tracking-tight text-ink">
               {data.name}
             </h1>
-            <p className="max-w-2xl text-ink-secondary">{data.description}</p>
+            {descriptionText ? (
+              <div className="max-w-2xl text-sm leading-relaxed text-ink-secondary md:text-base">
+                <Markdown
+                  content={isMultiSection ? firstParagraph : descriptionText}
+                  className="[&>p]:my-1"
+                />
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-4 text-sm text-ink-muted">
               <span>{data.moduleCount} modules</span>
               <span>{data.topicCount} topics</span>
@@ -203,16 +220,34 @@ export function CourseDetailPage() {
 
       {/* Outline */}
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
-        <section className="space-y-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
-            <span className="font-mono text-primary" aria-hidden="true">
-              {"{"}
-            </span>
-            Course content
-            <span className="font-mono text-primary" aria-hidden="true">
-              {"}"}
-            </span>
-          </h2>
+        <section className="space-y-6">
+          {descriptionText && isMultiSection ? (
+            <Card className="overflow-hidden border border-subtle bg-surface-base shadow-sm">
+              <CardHeader className="border-b border-subtle bg-surface-overlay/20 px-6 py-4">
+                <CardTitle className="flex items-center gap-2.5 text-base font-semibold text-ink">
+                  <BookOpen className="h-4 w-4 text-primary" />
+                  About this course
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6 md:p-8">
+                <Markdown
+                  content={descriptionText}
+                  className="text-sm leading-relaxed md:text-base"
+                />
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <div className="space-y-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-ink">
+              <span className="font-mono text-primary" aria-hidden="true">
+                {"{"}
+              </span>
+              Course content
+              <span className="font-mono text-primary" aria-hidden="true">
+                {"}"}
+              </span>
+            </h2>
           {data.modules.map((module, mi) => (
             <Card key={module.id}>
               <CardHeader className="pb-3">
@@ -257,6 +292,7 @@ export function CourseDetailPage() {
               </CardContent>
             </Card>
           ))}
+          </div>
         </section>
 
         <aside className="space-y-4">

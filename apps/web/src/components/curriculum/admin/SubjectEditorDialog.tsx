@@ -7,12 +7,15 @@
  * server errors surface inline.
  */
 import type { AdminSubject, AdminSubjectUpsert } from "@codeapt/shared";
+import { Eye, List, ListOrdered, PenLine, Quote } from "lucide-react";
+import { useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
-import { useState } from "react";
 
 import { ImageUpload } from "../../media/ImageUpload.js";
+import { Markdown } from "../../player/Markdown.js";
 
 import { api, parseApiError } from "../../../lib/api-client.js";
+import { cn } from "../../../lib/cn.js";
 import {
   paiseToRupeeInput,
   rupeesToPaise,
@@ -117,12 +120,38 @@ export function SubjectEditorDialog({
   const defaults = toDefaults(initial);
   if (!initial && defaultProgramId) defaults.programId = defaultProgramId;
 
+  const [descTab, setDescTab] = useState<"write" | "preview">("write");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
   const {
     register,
     handleSubmit,
     control,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<SubjectFormValues>({ defaultValues: defaults });
+
+  const descriptionValue = watch("description") || "";
+
+  const insertFormatting = (prefix: string, suffix = "", placeholder = "") => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const current = el.value || "";
+    const selected = current.slice(start, end) || placeholder;
+    const next =
+      current.slice(0, start) + prefix + selected + suffix + current.slice(end);
+    setValue("description", next, { shouldDirty: true, shouldValidate: true });
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(
+        start + prefix.length,
+        start + prefix.length + selected.length,
+      );
+    }, 0);
+  };
 
   const onSubmit = handleSubmit(async (values) => {
     setFormError("");
@@ -252,9 +281,123 @@ export function SubjectEditorDialog({
             />
           </FormField>
 
-          <FormField label="Description" hint="Markdown supported.">
-            <Textarea rows={4} {...register("description")} />
-          </FormField>
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <label className="text-sm font-medium text-ink">Description</label>
+                <p className="text-xs text-ink-muted">
+                  Markdown supported — use **bold**, bullet points, and headings.
+                </p>
+              </div>
+              <div className="flex items-center gap-1 rounded-lg border border-subtle bg-surface-base p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setDescTab("write")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors",
+                    descTab === "write"
+                      ? "bg-surface-overlay text-ink shadow-sm"
+                      : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  <PenLine className="h-3.5 w-3.5" />
+                  Write
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDescTab("preview")}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1 font-medium transition-colors",
+                    descTab === "preview"
+                      ? "bg-surface-overlay text-ink shadow-sm"
+                      : "text-ink-muted hover:text-ink",
+                  )}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  Preview
+                </button>
+              </div>
+            </div>
+
+            {descTab === "write" ? (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap items-center gap-1 rounded-lg border border-subtle bg-surface-overlay/40 p-1 text-xs">
+                  <button
+                    type="button"
+                    title="Bold (**text**)"
+                    onClick={() => insertFormatting("**", "**", "bold text")}
+                    className="flex h-7 items-center justify-center rounded px-2 font-bold text-ink hover:bg-surface-overlay active:bg-surface-muted"
+                  >
+                    B
+                  </button>
+                  <button
+                    type="button"
+                    title="Italic (*text*)"
+                    onClick={() => insertFormatting("*", "*", "italic text")}
+                    className="flex h-7 items-center justify-center rounded px-2 italic text-ink hover:bg-surface-overlay active:bg-surface-muted"
+                  >
+                    I
+                  </button>
+                  <button
+                    type="button"
+                    title="Heading (### Section)"
+                    onClick={() => insertFormatting("### ", "\n", "Heading")}
+                    className="flex h-7 items-center justify-center rounded px-2 font-mono font-semibold text-ink hover:bg-surface-overlay active:bg-surface-muted"
+                  >
+                    H3
+                  </button>
+                  <div className="mx-1 h-4 w-px bg-subtle" />
+                  <button
+                    type="button"
+                    title="Bullet List (- item)"
+                    onClick={() => insertFormatting("- ", "\n", "List item")}
+                    className="flex h-7 items-center gap-1 rounded px-2 text-ink hover:bg-surface-overlay active:bg-surface-muted"
+                  >
+                    <List className="h-3.5 w-3.5" />
+                    List
+                  </button>
+                  <button
+                    type="button"
+                    title="Numbered List (1. item)"
+                    onClick={() => insertFormatting("1. ", "\n", "List item")}
+                    className="flex h-7 items-center gap-1 rounded px-2 text-ink hover:bg-surface-overlay active:bg-surface-muted"
+                  >
+                    <ListOrdered className="h-3.5 w-3.5" />
+                    1. List
+                  </button>
+                  <button
+                    type="button"
+                    title="Quote (> quote)"
+                    onClick={() => insertFormatting("> ", "\n", "Quote")}
+                    className="flex h-7 items-center gap-1 rounded px-2 text-ink hover:bg-surface-overlay active:bg-surface-muted"
+                  >
+                    <Quote className="h-3.5 w-3.5" />
+                    Quote
+                  </button>
+                </div>
+                <Textarea
+                  rows={6}
+                  {...register("description")}
+                  ref={(e) => {
+                    register("description").ref(e);
+                    textareaRef.current = e;
+                  }}
+                  placeholder="e.g.&#10;**Course Highlights:**&#10;- Foundation & Advanced practice&#10;- Live mentoring & video solutions&#10;&#10;### Who this course is for&#10;- Students preparing for recruitment drives"
+                  className="font-mono text-xs leading-relaxed sm:text-sm"
+                />
+              </div>
+            ) : (
+              <div className="min-h-[160px] max-h-[280px] overflow-y-auto rounded-xl border border-subtle bg-surface-sunken/40 p-4 text-sm text-ink">
+                {descriptionValue ? (
+                  <Markdown content={descriptionValue} className="text-sm" />
+                ) : (
+                  <p className="italic text-ink-muted">
+                    No description entered yet. Switch to the Write tab to type.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
 
           <div className="flex flex-wrap gap-6">
             <Controller

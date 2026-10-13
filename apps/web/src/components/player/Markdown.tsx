@@ -23,20 +23,27 @@ const components: Components = {
   h3: ({ children }) => (
     <h3 className="mb-2 mt-6 text-lg font-semibold text-ink">{children}</h3>
   ),
+  h4: ({ children }) => (
+    <h4 className="mb-2 mt-4 text-base font-semibold text-ink">{children}</h4>
+  ),
   p: ({ children }) => (
-    <p className="my-4 leading-7 text-ink-secondary">{children}</p>
+    <p className="my-3 leading-7 text-ink-secondary whitespace-pre-line">
+      {children}
+    </p>
   ),
   ul: ({ children }) => (
-    <ul className="my-4 list-disc space-y-2 pl-6 text-ink-secondary">
+    <ul className="my-3 list-disc space-y-1.5 pl-6 text-ink-secondary">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="my-4 list-decimal space-y-2 pl-6 text-ink-secondary">
+    <ol className="my-3 list-decimal space-y-1.5 pl-6 text-ink-secondary">
       {children}
     </ol>
   ),
-  li: ({ children }) => <li className="leading-7">{children}</li>,
+  li: ({ children }) => (
+    <li className="leading-7 whitespace-pre-line">{children}</li>
+  ),
   a: ({ children, href }) => (
     <a
       href={href}
@@ -96,10 +103,11 @@ export function Markdown({
   content: string;
   className?: string;
 }) {
+  const normalized = (content ?? "").replace(/\r\n/g, "\n");
   return (
     <div className={cn("max-w-none", className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {content}
+        {normalized}
       </ReactMarkdown>
     </div>
   );
