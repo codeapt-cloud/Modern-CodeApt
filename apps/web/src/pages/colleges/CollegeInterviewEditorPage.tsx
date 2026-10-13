@@ -3,6 +3,7 @@
  * and mounts the shared InterviewEditor (surface="college", org-unit targeting).
  * Publish/unpublish/delete + a Cohort link per row. Mirrors CollegeSpeakingEditorPage.
  */
+import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -74,11 +75,20 @@ export function CollegeInterviewEditorPage(): JSX.Element {
       </div>
 
       {actionError ? <Alert variant="error">{actionError}</Alert> : null}
+      {list.error ? <Alert variant="error">{list.error}</Alert> : null}
 
       {list.loading ? (
         <Skeleton className="h-24 w-full" />
       ) : (list.data?.items.length ?? 0) === 0 ? (
-        <EmptyState title="No interviews yet" description="Create one to get started." />
+        <EmptyState
+          title="No interviews yet"
+          description="Create one to get started."
+          action={
+            <Button size="sm" onClick={() => setEditing("new")}>
+              <Plus className="mr-2 h-4 w-4" /> New interview
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-3">
           {list.data?.items.map((iv) => (

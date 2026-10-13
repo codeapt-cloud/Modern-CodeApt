@@ -3,7 +3,13 @@
  * CollegeCommunicationCohortPage: one row per student (best attempt), the five
  * dimensions + overall + score source, and a blob download of the .xlsx.
  */
-import { CollegeFeature, checkEntitlement } from "@codeapt/shared";
+import {
+  CollegeFeature,
+  COLLEGE_ADMIN_ROLES,
+  FACULTY_ROLES,
+  checkEntitlement,
+  isPlatformAdmin,
+} from "@codeapt/shared";
 import { Download } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -22,7 +28,13 @@ const cell = (v: number | null): string => (v === null ? "—" : `${v}`);
 export function CollegeInterviewCohortPage(): JSX.Element {
   const { slug, context } = useCollege();
   const { assessmentId = "" } = useParams();
-  const canAuthor = checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview");
+  const isPlatform = isPlatformAdmin(context.membership.role);
+  const isCollegeAdmin = COLLEGE_ADMIN_ROLES.includes(context.membership.role);
+  const isFaculty = FACULTY_ROLES.includes(context.membership.role);
+  const canAuthor =
+    isPlatform ||
+    (isCollegeAdmin && checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW)) ||
+    (isFaculty && checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview"));
   const report = useQuery(
     () =>
       canAuthor

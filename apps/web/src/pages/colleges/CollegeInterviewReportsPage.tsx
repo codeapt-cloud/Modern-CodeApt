@@ -5,7 +5,13 @@
  * via the shared InterviewResults, fed by the operator report endpoint. Reaches
  * here from the Manage list ("Reports") and the Analytics hub. Author-gated.
  */
-import { CollegeFeature, checkEntitlement } from "@codeapt/shared";
+import {
+  CollegeFeature,
+  COLLEGE_ADMIN_ROLES,
+  FACULTY_ROLES,
+  checkEntitlement,
+  isPlatformAdmin,
+} from "@codeapt/shared";
 import { Download } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -29,7 +35,13 @@ const when = (iso: string | null): string =>
 export function CollegeInterviewReportsPage(): JSX.Element {
   const { slug, context } = useCollege();
   const { assessmentId = "" } = useParams();
-  const canView = checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview");
+  const isPlatform = isPlatformAdmin(context.membership.role);
+  const isCollegeAdmin = COLLEGE_ADMIN_ROLES.includes(context.membership.role);
+  const isFaculty = FACULTY_ROLES.includes(context.membership.role);
+  const canView =
+    isPlatform ||
+    (isCollegeAdmin && checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW)) ||
+    (isFaculty && checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview"));
   const [tick, setTick] = useState(0);
   const attempts = useQuery(
     () =>

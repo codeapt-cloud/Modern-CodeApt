@@ -4,8 +4,14 @@
  * (pre-flight → intake → run → report). Mirrors CollegeSpeakingPage. Gated by the
  * INTERVIEW feature; "Manage" links to the authoring page for faculty.
  */
-import { CollegeFeature, checkEntitlement, isCollegeOperator } from "@codeapt/shared";
-import { Settings2 } from "lucide-react";
+import {
+  CollegeFeature,
+  COLLEGE_ADMIN_ROLES,
+  FACULTY_ROLES,
+  checkEntitlement,
+  isPlatformAdmin,
+} from "@codeapt/shared";
+import { Plus, Settings2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -23,12 +29,16 @@ import { useCollege } from "./college-context.js";
 export function CollegeInterviewPage(): JSX.Element {
   const { slug, context } = useCollege();
   const entitled = checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW);
-  // Authoring is for college OPERATORS (admin/faculty) only — never students,
-  // even when the college has the interview sub-capability (Step 38 fix: this was
-  // previously gated on the entitlement alone, so students saw "Manage").
+  // Authoring & management is for college admins, platform admins, and faculty.
+  // Never students. Platform admins bypass entitlements. College admins need the
+  // INTERVIEW feature. Faculty additionally check the "interview" sub-capability.
+  const isPlatform = isPlatformAdmin(context.membership.role);
+  const isCollegeAdmin = COLLEGE_ADMIN_ROLES.includes(context.membership.role);
+  const isFaculty = FACULTY_ROLES.includes(context.membership.role);
   const canAuthor =
-    isCollegeOperator(context.membership.role) &&
-    checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview");
+    isPlatform ||
+    (isCollegeAdmin && checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW)) ||
+    (isFaculty && checkEntitlement(context.entitlements, CollegeFeature.INTERVIEW, "interview"));
   const [picked, setPicked] = useState<{ id: string; role: string } | null>(null);
 
   const list = useQuery(
@@ -36,7 +46,7 @@ export function CollegeInterviewPage(): JSX.Element {
     [slug, entitled],
   );
 
-  if (!entitled) {
+  if (!entitled && !isPlatform) {
     return <Alert variant="info">Your college hasn’t enabled mock interviews yet.</Alert>;
   }
 
@@ -58,7 +68,7 @@ export function CollegeInterviewPage(): JSX.Element {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-ink">Mock interviews</h1>
           <p className="text-sm text-ink-muted">
@@ -67,9 +77,9 @@ export function CollegeInterviewPage(): JSX.Element {
           </p>
         </div>
         {canAuthor ? (
-          <Button asChild variant="secondary" size="sm">
+          <Button asChild size="sm" className="self-start">
             <Link to={`/c/${slug}/interviews/manage`}>
-              <Settings2 className="mr-2 h-4 w-4" /> Manage
+              <Settings2 className="mr-2 h-4 w-4" /> Manage interviews
             </Link>
           </Button>
         ) : null}
@@ -78,7 +88,24 @@ export function CollegeInterviewPage(): JSX.Element {
       {list.loading ? (
         <Skeleton className="h-24 w-full" />
       ) : (list.data?.items.length ?? 0) === 0 ? (
-        <EmptyState title="Nothing assigned yet" description="No mock interviews are published for your cohort." />
+        <EmptyState
+          icon={<Settings2 />}
+          title={canAuthor ? "No mock interviews created yet" : "Nothing assigned yet"}
+          description={
+            canAuthor
+              ? "Create and publish mock interviews with custom roles, questions, and duration for your cohorts to practice."
+              : "No mock interviews are published for your cohort."
+          }
+          action={
+            canAuthor ? (
+              <Button asChild>
+                <Link to={`/c/${slug}/interviews/manage`}>
+                  <Plus className="mr-2 h-4 w-4" /> Create &amp; manage interviews
+                </Link>
+              </Button>
+            ) : null
+          }
+        />
       ) : (
         <div className="space-y-3">
           {list.data?.items.map((iv) => (
@@ -92,12 +119,21 @@ export function CollegeInterviewPage(): JSX.Element {
                     {iv.maxAttempts === 0 ? "unlimited attempts" : `${iv.attemptsUsed}/${iv.maxAttempts} used`}
                   </p>
                 </div>
-                <Button
-                  disabled={iv.maxAttempts > 0 && iv.attemptsUsed >= iv.maxAttempts}
-                  onClick={() => setPicked({ id: iv.id, role: iv.role })}
-                >
-                  Start
-                </Button>
+                <div className="flex items-center gap-2">
+                  {canAuthor ? (
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link to={`/c/${slug}/interviews/manage`}>
+                        <Settings2 className="mr-1.5 h-3.5 w-3.5" /> Manage
+                      </Link>
+                    </Button>
+                  ) : null}
+                  <Button
+                    disabled={iv.maxAttempts > 0 && iv.attemptsUsed >= iv.maxAttempts}
+                    onClick={() => setPicked({ id: iv.id, role: iv.role })}
+                  >
+                    Start
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
